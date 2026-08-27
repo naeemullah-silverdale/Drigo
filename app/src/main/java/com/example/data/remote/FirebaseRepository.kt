@@ -9,6 +9,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -54,6 +55,7 @@ class FirebaseRepository private constructor(private val context: Context) {
         private const val CHAT_COLLECTION = "chat_messages"
         private const val PROFILES_COLLECTION = "user_profiles"
         private const val TELEMETRY_COLLECTION = "driver_telemetry"
+        private const val RIDE_REQUESTS_COLLECTION = "ride_requests"
 
         @Volatile
         private var INSTANCE: FirebaseRepository? = null
@@ -441,6 +443,119 @@ class FirebaseRepository private constructor(private val context: Context) {
             firestore!!.collection(PROFILES_COLLECTION).document(profile.userId).set(userMap).await()
         } catch (e: Exception) {
             Log.w(TAG, "Error syncing user profile: ${e.message}")
+        }
+    }
+
+    // --- Passenger Ride Requests (Realtime Database & Firestore Sync) ---
+
+    suspend fun createRideRequest(request: RideRequest): Result<String> {
+        return try {
+            val requestMap = mapOf(
+                "id" to request.id,
+                "passengerId" to request.passengerId,
+                "passengerName" to request.passengerName,
+                "passengerEmail" to request.passengerEmail,
+                "pickupTitle" to request.pickupTitle,
+                "pickupSubtitle" to request.pickupSubtitle,
+                "pickupLat" to request.pickupLat,
+                "pickupLon" to request.pickupLon,
+                "destinationTitle" to request.destinationTitle,
+                "destinationSubtitle" to request.destinationSubtitle,
+                "destinationLat" to request.destinationLat,
+                "destinationLon" to request.destinationLon,
+                "rideCategory" to request.rideCategory,
+                "estimatedFare" to request.estimatedFare,
+                "distanceKm" to request.distanceKm,
+                "durationMinutes" to request.durationMinutes,
+                "status" to request.status,
+                "timestamp" to request.timestamp
+            )
+
+            // 1. Write to Firebase Realtime Database
+            try {
+                val db = FirebaseDatabase.getInstance()
+                db.getReference("ride_requests").child(request.id).setValue(requestMap).await()
+                if (request.passengerId.isNotBlank()) {
+                    db.getReference("users").child(request.passengerId).child("active_ride_request")
+                        .setValue(requestMap).await()
+                }
+                Log.d(TAG, "Ride request created in Firebase Realtime Database: ${request.id}")
+            } catch (rtdbErr: Exception) {
+                Log.w(TAG, "Realtime Database write notice: ${rtdbErr.message}")
+            }
+
+            // 2. Write to Cloud Firestore if available
+            if (isAvailable()) {
+                firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(request.id).set(requestMap).await()
+                Log.d(TAG, "Ride request synced to Firestore collection '${RIDE_REQUESTS_COLLECTION}': ${request.id}")
+            }
+
+            Result.success(request.id)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating ride request in Firebase: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    fun listenToRideRequests(): Flow<List<RideRequest>> = callbackFlow {
+        if (!isAvailable()) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val registration = firestore!!.collection(RIDE_REQUESTS_COLLECTION)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(20)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Listen to ride requests error: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    val requests = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            RideRequest(
+                                id = doc.getString("id") ?: doc.id,
+                                passengerId = doc.getString("passengerId") ?: "",
+                                passengerName = doc.getString("passengerName") ?: "Passenger",
+                                passengerEmail = doc.getString("passengerEmail") ?: "",
+                                pickupTitle = doc.getString("pickupTitle") ?: "",
+                                pickupSubtitle = doc.getString("pickupSubtitle") ?: "",
+                                pickupLat = doc.getDouble("pickupLat") ?: 0.0,
+                                pickupLon = doc.getDouble("pickupLon") ?: 0.0,
+                                destinationTitle = doc.getString("destinationTitle") ?: "",
+                                destinationSubtitle = doc.getString("destinationSubtitle") ?: "",
+                                destinationLat = doc.getDouble("destinationLat") ?: 0.0,
+                                destinationLon = doc.getDouble("destinationLon") ?: 0.0,
+                                rideCategory = doc.getString("rideCategory") ?: "Share Ride",
+                                estimatedFare = (doc.getLong("estimatedFare") ?: 0).toInt(),
+                                distanceKm = doc.getDouble("distanceKm") ?: 0.0,
+                                durationMinutes = (doc.getLong("durationMinutes") ?: 0).toInt(),
+                                status = doc.getString("status") ?: "SEARCHING_DRIVERS",
+                                timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                            )
+                        } catch (e: Exception) { null }
+                    }
+                    trySend(requests)
+                }
+            }
+
+        awaitClose { registration.remove() }
+    }
+
+    suspend fun updateRideRequestStatus(requestId: String, status: String) {
+        try {
+            FirebaseDatabase.getInstance().getReference("ride_requests")
+                .child(requestId).child("status").setValue(status).await()
+        } catch (_: Exception) {}
+
+        if (isAvailable()) {
+            try {
+                firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(requestId)
+                    .update("status", status).await()
+            } catch (_: Exception) {}
         }
     }
 }

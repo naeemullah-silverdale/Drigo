@@ -3,7 +3,9 @@ package com.example.viewmodel
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.model.RideRequest
 import com.example.data.remote.AuthRepository
+import com.example.data.remote.FirebaseRepository
 import com.example.data.remote.GoogleAuthClient
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.UserProfileChangeRequest
@@ -15,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
 
 enum class AppScreen {
     WELCOME,
@@ -169,5 +172,50 @@ class MainViewModel(
         _currentUser.value = null
         _userMode.value = UserMode.PASSENGER
         _currentScreen.value = AppScreen.WELCOME
+    }
+
+    suspend fun createRideRequest(
+        context: Context,
+        pickupTitle: String,
+        pickupSubtitle: String,
+        pickupLat: Double,
+        pickupLon: Double,
+        destinationTitle: String,
+        destinationSubtitle: String,
+        destinationLat: Double,
+        destinationLon: Double,
+        rideCategory: String,
+        fare: Int,
+        distanceKm: Double,
+        durationMinutes: Int
+    ): Result<String> {
+        val user = _currentUser.value
+        val passengerId = user?.uid ?: "rider_${System.currentTimeMillis().toString().takeLast(6)}"
+        val passengerName = user?.displayName?.ifBlank { "Drigo Passenger" } ?: (user?.email?.substringBefore("@") ?: "Drigo Passenger")
+        val passengerEmail = user?.email ?: ""
+
+        val request = RideRequest(
+            id = UUID.randomUUID().toString(),
+            passengerId = passengerId,
+            passengerName = passengerName,
+            passengerEmail = passengerEmail,
+            pickupTitle = pickupTitle,
+            pickupSubtitle = pickupSubtitle,
+            pickupLat = pickupLat,
+            pickupLon = pickupLon,
+            destinationTitle = destinationTitle,
+            destinationSubtitle = destinationSubtitle,
+            destinationLat = destinationLat,
+            destinationLon = destinationLon,
+            rideCategory = rideCategory,
+            estimatedFare = fare,
+            distanceKm = distanceKm,
+            durationMinutes = durationMinutes,
+            status = "SEARCHING_DRIVERS",
+            timestamp = System.currentTimeMillis()
+        )
+
+        val firebaseRepo = FirebaseRepository.getInstance(context)
+        return firebaseRepo.createRideRequest(request)
     }
 }

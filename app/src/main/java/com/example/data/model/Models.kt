@@ -174,3 +174,25 @@ data class AiMatchRecommendation(
     val co2SavingsKg: Double,
     val corridorName: String
 )
+
+data class RideRequest(
+    val id: String = UUID.randomUUID().toString(),
+    val passengerId: String = "",
+    val passengerName: String = "",
+    val passengerEmail: String = "",
+    val pickupTitle: String = "",
+    val pickupSubtitle: String = "",
+    val pickupLat: Double = 0.0,
+    val pickupLon: Double = 0.0,
+    val destinationTitle: String = "",
+    val destinationSubtitle: String = "",
+    val destinationLat: Double = 0.0,
+    val destinationLon: Double = 0.0,
+    val rideCategory: String = "Share Ride",
+    val estimatedFare: Int = 0,
+    val distanceKm: Double = 0.0,
+    val durationMinutes: Int = 0,
+    val status: String = "SEARCHING_DRIVERS",
+    val timestamp: Long = System.currentTimeMillis()
+)
+

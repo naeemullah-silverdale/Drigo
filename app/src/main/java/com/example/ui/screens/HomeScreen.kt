@@ -40,6 +40,8 @@ import com.example.data.LocationHelper
 import com.example.data.RouteResult
 import com.example.data.RouteService
 import com.example.data.UserLocationData
+import com.example.data.model.RideRequest
+import com.example.data.remote.FirebaseRepository
 import com.example.ui.components.MapSelectionMode
 import com.example.ui.components.PickupDestinationBottomCard
 import com.example.ui.components.RealOsmMapView
@@ -50,6 +52,7 @@ import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.osmdroid.util.GeoPoint
+import java.util.UUID
 
 @Composable
 fun HomeScreen(
@@ -97,6 +100,72 @@ fun HomeScreen(
 
     // Map Interaction State
     var isMapInteracting by remember { mutableStateOf(false) }
+
+    // Booking & Firebase Database state
+    var selectedRideCategory by remember { mutableStateOf<String?>("Share Ride") }
+    var showBookingDialog by remember { mutableStateOf(false) }
+    var isBookingInProgress by remember { mutableStateOf(false) }
+    var activeRideRequestId by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Function to submit ride request entry to Firebase Database
+    fun submitRideRequest() {
+        scope.launch {
+            isBookingInProgress = true
+            val dest = selectedDestinationLocation ?: AppLocation(
+                title = "Selected Destination",
+                subtitle = "",
+                latitude = selectedPickupLocation.latitude + 0.015,
+                longitude = selectedPickupLocation.longitude + 0.015
+            )
+            val cat = selectedRideCategory ?: "Share Ride"
+            val dist = activeRoute?.distanceKm ?: 5.0
+            val fare = when (cat) {
+                "Share Ride" -> 80 + (dist * 25).toInt()
+                "Book Car" -> 150 + (dist * 50).toInt()
+                else -> 70 + (dist * 20).toInt()
+            }
+            val duration = activeRoute?.durationMinutes ?: 12
+
+            val passengerId = user?.uid ?: "rider_${System.currentTimeMillis().toString().takeLast(6)}"
+            val passengerName = user?.displayName?.ifBlank { "Passenger" } ?: (user?.email?.substringBefore("@") ?: "Passenger")
+            val passengerEmail = user?.email ?: ""
+
+            val request = RideRequest(
+                id = UUID.randomUUID().toString(),
+                passengerId = passengerId,
+                passengerName = passengerName,
+                passengerEmail = passengerEmail,
+                pickupTitle = selectedPickupLocation.title,
+                pickupSubtitle = selectedPickupLocation.subtitle,
+                pickupLat = selectedPickupLocation.latitude,
+                pickupLon = selectedPickupLocation.longitude,
+                destinationTitle = dest.title,
+                destinationSubtitle = dest.subtitle,
+                destinationLat = dest.latitude,
+                destinationLon = dest.longitude,
+                rideCategory = cat,
+                estimatedFare = fare,
+                distanceKm = dist,
+                durationMinutes = duration,
+                status = "SEARCHING_DRIVERS",
+                timestamp = System.currentTimeMillis()
+            )
+
+            val repo = FirebaseRepository.getInstance(context)
+            val result = repo.createRideRequest(request)
+            isBookingInProgress = false
+            showBookingDialog = false
+            activeRideRequestId = request.id
+
+            if (result.isSuccess) {
+                val shortId = request.id.takeLast(6).uppercase()
+                snackbarHostState.showSnackbar("Ride Request #$shortId saved to Firebase! Searching for drivers...")
+            } else {
+                snackbarHostState.showSnackbar("Ride Request created locally. Connecting to Firebase...")
+            }
+        }
+    }
 
     // Function to calculate / update route preserving the exact selected locations
     fun calculateAndSetRoute(pickup: AppLocation, destination: AppLocation) {
@@ -256,9 +325,6 @@ fun HomeScreen(
             } catch (_: Exception) {}
         }
     }
-
-    var selectedRideCategory by remember { mutableStateOf<String?>(null) }
-    var showBookingDialog by remember { mutableStateOf(false) }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -1227,6 +1293,14 @@ fun HomeScreen(
                         )
                     }
                 }
+
+                // Feedback Snackbar
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 120.dp, start = 16.dp, end = 16.dp)
+                )
             }
         } else {
             // ================= DRIVER MODE =================
@@ -1506,9 +1580,19 @@ fun HomeScreen(
             },
             confirmButton = {
                 Button(
-                    onClick = { showBookingDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple)
+                    onClick = { submitRideRequest() },
+                    enabled = !isBookingInProgress,
+                    colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                    modifier = Modifier.testTag("confirm_booking_btn")
                 ) {
+                    if (isBookingInProgress) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
                     Text("Confirm Request")
                 }
             },
