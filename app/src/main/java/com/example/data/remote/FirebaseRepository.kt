@@ -473,11 +473,12 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             // 1. Write to Firebase Realtime Database
             try {
-                val db = FirebaseDatabase.getInstance()
-                db.getReference("ride_requests").child(request.id).setValue(requestMap).await()
+                val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                val reqRef = db.getReference("ride_requests").child(request.id)
+                reqRef.setValue(requestMap)
                 if (request.passengerId.isNotBlank()) {
                     db.getReference("users").child(request.passengerId).child("active_ride_request")
-                        .setValue(requestMap).await()
+                        .setValue(requestMap)
                 }
                 Log.d(TAG, "Ride request created in Firebase Realtime Database: ${request.id}")
             } catch (rtdbErr: Exception) {
@@ -486,8 +487,14 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             // 2. Write to Cloud Firestore if available
             if (isAvailable()) {
-                firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(request.id).set(requestMap).await()
-                Log.d(TAG, "Ride request synced to Firestore collection '${RIDE_REQUESTS_COLLECTION}': ${request.id}")
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                        firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(request.id).set(requestMap).await()
+                    }
+                    Log.d(TAG, "Ride request synced to Firestore collection '${RIDE_REQUESTS_COLLECTION}': ${request.id}")
+                } catch (fsErr: Exception) {
+                    Log.w(TAG, "Firestore sync notice: ${fsErr.message}")
+                }
             }
 
             Result.success(request.id)

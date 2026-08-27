@@ -13,6 +13,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import org.osmdroid.config.Configuration
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SignInScreen
 import com.example.ui.screens.SignUpScreen
@@ -26,6 +28,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Initialize OsmDroid userAgent configuration before map views load
+        try {
+            Configuration.getInstance().userAgentValue = packageName
+        } catch (_: Exception) {}
         enableEdgeToEdge()
         setContent {
             DrigoTheme {
