@@ -45,6 +45,7 @@ import com.example.data.remote.FirebaseRepository
 import com.example.ui.components.MapSelectionMode
 import com.example.ui.components.PickupDestinationBottomCard
 import com.example.ui.components.RealOsmMapView
+import com.example.ui.components.RideChatSheet
 import com.example.ui.components.RouteTopLocationsPanel
 import com.example.ui.theme.DrigoBrandPurple
 import com.example.viewmodel.UserMode
@@ -107,6 +108,32 @@ fun HomeScreen(
     var isBookingInProgress by remember { mutableStateOf(false) }
     var activeRideRequestId by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Real-Time Chat State
+    var showChatSheet by remember { mutableStateOf(false) }
+    var chatTripId by remember { mutableStateOf("") }
+    var chatPartnerName by remember { mutableStateOf("Captain Farhan") }
+    var chatPartnerRole by remember { mutableStateOf("Driver") }
+    var chatPartnerPhone by remember { mutableStateOf("+92 300 1234567") }
+    var chatPickupTitle by remember { mutableStateOf("") }
+    var chatDestinationTitle by remember { mutableStateOf("") }
+
+    // Driver Live Requests State
+    var driverRideRequests by remember { mutableStateOf<List<RideRequest>>(emptyList()) }
+    var activeDriverTrip by remember { mutableStateOf<RideRequest?>(null) }
+
+    // Listen for live driver requests when driver is online
+    LaunchedEffect(isDriverOnline) {
+        if (isDriverOnline) {
+            val repo = FirebaseRepository.getInstance(context)
+            repo.listenToRideRequests().collectLatest { reqList ->
+                driverRideRequests = reqList
+                if (activeDriverTrip == null && reqList.isNotEmpty()) {
+                    activeDriverTrip = reqList.first()
+                }
+            }
+        }
+    }
 
     // Function to submit ride request entry to Firebase Database
     fun submitRideRequest() {
@@ -1230,7 +1257,6 @@ fun HomeScreen(
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    // "Find Drivers" Action Button
                                     val currentCategory = selectedRideCategory ?: "Share Ride"
                                     val currentFare = when (currentCategory) {
                                         "Share Ride" -> shareFare
@@ -1238,44 +1264,228 @@ fun HomeScreen(
                                         else -> parcelFare
                                     }
 
-                                    Button(
-                                        onClick = {
-                                            if (selectedRideCategory == null) {
-                                                selectedRideCategory = "Share Ride"
-                                            }
-                                            showBookingDialog = true
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
-                                        shape = RoundedCornerShape(14.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(52.dp)
-                                            .testTag("find_drivers_btn")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                    // Check if there is an active confirmed ride booking
+                                    if (activeRideRequestId != null) {
+                                        // --- ACTIVE CONFIRMED BOOKING & DRIVER CARD ---
+                                        Surface(
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = Color(0xFFF3E5F5),
+                                            border = BorderStroke(1.5.dp, DrigoBrandPurple),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("active_ride_card")
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(
-                                                    imageVector = Icons.Default.DirectionsCar,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(12.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = Color(0xFF2E7D32)
+                                                    ) {
+                                                        Text(
+                                                            text = "CONFIRMED • DRIVER ASSIGNED",
+                                                            color = Color.White,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = "ID: #${activeRideRequestId?.takeLast(6)?.uppercase()}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = DrigoBrandPurple,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+
+                                                Spacer(modifier = Modifier.height(8.dp))
+
+                                                // Driver & Vehicle Details
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = DrigoBrandPurple,
+                                                        modifier = Modifier.size(40.dp)
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Person,
+                                                                contentDescription = null,
+                                                                tint = Color.White,
+                                                                modifier = Modifier.size(24.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            Text(
+                                                                text = "Captain Farhan",
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color(0xFF212121),
+                                                                fontSize = 15.sp
+                                                            )
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text(
+                                                                text = "★ 4.9",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color(0xFFF57F17),
+                                                                fontSize = 12.sp
+                                                            )
+                                                        }
+                                                        Text(
+                                                            text = "Toyota Corolla Altis • LEB-492 (White)",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = Color(0xFF616161),
+                                                            fontSize = 12.sp
+                                                        )
+                                                    }
+
+                                                    Text(
+                                                        text = "Rs. $currentFare",
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = DrigoBrandPurple
+                                                    )
+                                                }
+
+                                                Spacer(modifier = Modifier.height(10.dp))
+
+                                                // Action Buttons (Chat & Call)
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Button(
+                                                        onClick = {
+                                                            chatTripId = activeRideRequestId!!
+                                                            chatPartnerName = "Captain Farhan"
+                                                            chatPartnerRole = "Driver"
+                                                            chatPartnerPhone = "+92 300 1234567"
+                                                            chatPickupTitle = selectedPickupLocation.title
+                                                            chatDestinationTitle = selectedDestinationLocation?.title ?: "Destination"
+                                                            showChatSheet = true
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .height(44.dp)
+                                                            .testTag("passenger_chat_btn")
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Chat,
+                                                            contentDescription = "Chat",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(
+                                                            text = "Chat with Driver",
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.sp
+                                                        )
+                                                    }
+
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            chatTripId = activeRideRequestId!!
+                                                            chatPartnerName = "Captain Farhan"
+                                                            chatPartnerRole = "Driver"
+                                                            chatPartnerPhone = "+92 300 1234567"
+                                                            chatPickupTitle = selectedPickupLocation.title
+                                                            chatDestinationTitle = selectedDestinationLocation?.title ?: "Destination"
+                                                            showChatSheet = true
+                                                        },
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        border = BorderStroke(1.2.dp, DrigoBrandPurple),
+                                                        modifier = Modifier
+                                                            .size(44.dp)
+                                                            .testTag("passenger_call_btn"),
+                                                        contentPadding = PaddingValues(0.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Call,
+                                                            contentDescription = "Call Driver",
+                                                            tint = DrigoBrandPurple,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                TextButton(
+                                                    onClick = {
+                                                        activeRideRequestId = null
+                                                        scope.launch {
+                                                            snackbarHostState.showSnackbar("Ride booking cancelled.")
+                                                        }
+                                                    },
+                                                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                                                ) {
+                                                    Text(
+                                                        text = "Cancel Booking",
+                                                        color = Color(0xFFD32F2F),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // "Find Drivers" Action Button
+                                        Button(
+                                            onClick = {
+                                                if (selectedRideCategory == null) {
+                                                    selectedRideCategory = "Share Ride"
+                                                }
+                                                showBookingDialog = true
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(52.dp)
+                                                .testTag("find_drivers_btn")
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.DirectionsCar,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = "Find Drivers ($currentCategory)",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 15.sp
+                                                    )
+                                                }
                                                 Text(
-                                                    text = "Find Drivers ($currentCategory)",
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 15.sp
+                                                    text = "Rs. $currentFare",
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontSize = 16.sp
                                                 )
                                             }
-                                            Text(
-                                                text = "Rs. $currentFare",
-                                                fontWeight = FontWeight.ExtraBold,
-                                                fontSize = 16.sp
-                                            )
                                         }
                                     }
                                 }
@@ -1290,6 +1500,34 @@ fun HomeScreen(
                                 .fillMaxWidth()
                                 .height(38.dp)
                                 .background(DrigoBrandPurple)
+                        )
+                    }
+                }
+
+                // Floating Chat Action button on Map when a ride is active
+                if (activeRideRequestId != null) {
+                    FloatingActionButton(
+                        onClick = {
+                            chatTripId = activeRideRequestId!!
+                            chatPartnerName = "Captain Farhan"
+                            chatPartnerRole = "Driver"
+                            chatPartnerPhone = "+92 300 1234567"
+                            chatPickupTitle = selectedPickupLocation.title
+                            chatDestinationTitle = selectedDestinationLocation?.title ?: "Destination"
+                            showChatSheet = true
+                        },
+                        containerColor = DrigoBrandPurple,
+                        contentColor = Color.White,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 110.dp, end = 16.dp)
+                            .testTag("floating_chat_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Chat,
+                            contentDescription = "Chat with Driver",
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -1393,14 +1631,137 @@ fun HomeScreen(
                             .padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = if (isDriverOnline) "Searching for passenger requests near ${selectedPickupLocation.title}..." else "Go online to receive ride bookings in your area",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
+                        if (isDriverOnline) {
+                            val activeTrip = activeDriverTrip ?: driverRideRequests.firstOrNull()
+                            if (activeTrip != null) {
+                                // Active Passenger Request Card
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = Color(0xFFF3E5F5),
+                                    border = BorderStroke(1.5.dp, DrigoBrandPurple),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("driver_active_request_card")
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = Color(0xFF2E7D32)
+                                            ) {
+                                                Text(
+                                                    text = "PASSENGER RIDE REQUEST",
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                            Text(
+                                                text = "Rs. ${activeTrip.estimatedFare}",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = DrigoBrandPurple
+                                            )
+                                        }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Person,
+                                                contentDescription = null,
+                                                tint = DrigoBrandPurple,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = activeTrip.passengerName.ifBlank { "Passenger (Naeem Ullah)" },
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF212121)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "📍 Pickup: ${activeTrip.pickupTitle}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF424242),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "🎯 Dropoff: ${activeTrip.destinationTitle}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF424242),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        // Driver Chat Action Button
+                                        Button(
+                                            onClick = {
+                                                chatTripId = activeTrip.id
+                                                chatPartnerName = activeTrip.passengerName.ifBlank { "Naeem Ullah" }
+                                                chatPartnerRole = "Passenger"
+                                                chatPartnerPhone = "+92 300 9876543"
+                                                chatPickupTitle = activeTrip.pickupTitle
+                                                chatDestinationTitle = activeTrip.destinationTitle
+                                                showChatSheet = true
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(46.dp)
+                                                .testTag("driver_chat_btn")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Chat,
+                                                contentDescription = "Chat with Passenger",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "Chat with Passenger",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                            } else {
+                                Text(
+                                    text = "Searching for passenger requests near ${selectedPickupLocation.title}...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                        } else {
+                            Text(
+                                text = "Go online to receive ride bookings in your area",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
 
                         Button(
                             onClick = onToggleDriverOnline,
@@ -1602,6 +1963,22 @@ fun HomeScreen(
                 }
             },
             shape = RoundedCornerShape(18.dp)
+        )
+    }
+
+    // Real-Time Ride Chat Sheet Overlay (Driver <-> Passenger)
+    if (showChatSheet) {
+        RideChatSheet(
+            tripId = chatTripId.ifBlank { activeRideRequestId ?: "trip_default" },
+            currentUserId = user?.uid ?: if (userMode == UserMode.DRIVER) "driver_user" else "passenger_user",
+            currentUserName = user?.displayName?.ifBlank { if (userMode == UserMode.DRIVER) "Captain Farhan" else "Naeem Ullah" } ?: (user?.email?.substringBefore("@") ?: if (userMode == UserMode.DRIVER) "Captain Farhan" else "Naeem Ullah"),
+            isDriver = (userMode == UserMode.DRIVER),
+            partnerName = chatPartnerName,
+            partnerRole = chatPartnerRole,
+            partnerPhone = chatPartnerPhone,
+            pickupTitle = chatPickupTitle.ifBlank { selectedPickupLocation.title },
+            destinationTitle = chatDestinationTitle.ifBlank { selectedDestinationLocation?.title ?: "Destination" },
+            onDismiss = { showChatSheet = false }
         )
     }
 }

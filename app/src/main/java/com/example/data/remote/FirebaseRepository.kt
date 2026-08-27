@@ -318,67 +318,123 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
     }
 
-    // --- Chat Firestore Sync ---
+    // --- Chat Sync (Realtime Database & Firestore) ---
 
     suspend fun pushChatMessageToCloud(message: ChatMessageEntity): Result<Unit> {
-        if (!isAvailable()) return Result.success(Unit)
-        return try {
-            val messageMap = mapOf(
-                "id" to message.id,
-                "tripId" to message.tripId,
-                "senderId" to message.senderId,
-                "senderName" to message.senderName,
-                "isDriver" to message.isDriver,
-                "messageText" to message.messageText,
-                "timestamp" to message.timestamp,
-                "isRead" to message.isRead,
-                "isSystemNotice" to message.isSystemNotice
-            )
-            firestore!!.collection(CHAT_COLLECTION).document(message.id).set(messageMap).await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to push message to Firestore: ${e.message}")
-            Result.failure(e)
+        val messageMap = mapOf(
+            "id" to message.id,
+            "tripId" to message.tripId,
+            "senderId" to message.senderId,
+            "senderName" to message.senderName,
+            "isDriver" to message.isDriver,
+            "messageText" to message.messageText,
+            "timestamp" to message.timestamp,
+            "isRead" to message.isRead,
+            "isSystemNotice" to message.isSystemNotice
+        )
+
+        // 1. Write to Firebase Realtime Database for instant push
+        try {
+            val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            db.getReference("ride_chats").child(message.tripId).child(message.id).setValue(messageMap)
+            Log.d(TAG, "Chat message pushed to Realtime Database for trip: ${message.tripId}")
+        } catch (rtdbErr: Exception) {
+            Log.w(TAG, "Chat Realtime DB write notice: ${rtdbErr.message}")
         }
+
+        // 2. Sync to Cloud Firestore if available
+        if (isAvailable()) {
+            try {
+                kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    firestore!!.collection(CHAT_COLLECTION).document(message.id).set(messageMap).await()
+                }
+                Log.d(TAG, "Chat message synced to Firestore: ${message.id}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to push message to Firestore: ${e.message}")
+            }
+        }
+
+        return Result.success(Unit)
     }
 
     fun listenToCloudMessages(tripId: String): Flow<List<ChatMessageEntity>> = callbackFlow {
-        if (!isAvailable() || tripId.isBlank()) {
+        if (tripId.isBlank()) {
             trySend(emptyList())
             close()
             return@callbackFlow
         }
 
-        val registration = firestore!!.collection(CHAT_COLLECTION)
-            .whereEqualTo("tripId", tripId)
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.w(TAG, "Listen to chat messages failed: ${error.message}")
-                    return@addSnapshotListener
-                }
+        // Listen on Firebase Realtime Database for instant live stream
+        val rtdbRef = try {
+            val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            db.getReference("ride_chats").child(tripId)
+        } catch (_: Exception) {
+            null
+        }
 
-                if (snapshot != null) {
-                    val messages = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            ChatMessageEntity(
-                                id = doc.getString("id") ?: doc.id,
-                                tripId = doc.getString("tripId") ?: tripId,
-                                senderId = doc.getString("senderId") ?: "user",
-                                senderName = doc.getString("senderName") ?: "User",
-                                isDriver = doc.getBoolean("isDriver") ?: false,
-                                messageText = doc.getString("messageText") ?: "",
-                                timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
-                                isRead = doc.getBoolean("isRead") ?: true,
-                                isSystemNotice = doc.getBoolean("isSystemNotice") ?: false
-                            )
-                        } catch (e: Exception) { null }
-                    }
-                    trySend(messages)
+        val valueListener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val list = mutableListOf<ChatMessageEntity>()
+                for (child in snapshot.children) {
+                    try {
+                        val id = child.child("id").getValue(String::class.java) ?: child.key ?: UUID.randomUUID().toString()
+                        val trip = child.child("tripId").getValue(String::class.java) ?: tripId
+                        val sId = child.child("senderId").getValue(String::class.java) ?: ""
+                        val sName = child.child("senderName").getValue(String::class.java) ?: "User"
+                        val isDrv = child.child("isDriver").getValue(Boolean::class.java) ?: false
+                        val text = child.child("messageText").getValue(String::class.java) ?: ""
+                        val time = child.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
+                        val isRd = child.child("isRead").getValue(Boolean::class.java) ?: true
+                        val isSys = child.child("isSystemNotice").getValue(Boolean::class.java) ?: false
+                        list.add(ChatMessageEntity(id, trip, sId, sName, isDrv, text, time, isRd, isSys))
+                    } catch (_: Exception) {}
                 }
+                list.sortBy { it.timestamp }
+                trySend(list)
             }
 
-        awaitClose { registration.remove() }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Log.w(TAG, "Realtime Database chat listener cancelled: ${error.message}")
+            }
+        }
+
+        rtdbRef?.addValueEventListener(valueListener)
+
+        // Also listen on Firestore if initialized
+        var firestoreRegistration: ListenerRegistration? = null
+        if (isAvailable()) {
+            try {
+                firestoreRegistration = firestore!!.collection(CHAT_COLLECTION)
+                    .whereEqualTo("tripId", tripId)
+                    .orderBy("timestamp", Query.Direction.ASCENDING)
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        val messages = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                ChatMessageEntity(
+                                    id = doc.getString("id") ?: doc.id,
+                                    tripId = doc.getString("tripId") ?: tripId,
+                                    senderId = doc.getString("senderId") ?: "user",
+                                    senderName = doc.getString("senderName") ?: "User",
+                                    isDriver = doc.getBoolean("isDriver") ?: false,
+                                    messageText = doc.getString("messageText") ?: "",
+                                    timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
+                                    isRead = doc.getBoolean("isRead") ?: true,
+                                    isSystemNotice = doc.getBoolean("isSystemNotice") ?: false
+                                )
+                            } catch (e: Exception) { null }
+                        }
+                        if (messages.isNotEmpty()) {
+                            trySend(messages)
+                        }
+                    }
+            } catch (_: Exception) {}
+        }
+
+        awaitClose {
+            rtdbRef?.removeEventListener(valueListener)
+            firestoreRegistration?.remove()
+        }
     }
 
     // --- Driver Realtime Telemetry Broadcast ---
