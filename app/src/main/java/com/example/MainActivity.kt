@@ -19,9 +19,11 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SignInScreen
 import com.example.ui.screens.SignUpScreen
 import com.example.ui.screens.WelcomeScreen
+import com.example.ui.screens.WalletScreen
 import com.example.ui.theme.DrigoTheme
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.MainViewModel
+import com.example.viewmodel.UserMode
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -55,6 +57,7 @@ fun DrigoApp(viewModel: MainViewModel) {
     BackHandler(enabled = currentScreen != AppScreen.WELCOME && currentScreen != AppScreen.HOME_PLACEHOLDER && currentScreen != AppScreen.SIGN_IN) {
         when (currentScreen) {
             AppScreen.SIGN_UP -> viewModel.navigateTo(AppScreen.SIGN_IN)
+            AppScreen.WALLET -> viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
             else -> viewModel.navigateTo(AppScreen.SIGN_IN)
         }
     }
@@ -125,6 +128,18 @@ fun DrigoApp(viewModel: MainViewModel) {
                 },
                 onSignOutClick = {
                     viewModel.signOut()
+                },
+                onNavigateToWallet = {
+                    viewModel.navigateTo(AppScreen.WALLET)
+                }
+            )
+        }
+        AppScreen.WALLET -> {
+            WalletScreen(
+                user = currentUser,
+                userRole = if (userMode == UserMode.DRIVER) "DRIVER" else "PASSENGER",
+                onBackClick = {
+                    viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
                 }
             )
         }

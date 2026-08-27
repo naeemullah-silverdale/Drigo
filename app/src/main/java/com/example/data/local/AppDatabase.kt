@@ -10,6 +10,8 @@ import com.example.data.model.BookingEntity
 import com.example.data.model.ChatMessageEntity
 import com.example.data.model.TripEntity
 import com.example.data.model.UserPreferenceEntity
+import com.example.data.model.WalletEntity
+import com.example.data.model.WalletTransactionEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -19,9 +21,11 @@ import kotlinx.coroutines.launch
         TripEntity::class,
         BookingEntity::class,
         ChatMessageEntity::class,
-        UserPreferenceEntity::class
+        UserPreferenceEntity::class,
+        WalletEntity::class,
+        WalletTransactionEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -30,6 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookingDao(): BookingDao
     abstract fun chatDao(): ChatDao
     abstract fun preferenceDao(): PreferenceDao
+    abstract fun walletDao(): WalletDao
 
     companion object {
         @Volatile

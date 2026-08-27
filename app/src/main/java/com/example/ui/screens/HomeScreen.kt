@@ -63,6 +63,7 @@ fun HomeScreen(
     onToggleDriverOnline: () -> Unit,
     onSwitchUserMode: (UserMode) -> Unit,
     onSignOutClick: () -> Unit,
+    onNavigateToWallet: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -519,6 +520,41 @@ fun HomeScreen(
                 }
 
                 NavigationDrawerItem(
+                    icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = Color(0xFF00A859)) },
+                    label = {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Wallet", fontWeight = FontWeight.Bold)
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF00A859).copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "Easypaisa",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF00A859),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    },
+                    selected = false,
+                    onClick = {
+                        scope.launch {
+                            drawerState.close()
+                            onNavigateToWallet()
+                        }
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .testTag("drawer_wallet_item")
+                )
+
+                NavigationDrawerItem(
                     icon = { Icon(Icons.Default.History, contentDescription = null) },
                     label = { Text("Trip History") },
                     selected = false,
@@ -755,25 +791,62 @@ fun HomeScreen(
                         }
                     }
                 } else {
-                    // Initial State: Only Hamburger Menu button visible, NO From/To location card
-                    Surface(
-                        onClick = { scope.launch { drawerState.open() } },
-                        shape = CircleShape,
-                        color = DrigoBrandPurple,
-                        shadowElevation = 6.dp,
+                    // Initial State: Hamburger Menu button + Quick Wallet Access Chip
+                    Row(
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(top = 50.dp, start = 14.dp)
-                            .size(46.dp)
-                            .testTag("menu_hamburger_btn")
+                            .padding(top = 50.dp, start = 14.dp, end = 14.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Menu,
-                                contentDescription = "Menu",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
+                        Surface(
+                            onClick = { scope.launch { drawerState.open() } },
+                            shape = CircleShape,
+                            color = DrigoBrandPurple,
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .size(46.dp)
+                                .testTag("menu_hamburger_btn")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Menu,
+                                    contentDescription = "Menu",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = onNavigateToWallet,
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color(0xFF1E2026).copy(alpha = 0.94f),
+                            border = BorderStroke(1.dp, Color(0xFF00A859)),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .height(40.dp)
+                                .testTag("top_wallet_chip")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalanceWallet,
+                                    contentDescription = "Wallet",
+                                    tint = Color(0xFF00A859),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Wallet",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -1611,6 +1684,39 @@ fun HomeScreen(
                             text = if (isDriverOnline) "YOU'RE ONLINE" else "YOU'RE OFFLINE",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                // Driver Top Wallet Quick Button
+                Surface(
+                    onClick = onNavigateToWallet,
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF1E2026).copy(alpha = 0.94f),
+                    border = BorderStroke(1.dp, Color(0xFF00A859)),
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(end = 16.dp, top = 56.dp)
+                        .height(44.dp)
+                        .testTag("driver_top_wallet_chip")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = "Driver Wallet",
+                            tint = Color(0xFF00A859),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Wallet",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
                             color = Color.White
                         )
                     }

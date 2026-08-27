@@ -5,6 +5,8 @@ import com.example.data.model.LuggageAllowance
 import com.example.data.model.RecurringFrequency
 import com.example.data.model.TripStatus
 import com.example.data.model.BookingStatus
+import com.example.data.model.TransactionType
+import com.example.data.model.TransactionStatus
 
 class Converters {
     @TypeConverter
@@ -45,5 +47,25 @@ class Converters {
         BookingStatus.valueOf(value)
     } catch (e: Exception) {
         BookingStatus.CONFIRMED
+    }
+
+    @TypeConverter
+    fun fromTransactionType(type: TransactionType): String = type.name
+
+    @TypeConverter
+    fun toTransactionType(value: String): TransactionType = try {
+        TransactionType.valueOf(value)
+    } catch (e: Exception) {
+        TransactionType.TOP_UP
+    }
+
+    @TypeConverter
+    fun fromTransactionStatus(status: TransactionStatus): String = status.name
+
+    @TypeConverter
+    fun toTransactionStatus(value: String): TransactionStatus = try {
+        TransactionStatus.valueOf(value)
+    } catch (e: Exception) {
+        TransactionStatus.PENDING
     }
 }

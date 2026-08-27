@@ -23,7 +23,8 @@ enum class AppScreen {
     WELCOME,
     SIGN_IN,
     SIGN_UP,
-    HOME_PLACEHOLDER
+    HOME_PLACEHOLDER,
+    WALLET
 }
 
 enum class UserMode {

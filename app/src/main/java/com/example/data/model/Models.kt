@@ -196,3 +196,65 @@ data class RideRequest(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+enum class TransactionType {
+    TOP_UP,
+    RIDE_PAYMENT,
+    REFUND,
+    ADJUSTMENT
+}
+
+enum class TransactionStatus {
+    PENDING,
+    SUCCESS,
+    FAILED,
+    CANCELLED
+}
+
+@Entity(tableName = "wallets")
+data class WalletEntity(
+    @PrimaryKey val userId: String = "",
+    val walletId: String = UUID.randomUUID().toString(),
+    val balance: Double = 0.0,
+    val currency: String = "PKR",
+    val userRole: String = "PASSENGER", // "PASSENGER" or "DRIVER"
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "wallet_transactions")
+data class WalletTransactionEntity(
+    @PrimaryKey val transactionId: String = UUID.randomUUID().toString(),
+    val userId: String = "",
+    val walletId: String = "",
+    val type: TransactionType = TransactionType.TOP_UP,
+    val amount: Double = 0.0,
+    val balanceBefore: Double = 0.0,
+    val balanceAfter: Double = 0.0,
+    val status: TransactionStatus = TransactionStatus.PENDING,
+    val paymentMethod: String = "EASYPAISA",
+    val referenceId: String = "",
+    val notes: String = "",
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class EasypaisaPaymentRequest(
+    val orderId: String,
+    val transactionId: String,
+    val amount: Double,
+    val mobileNumber: String,
+    val userRole: String,
+    val storeId: String = "DRIGO_EASYPAISA_STORE",
+    val description: String = "Drigo Wallet Top-up via Easypaisa",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class EasypaisaPaymentResult(
+    val success: Boolean,
+    val orderId: String,
+    val transactionId: String,
+    val responseCode: String,
+    val responseMessage: String,
+    val updatedTransaction: WalletTransactionEntity? = null
+)
+
+
