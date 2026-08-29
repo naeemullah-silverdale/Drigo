@@ -49,7 +49,11 @@ import com.example.data.RouteService
 import com.example.data.UserLocationData
 import com.example.data.model.RideRequest
 import com.example.data.remote.FirebaseRepository
+import com.example.ui.components.CityRideType
+import com.example.ui.components.CityToCityPassengerFlow
+import com.example.ui.components.CityToCityStep
 import com.example.ui.components.InDriveFixedBottomBar
+import com.example.ui.components.InDriveLimeGreen
 import com.example.ui.components.InDriveRideOption
 import com.example.ui.components.InDriveRideOptionsList
 import com.example.ui.components.InDriveRouteTopCard
@@ -138,6 +142,14 @@ fun HomeScreen(
     var chatPickupTitle by remember { mutableStateOf("") }
     var chatDestinationTitle by remember { mutableStateOf("") }
 
+    // City to City Passenger Multi-Step Flow State (Screenshots 1, 2, 3)
+    var cityToCityStep by remember { mutableStateOf(CityToCityStep.WHAT_RIDE) }
+    var cityRideType by remember { mutableStateOf(CityRideType.PRIVATE) }
+    var cityTimingIsNow by remember { mutableStateOf(true) }
+    var cityScheduledDateTimeText by remember { mutableStateOf("Sun, 30 Aug 12:15 PM") }
+    var cityPassengerCount by remember { mutableIntStateOf(1) }
+    var cityComments by remember { mutableStateOf("") }
+
     // Driver Live Requests State
     var driverRideRequests by remember { mutableStateOf<List<RideRequest>>(emptyList()) }
     var activeDriverTrip by remember { mutableStateOf<RideRequest?>(null) }
@@ -165,18 +177,29 @@ fun HomeScreen(
                 latitude = selectedPickupLocation.latitude + 0.015,
                 longitude = selectedPickupLocation.longitude + 0.015
             )
-            val cat = selectedRideCategory ?: "Private AC"
+            val cat = if (selectedTopCategory == "city") {
+                "City: ${cityRideType.title}"
+            } else {
+                selectedRideCategory ?: "Private AC"
+            }
             val dist = activeRoute?.distanceKm ?: 5.0
-            val calculatedBaseFare = when (cat) {
-                "Ride A/C", "Private AC" -> 160 + (dist * 45).toInt()
-                "Mini" -> 120 + (dist * 35).toInt()
-                "Moto" -> 60 + (dist * 18).toInt()
-                "Ride", "Private Non-AC" -> 110 + (dist * 35).toInt()
-                "City to City", "City to city" -> 450 + (dist * 45).toInt()
-                "Couriers", "Parcel", "Parcel Delivery" -> 70 + (dist * 22).toInt()
-                "Freight" -> 300 + (dist * 60).toInt()
-                "Share Ride" -> 80 + (dist * 25).toInt()
-                "Book Car", "Book a Car" -> 160 + (dist * 45).toInt()
+            val calculatedBaseFare = when {
+                selectedTopCategory == "city" -> {
+                    when (cityRideType) {
+                        CityRideType.PRIVATE -> (1200 + (dist * 42)).toInt()
+                        CityRideType.SHARED -> (450 + (dist * 18)).toInt() * cityPassengerCount
+                        CityRideType.PARCEL -> (600 + (dist * 20)).toInt()
+                    }
+                }
+                cat in listOf("Ride A/C", "Private AC") -> 160 + (dist * 45).toInt()
+                cat == "Mini" -> 120 + (dist * 35).toInt()
+                cat == "Moto" -> 60 + (dist * 18).toInt()
+                cat in listOf("Ride", "Private Non-AC") -> 110 + (dist * 35).toInt()
+                cat in listOf("City to City", "City to city") -> 450 + (dist * 45).toInt()
+                cat in listOf("Couriers", "Parcel", "Parcel Delivery") -> 70 + (dist * 22).toInt()
+                cat == "Freight" -> 300 + (dist * 60).toInt()
+                cat == "Share Ride" -> 80 + (dist * 25).toInt()
+                cat in listOf("Book Car", "Book a Car") -> 160 + (dist * 45).toInt()
                 else -> 160 + (dist * 45).toInt()
             }
             val finalFare = customOfferedFare ?: calculatedBaseFare
@@ -906,9 +929,21 @@ fun HomeScreen(
                                     // Floating Back button on map (Attachment 1)
                                     Surface(
                                         onClick = {
-                                            activeRoute = null
-                                            selectedDestinationLocation = null
-                                            recenterTrigger++
+                                            if (selectedTopCategory == "city") {
+                                                when (cityToCityStep) {
+                                                    CityToCityStep.CUSTOMIZE -> cityToCityStep = CityToCityStep.WHEN_START
+                                                    CityToCityStep.WHEN_START -> cityToCityStep = CityToCityStep.WHAT_RIDE
+                                                    CityToCityStep.WHAT_RIDE -> {
+                                                        activeRoute = null
+                                                        selectedDestinationLocation = null
+                                                        recenterTrigger++
+                                                    }
+                                                }
+                                            } else {
+                                                activeRoute = null
+                                                selectedDestinationLocation = null
+                                                recenterTrigger++
+                                            }
                                         },
                                         shape = CircleShape,
                                         color = Color(0xFF1E2026).copy(alpha = 0.96f),
@@ -1047,277 +1082,335 @@ fun HomeScreen(
                         val currentSelectedOption = inDriveRideOptions.find { it.id == selectedRideOptionId } ?: inDriveRideOptions[2]
                         val effectiveCustomFare = customOfferedFare ?: currentSelectedOption.baseFare
 
-                        val defaultPeekHeight = if (activeRoute != null) 450.dp.coerceAtMost(screenMaxHeight * 0.74f) else 340.dp
-                        val targetHeight = if (isRideSheetExpanded) (screenMaxHeight * 0.92f) else defaultPeekHeight
-                        val animatedSheetHeight by animateDpAsState(
-                            targetValue = targetHeight,
-                            animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow),
-                            label = "ride_sheet_height"
-                        )
+                        // Check if City to City Passenger Flow is active
+                        if (activeRoute != null && selectedTopCategory == "city") {
+                            // City-to-City Passenger Flow (Screenshots 1, 2, 3)
+                            val cityDist = activeRoute?.distanceKm ?: 25.0
+                            val defaultCityFare = when (cityRideType) {
+                                CityRideType.PRIVATE -> (1200 + (cityDist * 42)).toInt()
+                                CityRideType.SHARED -> (450 + (cityDist * 18)).toInt() * cityPassengerCount
+                                CityRideType.PARCEL -> (600 + (cityDist * 20)).toInt()
+                            }
+                            val effectiveCityFare = customOfferedFare ?: defaultCityFare
 
-                        // Dark Sleek Bottom Sheet matching Wallet AddMoneyBottomSheet styling
-                        Surface(
-                            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                            color = Color(0xFF1E2026),
-                            border = BorderStroke(1.dp, Color(0xFF2C303B)),
-                            shadowElevation = 24.dp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(animatedSheetHeight)
-                                .testTag("ride_booking_sheet")
-                        ) {
-                            Column(
+                            CityToCityPassengerFlow(
+                                distanceKm = cityDist,
+                                currentStep = cityToCityStep,
+                                selectedRideType = cityRideType,
+                                selectedTimingIsNow = cityTimingIsNow,
+                                scheduledDateTimeText = cityScheduledDateTimeText,
+                                passengerCount = cityPassengerCount,
+                                customFare = effectiveCityFare,
+                                comments = cityComments,
+                                onStepChange = { nextStep -> cityToCityStep = nextStep },
+                                onRideTypeChange = { type ->
+                                    cityRideType = type
+                                    customOfferedFare = when (type) {
+                                        CityRideType.PRIVATE -> (1200 + (cityDist * 42)).toInt()
+                                        CityRideType.SHARED -> (450 + (cityDist * 18)).toInt() * cityPassengerCount
+                                        CityRideType.PARCEL -> (600 + (cityDist * 20)).toInt()
+                                    }
+                                },
+                                onTimingChange = { isNow -> cityTimingIsNow = isNow },
+                                onScheduledDateTimeChange = { dt -> cityScheduledDateTimeText = dt },
+                                onPassengerCountChange = { count ->
+                                    cityPassengerCount = count
+                                    if (cityRideType == CityRideType.SHARED) {
+                                        customOfferedFare = (450 + (cityDist * 18)).toInt() * count
+                                    }
+                                },
+                                onDecreaseFare = {
+                                    val current = customOfferedFare ?: defaultCityFare
+                                    customOfferedFare = (current - 100).coerceAtLeast(100)
+                                },
+                                onIncreaseFare = {
+                                    val current = customOfferedFare ?: defaultCityFare
+                                    customOfferedFare = current + 100
+                                },
+                                onCommentsChange = { comm -> cityComments = comm },
+                                onPaymentMethodClick = {
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Payment method: Cash")
+                                    }
+                                },
+                                onFindDriverClick = {
+                                    submitRideRequest()
+                                }
+                            )
+                        } else {
+                            val defaultPeekHeight = if (activeRoute != null) 450.dp.coerceAtMost(screenMaxHeight * 0.74f) else 340.dp
+                            val targetHeight = if (isRideSheetExpanded) (screenMaxHeight * 0.92f) else defaultPeekHeight
+                            val animatedSheetHeight by animateDpAsState(
+                                targetValue = targetHeight,
+                                animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow),
+                                label = "ride_sheet_height"
+                            )
+
+                            // Dark Sleek Bottom Sheet matching Wallet AddMoneyBottomSheet styling
+                            Surface(
+                                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                                color = Color(0xFF1E2026),
+                                border = BorderStroke(1.dp, Color(0xFF2C303B)),
+                                shadowElevation = 24.dp,
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .navigationBarsPadding()
-                                    .padding(horizontal = 16.dp)
-                                    .padding(bottom = 8.dp)
+                                    .fillMaxWidth()
+                                    .height(animatedSheetHeight)
+                                    .testTag("ride_booking_sheet")
                             ) {
-                                // Drag Handle Section with vertical drag gesture & click toggle
-                                Box(
+                                Column(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 10.dp, bottom = 6.dp)
-                                        .pointerInput(Unit) {
-                                            detectVerticalDragGestures { change, dragAmount ->
-                                                change.consume()
-                                                if (dragAmount < -12f) {
-                                                    isRideSheetExpanded = true
-                                                } else if (dragAmount > 12f) {
-                                                    isRideSheetExpanded = false
+                                        .fillMaxSize()
+                                        .navigationBarsPadding()
+                                        .padding(horizontal = 16.dp)
+                                        .padding(bottom = 8.dp)
+                                ) {
+                                    // Drag Handle Section with vertical drag gesture & click toggle
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 10.dp, bottom = 6.dp)
+                                            .pointerInput(Unit) {
+                                                detectVerticalDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    if (dragAmount < -12f) {
+                                                        isRideSheetExpanded = true
+                                                    } else if (dragAmount > 12f) {
+                                                        isRideSheetExpanded = false
+                                                    }
+                                                }
+                                            }
+                                            .clickable { isRideSheetExpanded = !isRideSheetExpanded },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(44.dp)
+                                                .height(5.dp)
+                                                .background(Color.Gray.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
+                                        )
+                                    }
+
+                                    if (activeRoute != null) {
+                                        // ===== ROUTE ACTIVE: inDrive Full Ride Selection UI (Attachments 1, 2, 3) =====
+
+                                        // Subtitle: "No traffic, lower prices"
+                                        Text(
+                                            text = "No traffic, lower prices",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color(0xFFA0A6B5),
+                                            fontSize = 13.sp,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(bottom = 6.dp)
+                                        )
+
+                                        // Scrollable Ride Options List (Attachment 2: Full view of sheet where can select the rider, prices for all)
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .verticalScroll(rememberScrollState())
+                                                .padding(horizontal = 16.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            InDriveRideOptionsList(
+                                                rideOptions = inDriveRideOptions,
+                                                selectedOptionId = selectedRideOptionId,
+                                                customFare = effectiveCustomFare,
+                                                onSelectOption = { opt ->
+                                                    selectedRideOptionId = opt.id
+                                                    selectedRideCategory = opt.title
+                                                    customOfferedFare = opt.baseFare
+                                                },
+                                                onDecreaseFare = {
+                                                    val current = customOfferedFare ?: currentSelectedOption.baseFare
+                                                    customOfferedFare = (current - 20).coerceAtLeast(50)
+                                                },
+                                                onIncreaseFare = {
+                                                    val current = customOfferedFare ?: currentSelectedOption.baseFare
+                                                    customOfferedFare = current + 20
+                                                }
+                                            )
+                                        }
+                                    } else {
+
+                                        val topCategories = remember {
+                                            listOf(
+                                                Triple("ride_ac", "Ride A/C", "Book Car"),
+                                                Triple("ride", "Ride", "Book Car"),
+                                                Triple("city", "City to city", "Book Car"),
+                                                Triple("couriers", "Couriers", "Parcel")
+                                            )
+                                        }
+
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState())
+                                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            topCategories.forEach { (catId, catLabel, defaultRide) ->
+                                                val isSelected = selectedTopCategory == catId
+
+                                                Surface(
+                                                    onClick = {
+                                                        selectedTopCategory = catId
+                                                        selectedRideCategory = defaultRide
+                                                    },
+                                                    shape = RoundedCornerShape(20.dp),
+                                                    color = if (isSelected) Color(0xFF2C303B) else Color.Transparent,
+                                                    border = BorderStroke(
+                                                        1.dp,
+                                                        if (isSelected) DrigoBrandPurple else Color(0xFF333846)
+                                                    ),
+                                                    modifier = Modifier.height(36.dp)
+                                                ) {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.padding(horizontal = 14.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = catLabel,
+                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                            fontSize = 13.sp,
+                                                            color = if (isSelected) Color.White else Color(0xFFA0A6B5)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
-                                        .clickable { isRideSheetExpanded = !isRideSheetExpanded },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(44.dp)
-                                            .height(5.dp)
-                                            .background(Color.Gray.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
-                                    )
-                                }
 
-                                if (activeRoute != null) {
-                                    // ===== ROUTE ACTIVE: inDrive Full Ride Selection UI (Attachments 1, 2, 3) =====
+                                        Spacer(modifier = Modifier.height(8.dp))
 
-                                    // Subtitle: "No traffic, lower prices"
-                                    Text(
-                                        text = "No traffic, lower prices",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = Color(0xFFA0A6B5),
-                                        fontSize = 13.sp,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(bottom = 6.dp)
-                                    )
-
-                                    // Scrollable Ride Options List (Attachment 2: Full view of sheet where can select the rider, prices for all)
-                                    Column(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .verticalScroll(rememberScrollState())
-                                            .padding(horizontal = 16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        InDriveRideOptionsList(
-                                            rideOptions = inDriveRideOptions,
-                                            selectedOptionId = selectedRideOptionId,
-                                            customFare = effectiveCustomFare,
-                                            onSelectOption = { opt ->
-                                                selectedRideOptionId = opt.id
-                                                selectedRideCategory = opt.title
-                                                customOfferedFare = opt.baseFare
-                                            },
-                                            onDecreaseFare = {
-                                                val current = customOfferedFare ?: currentSelectedOption.baseFare
-                                                customOfferedFare = (current - 20).coerceAtLeast(50)
-                                            },
-                                            onIncreaseFare = {
-                                                val current = customOfferedFare ?: currentSelectedOption.baseFare
-                                                customOfferedFare = current + 20
-                                            }
-                                        )
-                                    }
-                                } else {
-
-                                    val topCategories = remember {
-                                        listOf(
-                                            Triple("ride_ac", "Ride A/C", "Book Car"),
-                                            Triple("ride", "Ride", "Book Car"),
-                                            Triple("city", "City to city", "Book Car"),
-                                            Triple("couriers", "Couriers", "Parcel")
-                                        )
-                                    }
-
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(rememberScrollState())
-                                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        topCategories.forEach { (catId, catLabel, defaultRide) ->
-                                            val isSelected = selectedTopCategory == catId
-
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .verticalScroll(rememberScrollState())
+                                                .padding(horizontal = 16.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            // "Where To?" Search Entry Card
                                             Surface(
                                                 onClick = {
-                                                    selectedTopCategory = catId
-                                                    selectedRideCategory = defaultRide
+                                                    cardInitialEditPickup = false
+                                                    showPickupDestinationCard = true
                                                 },
-                                                shape = RoundedCornerShape(20.dp),
-                                                color = if (isSelected) Color(0xFF2C303B) else Color.Transparent,
-                                                border = BorderStroke(
-                                                    1.dp,
-                                                    if (isSelected) DrigoBrandPurple else Color(0xFF333846)
-                                                ),
-                                                modifier = Modifier.height(36.dp)
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = Color(0xFF232730),
+                                                border = BorderStroke(1.dp, Color(0xFF333846)),
+                                                modifier = Modifier.fillMaxWidth()
                                             ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.padding(horizontal = 14.dp)
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
                                                 ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Search,
+                                                        contentDescription = "Search",
+                                                        tint = DrigoBrandPurple,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
                                                     Text(
-                                                        text = catLabel,
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                        fontSize = 13.sp,
-                                                        color = if (isSelected) Color.White else Color(0xFFA0A6B5)
+                                                        text = "Where To?",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = Color.White,
+                                                        fontWeight = FontWeight.SemiBold
                                                     )
                                                 }
                                             }
+
+                                            // 3-Card Bento Layout in Initial Discovery View
+                                            RideCategoryBentoCards(
+                                                selectedCategory = selectedRideCategory,
+                                                onShareRideClick = {
+                                                    selectedRideCategory = "Share Ride"
+                                                    selectedTopCategory = "city"
+                                                    cardInitialEditPickup = false
+                                                    showPickupDestinationCard = true
+                                                },
+                                                onSendParcelClick = {
+                                                    selectedRideCategory = "Parcel"
+                                                    selectedTopCategory = "couriers"
+                                                    cardInitialEditPickup = false
+                                                    showPickupDestinationCard = true
+                                                },
+                                                onRequestCarClick = {
+                                                    selectedRideCategory = "Book a Car"
+                                                    selectedTopCategory = "ride_ac"
+                                                    cardInitialEditPickup = false
+                                                    showPickupDestinationCard = true
+                                                },
+                                                modifier = Modifier.padding(vertical = 2.dp)
+                                            )
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.height(8.dp))
-
-                                    Column(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .verticalScroll(rememberScrollState())
-                                            .padding(horizontal = 16.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        // "Where To?" Search Entry Card
-                                        Surface(
-                                            onClick = {
-                                                cardInitialEditPickup = false
-                                                showPickupDestinationCard = true
-                                            },
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = Color(0xFF232730),
-                                            border = BorderStroke(1.dp, Color(0xFF333846)),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Search,
-                                                    contentDescription = "Search",
-                                                    tint = DrigoBrandPurple,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = "Where To?",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = Color.White,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            }
+                                    // ===== BOTTOM ACTION AREA =====
+                                    if (activeRoute != null) {
+                                        if (activeRideRequestId == null) {
+                                            // inDrive Fixed Bottom Bar (Attachment 3)
+                                            InDriveFixedBottomBar(
+                                                currentFare = effectiveCustomFare,
+                                                autoAcceptOffer = autoAcceptOffer,
+                                                onAutoAcceptChange = { autoAcceptOffer = it },
+                                                onFindDriversClick = {
+                                                    showBookingDialog = true
+                                                },
+                                                onPaymentMethodClick = {
+                                                    scope.launch {
+                                                        snackbarHostState.showSnackbar("Payment method: Cash")
+                                                    }
+                                                },
+                                                onOptionsClick = {
+                                                    scope.launch {
+                                                        snackbarHostState.showSnackbar("Ride preferences: AC, Music, Luggage enabled")
+                                                    }
+                                                }
+                                            )
                                         }
-
-                                        // 3-Card Bento Layout in Initial Discovery View
-                                        RideCategoryBentoCards(
-                                            selectedCategory = selectedRideCategory,
-                                            onShareRideClick = {
-                                                selectedRideCategory = "Share Ride"
-                                                cardInitialEditPickup = false
-                                                showPickupDestinationCard = true
-                                            },
-                                            onSendParcelClick = {
-                                                selectedRideCategory = "Parcel"
-                                                selectedTopCategory = "couriers"
-                                                cardInitialEditPickup = false
-                                                showPickupDestinationCard = true
-                                            },
-                                            onRequestCarClick = {
-                                                selectedRideCategory = "Book a Car"
-                                                selectedTopCategory = "ride_ac"
-                                                cardInitialEditPickup = false
-                                                showPickupDestinationCard = true
-                                            },
-                                            modifier = Modifier.padding(vertical = 2.dp)
-                                        )
-                                    }
-                                }
-
-                                // ===== BOTTOM ACTION AREA =====
-                                if (activeRoute != null) {
-                                    if (activeRideRequestId == null) {
-                                        // inDrive Fixed Bottom Bar (Attachment 3)
-                                        InDriveFixedBottomBar(
-                                            currentFare = effectiveCustomFare,
-                                            autoAcceptOffer = autoAcceptOffer,
-                                            onAutoAcceptChange = { autoAcceptOffer = it },
-                                            onFindDriversClick = {
-                                                showBookingDialog = true
-                                            },
-                                            onPaymentMethodClick = {
-                                                scope.launch {
-                                                    snackbarHostState.showSnackbar("Payment method: Cash")
-                                                }
-                                            },
-                                            onOptionsClick = {
-                                                scope.launch {
-                                                    snackbarHostState.showSnackbar("Ride preferences: AC, Music, Luggage enabled")
-                                                }
-                                            }
-                                        )
-                                    }
-                                } else {
-                                    // Initial Discovery "Select Destination" Button
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 8.dp)
-                                    ) {
-                                        Button(
-                                            onClick = {
-                                                cardInitialEditPickup = false
-                                                showPickupDestinationCard = true
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
-                                            shape = RoundedCornerShape(14.dp),
+                                    } else {
+                                        // Initial Discovery "Select Destination" Button
+                                        Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(48.dp)
-                                                .testTag("find_drivers_btn")
+                                                .padding(top = 8.dp)
                                         ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.Center,
-                                                verticalAlignment = Alignment.CenterVertically
+                                            Button(
+                                                onClick = {
+                                                    cardInitialEditPickup = false
+                                                    showPickupDestinationCard = true
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(48.dp)
+                                                    .testTag("find_drivers_btn")
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Search,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = "Select Destination",
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 14.sp,
-                                                    color = Color.White
-                                                )
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Search,
+                                                        contentDescription = null,
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = "Select Destination",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp,
+                                                        color = Color.White
+                                                    )
+                                                }
                                             }
                                         }
                                     }
