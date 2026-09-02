@@ -466,35 +466,40 @@ fun PostRideRatingDialog(
                     if (isSubmitting) return@Button
                     isSubmitting = true
                     scope.launch {
-                        val ratingEntity = RideRatingEntity(
-                            id = UUID.randomUUID().toString(),
-                            rideId = rideId,
-                            raterId = currentUserId,
-                            raterRole = if (isDriver) "DRIVER" else "PASSENGER",
-                            raterName = currentUserName,
-                            targetId = targetId,
-                            targetName = targetName,
-                            stars = ratingStars,
-                            reviewText = reviewComment.trim(),
-                            tags = selectedTags.joinToString(","),
-                            tipAmount = tipAmountPkr.toDouble(),
-                            isBlocked = isBlockSelected,
-                            timestamp = System.currentTimeMillis()
-                        )
+                        try {
+                            val ratingEntity = RideRatingEntity(
+                                id = UUID.randomUUID().toString(),
+                                rideId = rideId,
+                                raterId = currentUserId,
+                                raterRole = if (isDriver) "DRIVER" else "PASSENGER",
+                                raterName = currentUserName,
+                                targetId = targetId,
+                                targetName = targetName,
+                                stars = ratingStars,
+                                reviewText = reviewComment.trim(),
+                                tags = selectedTags.joinToString(","),
+                                tipAmount = tipAmountPkr.toDouble(),
+                                isBlocked = isBlockSelected,
+                                timestamp = System.currentTimeMillis()
+                            )
 
-                        val res = repo.submitRideRating(ratingEntity)
-                        if (res.isSuccess) {
-                            Toast.makeText(
-                                context,
-                                if (isBlockSelected) "Rating submitted. User blocked." else "Thank you! Rating & review submitted.",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            onRatingSubmitted(ratingEntity)
-                            onDismiss()
-                        } else {
-                            Toast.makeText(context, "Error saving rating. Please try again.", Toast.LENGTH_SHORT).show()
+                            val res = repo.submitRideRating(ratingEntity)
+                            if (res.isSuccess) {
+                                Toast.makeText(
+                                    context,
+                                    if (isBlockSelected) "Rating submitted. User blocked." else "Thank you! Rating & review submitted.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                onRatingSubmitted(ratingEntity)
+                                onDismiss()
+                            } else {
+                                Toast.makeText(context, "Error saving rating. Please try again.", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Error saving rating: ${e.message}", Toast.LENGTH_SHORT).show()
+                        } finally {
+                            isSubmitting = false
                         }
-                        isSubmitting = false
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = InDriveLimeGreen),
@@ -564,6 +569,7 @@ fun SafetyReportDialog(
     var reportDescription by remember { mutableStateOf("") }
     var blockUserCheck by remember { mutableStateOf(true) }
     var isSubmitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val categories = remember(isReporterDriver) {
         if (isReporterDriver) {
@@ -590,7 +596,9 @@ fun SafetyReportDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (!isSubmitting) onDismiss()
+        },
         containerColor = Color(0xFF1E2028),
         titleContentColor = Color.White,
         textContentColor = Color.White,
@@ -650,7 +658,7 @@ fun SafetyReportDialog(
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text(
-                            text = "Reporting User: $reportedUserName",
+                            text = "Reporting User: ${reportedUserName.ifBlank { if (isReporterDriver) "Passenger" else "Driver Captain" }}",
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             fontSize = 12.sp
@@ -676,7 +684,12 @@ fun SafetyReportDialog(
                 categories.forEach { cat ->
                     val isSelected = selectedCategory == cat
                     Surface(
-                        onClick = { selectedCategory = cat },
+                        onClick = {
+                            if (!isSubmitting) {
+                                selectedCategory = cat
+                                errorMessage = null
+                            }
+                        },
                         shape = RoundedCornerShape(10.dp),
                         color = if (isSelected) Color(0xFFEF5350).copy(alpha = 0.15f) else Color(0xFF161822),
                         border = BorderStroke(
@@ -691,7 +704,12 @@ fun SafetyReportDialog(
                         ) {
                             RadioButton(
                                 selected = isSelected,
-                                onClick = { selectedCategory = cat },
+                                onClick = {
+                                    if (!isSubmitting) {
+                                        selectedCategory = cat
+                                        errorMessage = null
+                                    }
+                                },
                                 colors = RadioButtonDefaults.colors(
                                     selectedColor = Color(0xFFEF5350),
                                     unselectedColor = Color(0xFF6B7280)
@@ -718,7 +736,11 @@ fun SafetyReportDialog(
 
                 OutlinedTextField(
                     value = reportDescription,
-                    onValueChange = { reportDescription = it },
+                    onValueChange = {
+                        reportDescription = it
+                        errorMessage = null
+                    },
+                    enabled = !isSubmitting,
                     placeholder = {
                         Text(
                             text = "Provide details about the incident for the security audit...",
@@ -744,13 +766,14 @@ fun SafetyReportDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { blockUserCheck = !blockUserCheck }
+                        .clickable(enabled = !isSubmitting) { blockUserCheck = !blockUserCheck }
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Checkbox(
                         checked = blockUserCheck,
-                        onCheckedChange = { blockUserCheck = it },
+                        onCheckedChange = { if (!isSubmitting) blockUserCheck = it },
+                        enabled = !isSubmitting,
                         colors = CheckboxDefaults.colors(
                             checkedColor = Color(0xFFEF5350),
                             uncheckedColor = Color(0xFF7A8194)
@@ -764,52 +787,102 @@ fun SafetyReportDialog(
                         fontWeight = if (blockUserCheck) FontWeight.Bold else FontWeight.Normal
                     )
                 }
+
+                // Error Message Display
+                if (errorMessage != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFEF5350).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFFEF5350)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = "Error",
+                                tint = Color(0xFFEF5350),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = errorMessage!!,
+                                color = Color(0xFFFFCDD2),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (reportDescription.isBlank()) {
+                    val trimmedDesc = reportDescription.trim()
+                    if (trimmedDesc.isBlank()) {
+                        errorMessage = "Please write a brief description of the issue."
                         Toast.makeText(context, "Please write a brief description of the issue.", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    if (trimmedDesc.length < 3) {
+                        errorMessage = "Description must be at least 3 characters long."
+                        Toast.makeText(context, "Description must be at least 3 characters long.", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
                     if (isSubmitting) return@Button
                     isSubmitting = true
+                    errorMessage = null
 
                     scope.launch {
-                        val reportEntity = SafetyReportEntity(
-                            id = UUID.randomUUID().toString(),
-                            rideId = rideId,
-                            reporterId = reporterId,
-                            reporterRole = if (isReporterDriver) "DRIVER" else "PASSENGER",
-                            reporterName = reporterName,
-                            reporterPhone = reporterPhone,
-                            reportedUserId = reportedUserId,
-                            reportedUserName = reportedUserName,
-                            reportedUserRole = if (isReporterDriver) "PASSENGER" else "DRIVER",
-                            category = selectedCategory,
-                            description = reportDescription.trim(),
-                            blockUser = blockUserCheck,
-                            ridePickupTitle = pickupTitle,
-                            rideDestinationTitle = destinationTitle,
-                            driverPlateNumber = driverPlateNumber,
-                            status = "PENDING_ADMIN_REVIEW",
-                            timestamp = System.currentTimeMillis()
-                        )
+                        try {
+                            val safeRideId = rideId.ifBlank { "trip_${System.currentTimeMillis()}" }
+                            val safeReporterId = reporterId.ifBlank { "reporter_${System.currentTimeMillis()}" }
+                            val safeReportedUserId = reportedUserId.ifBlank { "reported_user_$safeRideId" }
 
-                        val res = repo.submitSafetyReport(reportEntity)
-                        if (res.isSuccess) {
-                            Toast.makeText(
-                                context,
-                                "Incident report securely logged (#${reportEntity.id.take(6)}). Admin team is reviewing.",
-                                Toast.LENGTH_LONG
-                            ).show()
-                            onReportSubmitted()
-                            onDismiss()
-                        } else {
-                            Toast.makeText(context, "Failed to submit report. Please check connection.", Toast.LENGTH_SHORT).show()
+                            val reportEntity = SafetyReportEntity(
+                                id = UUID.randomUUID().toString(),
+                                rideId = safeRideId,
+                                reporterId = safeReporterId,
+                                reporterRole = if (isReporterDriver) "DRIVER" else "PASSENGER",
+                                reporterName = reporterName.ifBlank { if (isReporterDriver) "Driver Captain" else "Passenger" },
+                                reporterPhone = reporterPhone,
+                                reportedUserId = safeReportedUserId,
+                                reportedUserName = reportedUserName.ifBlank { if (isReporterDriver) "Passenger" else "Driver Captain" },
+                                reportedUserRole = if (isReporterDriver) "PASSENGER" else "DRIVER",
+                                category = selectedCategory,
+                                description = trimmedDesc,
+                                blockUser = blockUserCheck,
+                                ridePickupTitle = pickupTitle,
+                                rideDestinationTitle = destinationTitle,
+                                driverPlateNumber = driverPlateNumber,
+                                status = "PENDING_ADMIN_REVIEW",
+                                timestamp = System.currentTimeMillis()
+                            )
+
+                            val res = repo.submitSafetyReport(reportEntity)
+                            if (res.isSuccess) {
+                                Toast.makeText(
+                                    context,
+                                    "Incident report submitted successfully. Our 24/7 Safety team is reviewing (#${reportEntity.id.take(6)}).",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                onReportSubmitted()
+                                onDismiss()
+                            } else {
+                                val err = res.exceptionOrNull()?.localizedMessage ?: "Failed to submit report. Please check your connection."
+                                errorMessage = err
+                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            val err = e.localizedMessage ?: "Failed to submit report. Please check your connection."
+                            errorMessage = err
+                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                        } finally {
+                            isSubmitting = false
                         }
-                        isSubmitting = false
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF5350)),
@@ -821,11 +894,23 @@ fun SafetyReportDialog(
                     .testTag("submit_safety_report_btn")
             ) {
                 if (isSubmitting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Submitting Report...",
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 12.sp
+                        )
+                    }
                 } else {
                     Text(
                         text = "Submit Official Report",
@@ -839,11 +924,12 @@ fun SafetyReportDialog(
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
+                enabled = !isSubmitting,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "Cancel",
-                    color = Color(0xFFA0A6B5),
+                    color = if (isSubmitting) Color(0xFF555B6E) else Color(0xFFA0A6B5),
                     fontSize = 12.sp
                 )
             }

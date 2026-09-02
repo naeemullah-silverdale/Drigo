@@ -2783,7 +2783,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             val dbLocal = AppDatabase.getDatabase(context, kotlinx.coroutines.CoroutineScope(Dispatchers.IO))
             dbLocal.safetyDao().insertRating(rating)
 
-            if (rating.isBlocked) {
+            if (rating.isBlocked && rating.targetId.isNotBlank()) {
                 dbLocal.safetyDao().insertBlockedUser(
                     BlockedUserEntity(
                         blockerUserId = rating.raterId,
@@ -2792,6 +2792,27 @@ class FirebaseRepository private constructor(private val context: Context) {
                         reason = "Blocked during post-ride rating"
                     )
                 )
+
+                // Sync block to Realtime Database
+                try {
+                    val rtdb = try {
+                        FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    } catch (_: Exception) {
+                        FirebaseDatabase.getInstance()
+                    }
+                    val blockMap = mapOf(
+                        "blockerUserId" to rating.raterId,
+                        "blockedUserId" to rating.targetId,
+                        "blockedUserName" to rating.targetName,
+                        "reason" to "Blocked during post-ride rating",
+                        "timestamp" to System.currentTimeMillis()
+                    )
+                    kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                        rtdb.getReference("blocked_users").child(rating.raterId).child(rating.targetId).setValue(blockMap).await()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "RTDB block sync: ${e.message}")
+                }
             }
 
             // 2. Save to Firebase Realtime Database
@@ -2801,7 +2822,9 @@ class FirebaseRepository private constructor(private val context: Context) {
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
-                rtdb.getReference("ride_ratings").child(ratingId).setValue(map).await()
+                kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                    rtdb.getReference("ride_ratings").child(ratingId).setValue(map).await()
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "RTDB rating save: ${e.message}")
             }
@@ -2809,7 +2832,9 @@ class FirebaseRepository private constructor(private val context: Context) {
             // 3. Save to Cloud Firestore
             if (isAvailable() && firestore != null) {
                 try {
-                    firestore!!.collection("ride_ratings").document(ratingId).set(map).await()
+                    kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                        firestore!!.collection("ride_ratings").document(ratingId).set(map).await()
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Firestore rating save: ${e.message}")
                 }
@@ -2832,8 +2857,10 @@ class FirebaseRepository private constructor(private val context: Context) {
             if (hasLocal) return true
 
             if (isAvailable() && firestore != null) {
-                val doc = firestore!!.collection("ride_ratings").document("${rideId}_$raterRole").get().await()
-                if (doc.exists()) return true
+                val doc = kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    firestore!!.collection("ride_ratings").document("${rideId}_$raterRole").get().await()
+                }
+                if (doc != null && doc.exists()) return true
             }
         } catch (_: Exception) {}
         return false
@@ -2842,10 +2869,11 @@ class FirebaseRepository private constructor(private val context: Context) {
     /**
      * Submit safety incident/misconduct report for Admin review
      */
-    suspend fun submitSafetyReport(report: SafetyReportEntity): Result<Boolean> {
-        return try {
+    suspend fun submitSafetyReport(report: SafetyReportEntity): Result<Boolean> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        return@withContext try {
+            val safeId = report.id.ifBlank { UUID.randomUUID().toString() }
             val map = mapOf(
-                "id" to report.id,
+                "id" to safeId,
                 "rideId" to report.rideId,
                 "reporterId" to report.reporterId,
                 "reporterRole" to report.reporterRole,
@@ -2865,10 +2893,11 @@ class FirebaseRepository private constructor(private val context: Context) {
                 "timestamp" to report.timestamp
             )
 
-            // 1. Save in Room DB
+            // 1. Save in Room DB for instant offline persistence
             val dbLocal = AppDatabase.getDatabase(context, kotlinx.coroutines.CoroutineScope(Dispatchers.IO))
-            dbLocal.safetyDao().insertReport(report)
+            dbLocal.safetyDao().insertReport(report.copy(id = safeId))
 
+            // 2. If Block User requested, persist restriction locally and to cloud
             if (report.blockUser && report.reportedUserId.isNotBlank()) {
                 dbLocal.safetyDao().insertBlockedUser(
                     BlockedUserEntity(
@@ -2878,24 +2907,49 @@ class FirebaseRepository private constructor(private val context: Context) {
                         reason = "Blocked via Safety Report: ${report.category.label}"
                     )
                 )
+
+                // Sync block to RTDB
+                try {
+                    val rtdb = try {
+                        FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    } catch (_: Exception) {
+                        FirebaseDatabase.getInstance()
+                    }
+                    val blockMap = mapOf(
+                        "blockerUserId" to report.reporterId,
+                        "blockedUserId" to report.reportedUserId,
+                        "blockedUserName" to report.reportedUserName,
+                        "reason" to "Blocked via Safety Report: ${report.category.label}",
+                        "timestamp" to System.currentTimeMillis()
+                    )
+                    kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                        rtdb.getReference("blocked_users").child(report.reporterId).child(report.reportedUserId).setValue(blockMap).await()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "RTDB safety block sync: ${e.message}")
+                }
             }
 
-            // 2. Realtime Database
+            // 3. Realtime Database (with non-hanging timeout)
             try {
                 val rtdb = try {
                     FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
-                rtdb.getReference("safety_reports_admin").child(report.id).setValue(map).await()
+                kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                    rtdb.getReference("safety_reports_admin").child(safeId).setValue(map).await()
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "RTDB report: ${e.message}")
             }
 
-            // 3. Firestore (Secure Admin Collection)
+            // 4. Firestore (Secure Admin Collection with timeout)
             if (isAvailable() && firestore != null) {
                 try {
-                    firestore!!.collection("safety_reports_admin").document(report.id).set(map).await()
+                    kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                        firestore!!.collection("safety_reports_admin").document(safeId).set(map).await()
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Firestore report: ${e.message}")
                 }
