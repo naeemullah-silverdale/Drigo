@@ -383,6 +383,9 @@ class MainViewModel(
             passengerId = passengerId,
             passengerName = passengerName,
             passengerEmail = passengerEmail,
+            passengerPhotoUrl = "",
+            passengerRating = 4.9,
+            paymentMethod = "Cash",
             pickupTitle = pickupTitle,
             pickupSubtitle = pickupSubtitle,
             pickupLat = pickupLat,
@@ -392,11 +395,20 @@ class MainViewModel(
             destinationLat = destinationLat,
             destinationLon = destinationLon,
             rideCategory = rideCategory,
+            vehicleType = when {
+                rideCategory.contains("Bike", true) || rideCategory.contains("Moto", true) -> "Bike"
+                rideCategory.contains("Mini", true) -> "Mini Car"
+                rideCategory.contains("Courier", true) || rideCategory.contains("Parcel", true) -> "Courier"
+                else -> "Car"
+            },
+            hasAc = rideCategory.contains("AC", true) || rideCategory.contains("A/C", true),
             estimatedFare = fare,
             distanceKm = distanceKm,
             durationMinutes = durationMinutes,
             status = "SEARCHING_DRIVERS",
-            timestamp = System.currentTimeMillis()
+            assignedDriverId = "",
+            timestamp = System.currentTimeMillis(),
+            expiresAt = System.currentTimeMillis() + (15 * 60 * 1000L)
         )
 
         val firebaseRepo = FirebaseRepository.getInstance(context)

@@ -593,6 +593,9 @@ fun HomeScreen(
                 passengerId = passengerId,
                 passengerName = passengerName,
                 passengerEmail = passengerEmail,
+                passengerPhotoUrl = user?.photoUrl?.toString() ?: "",
+                passengerRating = 4.9,
+                paymentMethod = if (selectedPaymentMethod.equals("WALLET", true)) "Wallet" else "Cash",
                 pickupTitle = selectedPickupLocation.title,
                 pickupSubtitle = selectedPickupLocation.subtitle,
                 pickupLat = selectedPickupLocation.latitude,
@@ -602,11 +605,20 @@ fun HomeScreen(
                 destinationLat = dest.latitude,
                 destinationLon = dest.longitude,
                 rideCategory = cat,
+                vehicleType = when {
+                    cat.contains("Bike", true) || cat.contains("Moto", true) -> "Bike"
+                    cat.contains("Mini", true) -> "Mini Car"
+                    cat.contains("Courier", true) || cat.contains("Parcel", true) -> "Courier"
+                    else -> "Car"
+                },
+                hasAc = cat.contains("AC", true) || cat.contains("A/C", true),
                 estimatedFare = finalFare,
                 distanceKm = dist,
                 durationMinutes = duration,
                 status = "SEARCHING_DRIVERS",
-                timestamp = System.currentTimeMillis()
+                assignedDriverId = "",
+                timestamp = System.currentTimeMillis(),
+                expiresAt = System.currentTimeMillis() + (15 * 60 * 1000L)
             )
 
             val repo = FirebaseRepository.getInstance(context)
@@ -2183,6 +2195,7 @@ fun HomeScreen(
                     chatDestinationTitle = dest
                     showChatSheet = true
                 },
+                initialUserLocation = userLocationData,
                 modifier = modifier
             )
         }

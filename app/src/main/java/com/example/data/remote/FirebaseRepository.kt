@@ -523,6 +523,9 @@ class FirebaseRepository private constructor(private val context: Context) {
                 "passengerId" to request.passengerId,
                 "passengerName" to request.passengerName,
                 "passengerEmail" to request.passengerEmail,
+                "passengerPhotoUrl" to request.passengerPhotoUrl,
+                "passengerRating" to request.passengerRating,
+                "paymentMethod" to request.paymentMethod,
                 "pickupTitle" to request.pickupTitle,
                 "pickupSubtitle" to request.pickupSubtitle,
                 "pickupLat" to request.pickupLat,
@@ -532,11 +535,15 @@ class FirebaseRepository private constructor(private val context: Context) {
                 "destinationLat" to request.destinationLat,
                 "destinationLon" to request.destinationLon,
                 "rideCategory" to request.rideCategory,
+                "vehicleType" to request.vehicleType,
+                "hasAc" to request.hasAc,
                 "estimatedFare" to request.estimatedFare,
                 "distanceKm" to request.distanceKm,
                 "durationMinutes" to request.durationMinutes,
                 "status" to request.status,
-                "timestamp" to request.timestamp
+                "assignedDriverId" to request.assignedDriverId,
+                "timestamp" to request.timestamp,
+                "expiresAt" to request.expiresAt
             )
 
             // 1. Write to Firebase Realtime Database
@@ -573,51 +580,203 @@ class FirebaseRepository private constructor(private val context: Context) {
     }
 
     fun listenToRideRequests(): Flow<List<RideRequest>> = callbackFlow {
-        if (!isAvailable()) {
-            trySend(emptyList())
-            close()
-            return@callbackFlow
+        val rtdbRequestsMap = mutableMapOf<String, RideRequest>()
+        val firestoreRequestsMap = mutableMapOf<String, RideRequest>()
+
+        fun emitCombinedRequests() {
+            val now = System.currentTimeMillis()
+            val combined = (firestoreRequestsMap + rtdbRequestsMap).values
+                .filter { req ->
+                    val isActive = (req.status == "SEARCHING_DRIVERS" || req.status == "SEARCHING") &&
+                            req.status != "CANCELLED" && req.status != "COMPLETED" && req.status != "REJECTED" && req.status != "ACCEPTED"
+                    val notExpired = (req.expiresAt == 0L || req.expiresAt > now) && (now - req.timestamp < 30 * 60 * 1000L)
+                    val notAssigned = req.assignedDriverId.isBlank()
+                    isActive && notExpired && notAssigned
+                }
+                .sortedByDescending { it.timestamp }
+            trySend(combined)
         }
 
-        val registration = firestore!!.collection(RIDE_REQUESTS_COLLECTION)
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .limit(20)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.w(TAG, "Listen to ride requests error: ${error.message}")
-                    return@addSnapshotListener
-                }
+        // 1. Firebase Realtime Database Listener
+        val db = try {
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+        } catch (_: Exception) {
+            try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+        }
 
-                if (snapshot != null) {
-                    val requests = snapshot.documents.mapNotNull { doc ->
+        val rtdbListener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                rtdbRequestsMap.clear()
+                if (snapshot.exists()) {
+                    for (child in snapshot.children) {
                         try {
-                            RideRequest(
-                                id = doc.getString("id") ?: doc.id,
-                                passengerId = doc.getString("passengerId") ?: "",
-                                passengerName = doc.getString("passengerName") ?: "Passenger",
-                                passengerEmail = doc.getString("passengerEmail") ?: "",
-                                pickupTitle = doc.getString("pickupTitle") ?: "",
-                                pickupSubtitle = doc.getString("pickupSubtitle") ?: "",
-                                pickupLat = doc.getDouble("pickupLat") ?: 0.0,
-                                pickupLon = doc.getDouble("pickupLon") ?: 0.0,
-                                destinationTitle = doc.getString("destinationTitle") ?: "",
-                                destinationSubtitle = doc.getString("destinationSubtitle") ?: "",
-                                destinationLat = doc.getDouble("destinationLat") ?: 0.0,
-                                destinationLon = doc.getDouble("destinationLon") ?: 0.0,
-                                rideCategory = doc.getString("rideCategory") ?: "Share Ride",
-                                estimatedFare = (doc.getLong("estimatedFare") ?: 0).toInt(),
-                                distanceKm = doc.getDouble("distanceKm") ?: 0.0,
-                                durationMinutes = (doc.getLong("durationMinutes") ?: 0).toInt(),
-                                status = doc.getString("status") ?: "SEARCHING_DRIVERS",
-                                timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                            val id = child.child("id").getValue(String::class.java) ?: child.key ?: continue
+                            val status = child.child("status").getValue(String::class.java) ?: "SEARCHING_DRIVERS"
+                            val assignedDriverId = child.child("assignedDriverId").getValue(String::class.java) ?: ""
+                            val timestamp = child.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
+                            val expiresAt = child.child("expiresAt").getValue(Long::class.java) ?: 0L
+
+                            val req = RideRequest(
+                                id = id,
+                                passengerId = child.child("passengerId").getValue(String::class.java) ?: "",
+                                passengerName = child.child("passengerName").getValue(String::class.java) ?: "Passenger",
+                                passengerEmail = child.child("passengerEmail").getValue(String::class.java) ?: "",
+                                passengerPhotoUrl = child.child("passengerPhotoUrl").getValue(String::class.java) ?: "",
+                                passengerRating = child.child("passengerRating").getValue(Double::class.java) ?: 4.9,
+                                paymentMethod = child.child("paymentMethod").getValue(String::class.java) ?: "Cash",
+                                pickupTitle = child.child("pickupTitle").getValue(String::class.java) ?: "",
+                                pickupSubtitle = child.child("pickupSubtitle").getValue(String::class.java) ?: "",
+                                pickupLat = child.child("pickupLat").getValue(Double::class.java) ?: 0.0,
+                                pickupLon = child.child("pickupLon").getValue(Double::class.java) ?: 0.0,
+                                destinationTitle = child.child("destinationTitle").getValue(String::class.java) ?: "",
+                                destinationSubtitle = child.child("destinationSubtitle").getValue(String::class.java) ?: "",
+                                destinationLat = child.child("destinationLat").getValue(Double::class.java) ?: 0.0,
+                                destinationLon = child.child("destinationLon").getValue(Double::class.java) ?: 0.0,
+                                rideCategory = child.child("rideCategory").getValue(String::class.java) ?: "Share Ride",
+                                vehicleType = child.child("vehicleType").getValue(String::class.java) ?: "Car",
+                                hasAc = child.child("hasAc").getValue(Boolean::class.java) ?: false,
+                                estimatedFare = (child.child("estimatedFare").getValue(Long::class.java) ?: 0).toInt(),
+                                distanceKm = child.child("distanceKm").getValue(Double::class.java) ?: 0.0,
+                                durationMinutes = (child.child("durationMinutes").getValue(Long::class.java) ?: 0).toInt(),
+                                status = status,
+                                assignedDriverId = assignedDriverId,
+                                timestamp = timestamp,
+                                expiresAt = expiresAt
                             )
-                        } catch (e: Exception) { null }
-                    }.filter { it.status != "CANCELLED" && it.status != "COMPLETED" && it.status != "REJECTED" }
-                    trySend(requests)
+                            rtdbRequestsMap[id] = req
+                        } catch (_: Exception) {}
+                    }
                 }
+                emitCombinedRequests()
             }
 
-        awaitClose { registration.remove() }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Log.w(TAG, "RTDB listenToRideRequests error: ${error.message}")
+            }
+        }
+
+        val rtdbRef = db?.getReference("ride_requests")
+        rtdbRef?.addValueEventListener(rtdbListener)
+
+        // 2. Cloud Firestore Listener (if available)
+        var firestoreReg: com.google.firebase.firestore.ListenerRegistration? = null
+        if (isAvailable() && firestore != null) {
+            try {
+                firestoreReg = firestore!!.collection(RIDE_REQUESTS_COLLECTION)
+                    .orderBy("timestamp", Query.Direction.DESCENDING)
+                    .limit(30)
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            Log.w(TAG, "Firestore listen to ride requests error: ${error.message}")
+                            return@addSnapshotListener
+                        }
+
+                        if (snapshot != null) {
+                            firestoreRequestsMap.clear()
+                            for (doc in snapshot.documents) {
+                                try {
+                                    val id = doc.getString("id") ?: doc.id
+                                    val req = RideRequest(
+                                        id = id,
+                                        passengerId = doc.getString("passengerId") ?: "",
+                                        passengerName = doc.getString("passengerName") ?: "Passenger",
+                                        passengerEmail = doc.getString("passengerEmail") ?: "",
+                                        passengerPhotoUrl = doc.getString("passengerPhotoUrl") ?: "",
+                                        passengerRating = doc.getDouble("passengerRating") ?: 4.9,
+                                        paymentMethod = doc.getString("paymentMethod") ?: "Cash",
+                                        pickupTitle = doc.getString("pickupTitle") ?: "",
+                                        pickupSubtitle = doc.getString("pickupSubtitle") ?: "",
+                                        pickupLat = doc.getDouble("pickupLat") ?: 0.0,
+                                        pickupLon = doc.getDouble("pickupLon") ?: 0.0,
+                                        destinationTitle = doc.getString("destinationTitle") ?: "",
+                                        destinationSubtitle = doc.getString("destinationSubtitle") ?: "",
+                                        destinationLat = doc.getDouble("destinationLat") ?: 0.0,
+                                        destinationLon = doc.getDouble("destinationLon") ?: 0.0,
+                                        rideCategory = doc.getString("rideCategory") ?: "Share Ride",
+                                        vehicleType = doc.getString("vehicleType") ?: "Car",
+                                        hasAc = doc.getBoolean("hasAc") ?: false,
+                                        estimatedFare = (doc.getLong("estimatedFare") ?: 0).toInt(),
+                                        distanceKm = doc.getDouble("distanceKm") ?: 0.0,
+                                        durationMinutes = (doc.getLong("durationMinutes") ?: 0).toInt(),
+                                        status = doc.getString("status") ?: "SEARCHING_DRIVERS",
+                                        assignedDriverId = doc.getString("assignedDriverId") ?: "",
+                                        timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
+                                        expiresAt = doc.getLong("expiresAt") ?: 0L
+                                    )
+                                    firestoreRequestsMap[id] = req
+                                } catch (_: Exception) {}
+                            }
+                            emitCombinedRequests()
+                        }
+                    }
+            } catch (_: Exception) {}
+        }
+
+        awaitClose {
+            rtdbRef?.removeEventListener(rtdbListener)
+            firestoreReg?.remove()
+        }
+    }
+
+    suspend fun acceptRideRequest(
+        requestId: String,
+        driverOffer: DriverOffer,
+        order: PassengerOrder
+    ): Result<Boolean> {
+        return try {
+            val db = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+            }
+
+            if (db != null) {
+                val reqRef = db.getReference("ride_requests").child(requestId)
+                val snapshot = reqRef.get().await()
+                val currentStatus = snapshot.child("status").getValue(String::class.java)
+                val assignedDriver = snapshot.child("assignedDriverId").getValue(String::class.java)
+
+                // Check if already won by another driver
+                if (currentStatus == "ACCEPTED" && !assignedDriver.isNullOrBlank() && assignedDriver != driverOffer.driverId) {
+                    return Result.success(false)
+                }
+
+                // Atomically update request to ACCEPTED
+                val updates = mapOf(
+                    "status" to "ACCEPTED",
+                    "assignedDriverId" to driverOffer.driverId,
+                    "assignedDriverName" to driverOffer.driverName,
+                    "assignedFare" to driverOffer.offeredFare,
+                    "acceptedAt" to System.currentTimeMillis()
+                )
+                reqRef.updateChildren(updates).await()
+            }
+
+            // Sync to Firestore
+            if (isAvailable() && firestore != null) {
+                try {
+                    firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(requestId).update(
+                        mapOf(
+                            "status" to "ACCEPTED",
+                            "assignedDriverId" to driverOffer.driverId,
+                            "assignedDriverName" to driverOffer.driverName,
+                            "assignedFare" to driverOffer.offeredFare
+                        )
+                    ).await()
+                } catch (_: Exception) {}
+            }
+
+            // Send driver offer details to passenger
+            sendDriverOffer(driverOffer)
+
+            // Save the synchronized passenger order
+            savePassengerOrder(order)
+
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error accepting ride request: ${e.message}", e)
+            Result.failure(e)
+        }
     }
 
     suspend fun updateRideRequestStatus(requestId: String, status: String) {
@@ -1720,6 +1879,118 @@ class FirebaseRepository private constructor(private val context: Context) {
             Result.success(rideTxn)
         } catch (e: Exception) {
             Log.e(TAG, "Error deducting ride payment: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Credits driver earnings to wallet balance atomically.
+     */
+    suspend fun creditDriverEarnings(
+        userId: String,
+        tripId: String,
+        amount: Double,
+        description: String = "Ride Earnings"
+    ): Result<WalletEntity> {
+        return try {
+            val safeUserId = userId.ifBlank { "guest_user" }
+            val dbScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            val roomDb = com.example.data.local.AppDatabase.getDatabase(context, dbScope)
+
+            val currentWallet = if (isAvailable()) {
+                val walDoc = firestore!!.collection(WALLETS_COLLECTION).document(safeUserId).get().await()
+                if (walDoc.exists()) {
+                    WalletEntity(
+                        userId = walDoc.getString("userId") ?: safeUserId,
+                        walletId = walDoc.getString("walletId") ?: "wal_$safeUserId",
+                        balance = walDoc.getDouble("balance") ?: 1250.0,
+                        currency = walDoc.getString("currency") ?: "PKR",
+                        userRole = walDoc.getString("userRole") ?: "DRIVER"
+                    )
+                } else {
+                    roomDb.walletDao().getWalletSync(safeUserId) ?: WalletEntity(
+                        userId = safeUserId,
+                        walletId = "wal_$safeUserId",
+                        balance = 1250.0,
+                        currency = "PKR",
+                        userRole = "DRIVER"
+                    )
+                }
+            } else {
+                roomDb.walletDao().getWalletSync(safeUserId) ?: WalletEntity(
+                    userId = safeUserId,
+                    walletId = "wal_$safeUserId",
+                    balance = 1250.0,
+                    currency = "PKR",
+                    userRole = "DRIVER"
+                )
+            }
+
+            val balanceBefore = currentWallet.balance
+            val balanceAfter = balanceBefore + amount
+            val now = System.currentTimeMillis()
+            val txnId = "txn_${UUID.randomUUID().toString().take(12)}"
+
+            val updatedWallet = currentWallet.copy(
+                balance = balanceAfter,
+                updatedAt = now
+            )
+
+            val earningsTxn = WalletTransactionEntity(
+                transactionId = txnId,
+                userId = safeUserId,
+                walletId = currentWallet.walletId,
+                type = TransactionType.RIDE_PAYMENT,
+                amount = amount,
+                balanceBefore = balanceBefore,
+                balanceAfter = balanceAfter,
+                status = TransactionStatus.SUCCESS,
+                paymentMethod = "CASH_COLLECTED",
+                referenceId = tripId,
+                notes = description,
+                createdAt = now
+            )
+
+            if (isAvailable()) {
+                val walletMap = mapOf(
+                    "userId" to updatedWallet.userId,
+                    "walletId" to updatedWallet.walletId,
+                    "balance" to updatedWallet.balance,
+                    "currency" to updatedWallet.currency,
+                    "userRole" to updatedWallet.userRole,
+                    "createdAt" to updatedWallet.createdAt,
+                    "updatedAt" to updatedWallet.updatedAt
+                )
+                firestore!!.collection(WALLETS_COLLECTION).document(safeUserId).set(walletMap).await()
+
+                try {
+                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                        .getReference("wallets").child(safeUserId).setValue(walletMap)
+                } catch (_: Exception) {}
+
+                val txnMap = mapOf(
+                    "transactionId" to earningsTxn.transactionId,
+                    "userId" to earningsTxn.userId,
+                    "walletId" to earningsTxn.walletId,
+                    "type" to earningsTxn.type.name,
+                    "amount" to earningsTxn.amount,
+                    "balanceBefore" to earningsTxn.balanceBefore,
+                    "balanceAfter" to earningsTxn.balanceAfter,
+                    "status" to earningsTxn.status.name,
+                    "paymentMethod" to earningsTxn.paymentMethod,
+                    "referenceId" to earningsTxn.referenceId,
+                    "notes" to earningsTxn.notes,
+                    "createdAt" to earningsTxn.createdAt
+                )
+                firestore!!.collection(WALLET_TRANSACTIONS_COLLECTION).document(txnId).set(txnMap).await()
+            }
+
+            roomDb.walletDao().insertOrUpdateWallet(updatedWallet)
+            roomDb.walletDao().insertTransaction(earningsTxn)
+
+            Result.success(updatedWallet)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error crediting driver earnings: ${e.message}", e)
             Result.failure(e)
         }
     }

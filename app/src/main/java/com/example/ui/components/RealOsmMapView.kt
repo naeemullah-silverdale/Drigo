@@ -111,6 +111,7 @@ fun RealOsmMapView(
     onNearbyDriverMarkerClick: ((NearbyDriverMarkerData) -> Unit)? = null,
     recenterTrigger: Int = 0,
     showCenterPickupPin: Boolean = false,
+    showMapLayerSwitcher: Boolean = true,
     mapSelectionMode: MapSelectionMode = MapSelectionMode.NONE,
     onMapTapped: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     onCancelMapSelection: () -> Unit = {},
@@ -219,9 +220,10 @@ fun RealOsmMapView(
     LaunchedEffect(recenterTrigger) {
         if (recenterTrigger > 0 && routeResult == null) {
             mapViewRef?.let { map ->
-                val targetPoint = GeoPoint(activeLat, activeLng)
+                val targetPoint = driverCarLocation ?: GeoPoint(activeLat, activeLng)
                 map.controller.animateTo(targetPoint, 18.0, 500L)
                 locationMarker?.position = targetPoint
+                driverCarMarker?.position = targetPoint
                 map.invalidate()
             }
         }
@@ -287,6 +289,10 @@ fun RealOsmMapView(
     LaunchedEffect(driverCarLocation, driverCarBearing) {
         mapViewRef?.let { map ->
             if (driverCarLocation != null) {
+                // Ensure generic location dot does not overlap driver car marker
+                locationMarker?.let { map.overlays.remove(it) }
+                locationMarker = null
+
                 val carDrawable = cachedDriverCarMarkerDrawable ?: createDriverCarMarkerDrawable(context).also {
                     cachedDriverCarMarkerDrawable = it
                 }
@@ -673,101 +679,103 @@ fun RealOsmMapView(
         }
 
         // Map Layer Switcher Floating Button (Top Right)
-        Surface(
-            onClick = { showLayerMenu = !showLayerMenu },
-            shape = CircleShape,
-            color = Color(0xFF1E2024).copy(alpha = 0.92f),
-            shadowElevation = 6.dp,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 56.dp, end = 16.dp)
-                .size(44.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Default.Layers,
-                    contentDescription = "Map Style & Street View",
-                    tint = if (showLayerMenu) DrigoBrandPurple else Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
-
-        // Map Layer Selection Dialog / Card
-        AnimatedVisibility(
-            visible = showLayerMenu,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { -20 }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { -20 }),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 106.dp, end = 16.dp)
-        ) {
+        if (showMapLayerSwitcher) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF1E2024).copy(alpha = 0.96f),
-                shadowElevation = 10.dp,
-                modifier = Modifier.width(200.dp)
+                onClick = { showLayerMenu = !showLayerMenu },
+                shape = CircleShape,
+                color = Color(0xFF1E2024).copy(alpha = 0.92f),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 56.dp, end = 16.dp)
+                    .size(44.dp)
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Map Style",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        IconButton(
-                            onClick = { showLayerMenu = false },
-                            modifier = Modifier.size(24.dp)
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "Map Style & Street View",
+                        tint = if (showLayerMenu) DrigoBrandPurple else Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            // Map Layer Selection Dialog / Card
+            AnimatedVisibility(
+                visible = showLayerMenu,
+                enter = fadeIn() + slideInVertically(initialOffsetY = { -20 }),
+                exit = fadeOut() + slideOutVertically(targetOffsetY = { -20 }),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 106.dp, end = 16.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF1E2024).copy(alpha = 0.96f),
+                    shadowElevation = 10.dp,
+                    modifier = Modifier.width(200.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color.White.copy(alpha = 0.7f),
-                                modifier = Modifier.size(16.dp)
+                            Text(
+                                text = "Map Style",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
                             )
+                            IconButton(
+                                onClick = { showLayerMenu = false },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        MapLayerOptionItem(
+                            title = "Street View",
+                            subtitle = "High clarity roads & labels",
+                            isSelected = selectedLayer == MapTileLayer.STREET,
+                            onClick = {
+                                selectedLayer = MapTileLayer.STREET
+                                showLayerMenu = false
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        MapLayerOptionItem(
+                            title = "Topography",
+                            subtitle = "Contours, POIs & terrain",
+                            isSelected = selectedLayer == MapTileLayer.DETAILED_TOPO,
+                            onClick = {
+                                selectedLayer = MapTileLayer.DETAILED_TOPO
+                                showLayerMenu = false
+                            }
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        MapLayerOptionItem(
+                            title = "Satellite View",
+                            subtitle = "Aerial imagery",
+                            isSelected = selectedLayer == MapTileLayer.SATELLITE,
+                            onClick = {
+                                selectedLayer = MapTileLayer.SATELLITE
+                                showLayerMenu = false
+                            }
+                        )
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    MapLayerOptionItem(
-                        title = "Street View",
-                        subtitle = "High clarity roads & labels",
-                        isSelected = selectedLayer == MapTileLayer.STREET,
-                        onClick = {
-                            selectedLayer = MapTileLayer.STREET
-                            showLayerMenu = false
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    MapLayerOptionItem(
-                        title = "Topography",
-                        subtitle = "Contours, POIs & terrain",
-                        isSelected = selectedLayer == MapTileLayer.DETAILED_TOPO,
-                        onClick = {
-                            selectedLayer = MapTileLayer.DETAILED_TOPO
-                            showLayerMenu = false
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    MapLayerOptionItem(
-                        title = "Satellite View",
-                        subtitle = "Aerial imagery",
-                        isSelected = selectedLayer == MapTileLayer.SATELLITE,
-                        onClick = {
-                            selectedLayer = MapTileLayer.SATELLITE
-                            showLayerMenu = false
-                        }
-                    )
                 }
             }
         }

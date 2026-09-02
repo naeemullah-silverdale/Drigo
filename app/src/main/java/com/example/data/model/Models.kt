@@ -180,6 +180,9 @@ data class RideRequest(
     val passengerId: String = "",
     val passengerName: String = "",
     val passengerEmail: String = "",
+    val passengerPhotoUrl: String = "",
+    val passengerRating: Double = 4.9,
+    val paymentMethod: String = "Cash",
     val pickupTitle: String = "",
     val pickupSubtitle: String = "",
     val pickupLat: Double = 0.0,
@@ -189,11 +192,15 @@ data class RideRequest(
     val destinationLat: Double = 0.0,
     val destinationLon: Double = 0.0,
     val rideCategory: String = "Share Ride",
+    val vehicleType: String = "Car",
+    val hasAc: Boolean = false,
     val estimatedFare: Int = 0,
     val distanceKm: Double = 0.0,
     val durationMinutes: Int = 0,
     val status: String = "SEARCHING_DRIVERS",
-    val timestamp: Long = System.currentTimeMillis()
+    val assignedDriverId: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    val expiresAt: Long = 0L
 )
 
 enum class TransactionType {

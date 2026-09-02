@@ -25,7 +25,9 @@ data class UserLocationData(
     val longitude: Double,
     val addressLine: String,
     val areaName: String,
-    val city: String
+    val city: String,
+    val bearing: Float = 0f,
+    val speedKmh: Float = 0f
 )
 
 class LocationHelper(private val context: Context) {
@@ -51,7 +53,9 @@ class LocationHelper(private val context: Context) {
                     longitude = location.longitude,
                     addressLine = geocodeResult.first,
                     areaName = geocodeResult.second,
-                    city = geocodeResult.third
+                    city = geocodeResult.third,
+                    bearing = if (location.hasBearing()) location.bearing else 0f,
+                    speedKmh = if (location.hasSpeed()) (location.speed * 3.6f) else 0f
                 )
             } else {
                 null
@@ -63,9 +67,9 @@ class LocationHelper(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun getLocationUpdatesFlow(): Flow<UserLocationData> = callbackFlow {
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 4000L)
-            .setMinUpdateIntervalMillis(2000L)
-            .setMinUpdateDistanceMeters(3f)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
+            .setMinUpdateIntervalMillis(1500L)
+            .setMinUpdateDistanceMeters(2f)
             .build()
 
         val callback = object : LocationCallback() {
@@ -78,7 +82,9 @@ class LocationHelper(private val context: Context) {
                         longitude = loc.longitude,
                         addressLine = geocodeResult.first,
                         areaName = geocodeResult.second,
-                        city = geocodeResult.third
+                        city = geocodeResult.third,
+                        bearing = if (loc.hasBearing()) loc.bearing else 0f,
+                        speedKmh = if (loc.hasSpeed()) (loc.speed * 3.6f) else 0f
                     )
                 )
             }
