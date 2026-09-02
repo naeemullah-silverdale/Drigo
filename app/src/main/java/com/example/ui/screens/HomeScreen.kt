@@ -169,6 +169,12 @@ fun HomeScreen(
     }
     var passengerMapDriverLoc by remember { mutableStateOf<LiveDriverLocation?>(null) }
 
+    val repo = remember { FirebaseRepository.getInstance(context) }
+    val userRecord by repo.listenToUserRecord(user?.uid ?: "").collectAsState(initial = null)
+    val passengerAccStatus = remember(userRecord) {
+        com.example.data.model.parsePassengerAccountStatus(userRecord?.accountStatus, null)
+    }
+
     LaunchedEffect(activePassengerOrder?.requestId, activePassengerOrder?.id) {
         val reqId = activePassengerOrder?.requestId?.ifBlank { activePassengerOrder?.id }
         if (reqId != null) {
@@ -1044,6 +1050,66 @@ fun HomeScreen(
                                     isMapInteracting = isInteracting
                                 }
                             )
+
+                // Passenger Account Restricted / Suspended Overlay
+                if (passengerAccStatus == com.example.data.model.PassengerAccountStatus.SUSPENDED ||
+                    passengerAccStatus == com.example.data.model.PassengerAccountStatus.DEACTIVATED) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.85f))
+                            .padding(24.dp),
+                        color = Color(0xFF1E1E24),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.5.dp, Color(0xFFE53935))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Block,
+                                contentDescription = "Account Restricted",
+                                tint = Color(0xFFE53935),
+                                modifier = Modifier.size(64.dp)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Account Restricted / Suspended",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Your passenger account has been restricted by compliance. You cannot request rides or process payments at this time. Please contact support.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(alpha = 0.8f),
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+                                        data = android.net.Uri.parse("mailto:support@drigo.com?subject=Passenger%20Account%20Appeal%20UID%20${user?.uid}")
+                                    }
+                                    try { context.startActivity(intent) } catch (_: Exception) {}
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Email, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Contact Support", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
 
                 // Top Persistent inDrive Route Panel (Attachment 1)
                 if (activeRoute != null) {

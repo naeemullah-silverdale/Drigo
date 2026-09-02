@@ -341,6 +341,103 @@ enum class VerificationStatus(val label: String) {
     REJECTED("REJECTED")
 }
 
+enum class DriverVerificationStatus {
+    PENDING,
+    APPROVED,
+    REJECTED
+}
+
+enum class DriverAccountStatus {
+    PENDING_REVIEW,
+    ACTIVE,
+    ONLINE,
+    ON_TRIP,
+    SUSPENDED,
+    FLAGGED
+}
+
+enum class PassengerAccountStatus {
+    ACTIVE,
+    ON_TRIP,
+    SUSPENDED,
+    FLAGGED,
+    INACTIVE,
+    DEACTIVATED
+}
+
+data class UserRecord(
+    val uid: String = "",
+    val name: String = "",
+    val email: String = "",
+    val phone: String = "",
+    val role: String = "PASSENGER", // "DRIVER" or "PASSENGER"
+    val accountStatus: String = "ACTIVE", // Role-specific enum string
+    val verificationStatus: String = "PENDING", // For Drivers: PENDING, APPROVED, REJECTED
+    val isOnline: Boolean = false,
+    val mode: String = "PASSENGER",
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+fun parseDriverVerificationStatus(
+    rawVerStatus: String?,
+    rawStatus: String?,
+    isConfirmation: Boolean
+): DriverVerificationStatus {
+    val ver = rawVerStatus?.uppercase()?.trim() ?: ""
+    val st = rawStatus?.uppercase()?.trim() ?: ""
+    
+    if (ver == "APPROVED" || ver == "VERIFIED" || st == "APPROVED" || st == "VERIFIED" || isConfirmation) {
+        return DriverVerificationStatus.APPROVED
+    }
+    if (ver == "REJECTED" || st == "REJECTED") {
+        return DriverVerificationStatus.REJECTED
+    }
+    return DriverVerificationStatus.PENDING
+}
+
+fun parseDriverAccountStatus(
+    rawAccountStatus: String?,
+    rawStatus: String?,
+    verificationStatus: DriverVerificationStatus,
+    isOnline: Boolean
+): DriverAccountStatus {
+    val acc = rawAccountStatus?.uppercase()?.trim() ?: ""
+    val st = rawStatus?.uppercase()?.trim() ?: ""
+    
+    if (acc == "SUSPENDED" || st == "SUSPENDED") return DriverAccountStatus.SUSPENDED
+    if (acc == "FLAGGED" || st == "FLAGGED") return DriverAccountStatus.FLAGGED
+    if (acc == "ON_TRIP" || st == "ON_TRIP" || st == "IN_TRIP") return DriverAccountStatus.ON_TRIP
+    if (acc == "ONLINE" || st == "ONLINE" || (isOnline && verificationStatus == DriverVerificationStatus.APPROVED)) return DriverAccountStatus.ONLINE
+    if (acc == "ACTIVE" || st == "ACTIVE" || st == "APPROVED") {
+        return if (verificationStatus == DriverVerificationStatus.APPROVED) {
+            if (isOnline) DriverAccountStatus.ONLINE else DriverAccountStatus.ACTIVE
+        } else {
+            DriverAccountStatus.PENDING_REVIEW
+        }
+    }
+    if (acc == "PENDING_REVIEW" || st == "PENDING_VERIFICATION" || st == "PENDING" || st == "UNDER_REVIEW") {
+        return DriverAccountStatus.PENDING_REVIEW
+    }
+    
+    return if (verificationStatus == DriverVerificationStatus.APPROVED) DriverAccountStatus.ACTIVE else DriverAccountStatus.PENDING_REVIEW
+}
+
+fun parsePassengerAccountStatus(
+    rawAccountStatus: String?,
+    rawStatus: String?
+): PassengerAccountStatus {
+    val acc = rawAccountStatus?.uppercase()?.trim() ?: ""
+    val st = rawStatus?.uppercase()?.trim() ?: ""
+    
+    if (acc == "SUSPENDED" || st == "SUSPENDED") return PassengerAccountStatus.SUSPENDED
+    if (acc == "DEACTIVATED" || st == "DEACTIVATED") return PassengerAccountStatus.DEACTIVATED
+    if (acc == "FLAGGED" || st == "FLAGGED") return PassengerAccountStatus.FLAGGED
+    if (acc == "ON_TRIP" || st == "ON_TRIP" || st == "IN_TRIP") return PassengerAccountStatus.ON_TRIP
+    if (acc == "INACTIVE" || st == "INACTIVE") return PassengerAccountStatus.INACTIVE
+    
+    return PassengerAccountStatus.ACTIVE
+}
+
 data class GoogleDriveFileRecord(
     val fileId: String = "",
     val fileName: String = "",

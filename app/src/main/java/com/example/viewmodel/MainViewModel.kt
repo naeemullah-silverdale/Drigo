@@ -53,9 +53,13 @@ class MainViewModel(
     private val _isDriverOnline = MutableStateFlow(false)
     val isDriverOnline = _isDriverOnline.asStateFlow()
 
-    // Driver verification state (including 'confirmtion' boolean)
+    // Driver verification state
     private val _driverVerification = MutableStateFlow<com.example.data.model.DriverVerification?>(null)
     val driverVerification = _driverVerification.asStateFlow()
+
+    // Unified User Record flow from users/{uid}
+    private val _userRecord = MutableStateFlow<com.example.data.model.UserRecord?>(null)
+    val userRecord = _userRecord.asStateFlow()
 
     // Google Drive REST API Cloud Storage state
     val googleDriveManager = com.example.data.remote.GoogleDriveStorageManager()
@@ -88,9 +92,11 @@ class MainViewModel(
                 if (user != null) {
                     fetchUserModeFromDb(user.uid)
                     fetchDriverVerificationFromDb(user.uid)
+                    fetchUserRecordFromDb(user.uid)
                 } else {
                     _userMode.value = UserMode.PASSENGER
                     _driverVerification.value = null
+                    _userRecord.value = null
                 }
             }
         }
@@ -101,21 +107,63 @@ class MainViewModel(
     }
 
     private var driverVerificationJob: kotlinx.coroutines.Job? = null
+    private var userRecordJob: kotlinx.coroutines.Job? = null
+
+    private fun fetchUserRecordFromDb(uid: String) {
+        userRecordJob?.cancel()
+        userRecordJob = viewModelScope.launch {
+            FirebaseRepository.getInstance().listenToUserRecord(uid).collect { record ->
+                _userRecord.value = record
+                if (record != null) {
+                    val driverVer = _driverVerification.value
+                    val parsedVerStatus = com.example.data.model.parseDriverVerificationStatus(
+                        record.verificationStatus,
+                        driverVer?.status,
+                        driverVer?.confirmtion ?: false
+                    )
+                    val parsedDriverAccStatus = com.example.data.model.parseDriverAccountStatus(
+                        record.accountStatus,
+                        driverVer?.status,
+                        parsedVerStatus,
+                        record.isOnline
+                    )
+
+                    // Realtime Enforcement: Kick driver offline if suspended
+                    if (parsedDriverAccStatus == com.example.data.model.DriverAccountStatus.SUSPENDED ||
+                        parsedDriverAccStatus == com.example.data.model.DriverAccountStatus.FLAGGED) {
+                        if (_isDriverOnline.value) {
+                            _isDriverOnline.value = false
+                            viewModelScope.launch {
+                                FirebaseRepository.getInstance().updateDriverOperationalStatus(uid, "SUSPENDED", false)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     private fun fetchDriverVerificationFromDb(uid: String) {
         driverVerificationJob?.cancel()
         driverVerificationJob = viewModelScope.launch {
             FirebaseRepository.getInstance().listenToDriverVerification(uid).collect { ver ->
                 _driverVerification.value = ver
-                if (ver != null) {
-                    val accStatus = ver.accountStatus
-                    val verStatus = ver.verificationStatus
-                    val status = ver.status
-                    val isApproved = verStatus == "APPROVED" || verStatus == "VERIFIED" || status == "APPROVED" || status == "VERIFIED" || accStatus == "ACTIVE" || accStatus == "ONLINE" || accStatus == "ON_TRIP"
-                    if (!isApproved) {
-                        _isDriverOnline.value = false
-                    }
-                } else {
+                val userRec = _userRecord.value
+                val verStatus = com.example.data.model.parseDriverVerificationStatus(
+                    userRec?.verificationStatus ?: ver?.verificationStatus,
+                    ver?.status,
+                    ver?.confirmtion ?: false
+                )
+                val accStatus = com.example.data.model.parseDriverAccountStatus(
+                    userRec?.accountStatus ?: ver?.accountStatus,
+                    ver?.status,
+                    verStatus,
+                    _isDriverOnline.value
+                )
+
+                if (verStatus != com.example.data.model.DriverVerificationStatus.APPROVED ||
+                    accStatus == com.example.data.model.DriverAccountStatus.SUSPENDED ||
+                    accStatus == com.example.data.model.DriverAccountStatus.FLAGGED) {
                     _isDriverOnline.value = false
                 }
             }
@@ -154,19 +202,27 @@ class MainViewModel(
     fun attemptSwitchUserMode(targetMode: UserMode) {
         if (targetMode == UserMode.DRIVER) {
             val ver = _driverVerification.value
-            val isApproved = ver != null && (
-                ver.verificationStatus == "APPROVED" ||
-                ver.verificationStatus == "VERIFIED" ||
-                ver.status == "APPROVED" ||
-                ver.status == "VERIFIED" ||
-                ver.accountStatus == "ACTIVE" ||
-                ver.accountStatus == "ONLINE" ||
-                ver.accountStatus == "ON_TRIP" ||
-                ver.isVerified ||
-                ver.confirmtion
+            val userRec = _userRecord.value
+            val verStatus = com.example.data.model.parseDriverVerificationStatus(
+                userRec?.verificationStatus ?: ver?.verificationStatus,
+                ver?.status,
+                ver?.confirmtion ?: false
             )
-            if (ver == null || !isApproved) {
-                // Not registered or pending review/approval -> navigate to Driver Registration flow
+            val accStatus = com.example.data.model.parseDriverAccountStatus(
+                userRec?.accountStatus ?: ver?.accountStatus,
+                ver?.status,
+                verStatus,
+                _isDriverOnline.value
+            )
+
+            if (accStatus == com.example.data.model.DriverAccountStatus.SUSPENDED) {
+                // Switch mode to DRIVER so DriverModeView displays the Account Suspended UI overlay
+                setUserMode(UserMode.DRIVER)
+                return
+            }
+
+            if (verStatus != com.example.data.model.DriverVerificationStatus.APPROVED) {
+                // Not approved yet -> navigate to Driver Registration / KYC Status Tracker screen
                 _currentScreen.value = AppScreen.DRIVER_REGISTRATION
             } else {
                 // Confirmed & Approved! Switch to DRIVER mode
@@ -192,12 +248,25 @@ class MainViewModel(
 
     fun toggleDriverOnline() {
         val ver = _driverVerification.value
-        val isApprovedAndActive = ver != null && (
-            ver.accountStatus == "ACTIVE" || ver.accountStatus == "ONLINE" || ver.accountStatus == "ON_TRIP" ||
-            (ver.verificationStatus == "APPROVED" && ver.accountStatus != "SUSPENDED")
+        val userRec = _userRecord.value
+        val verStatus = com.example.data.model.parseDriverVerificationStatus(
+            userRec?.verificationStatus ?: ver?.verificationStatus,
+            ver?.status,
+            ver?.confirmtion ?: false
         )
-        
-        if (!isApprovedAndActive) {
+        val accStatus = com.example.data.model.parseDriverAccountStatus(
+            userRec?.accountStatus ?: ver?.accountStatus,
+            ver?.status,
+            verStatus,
+            _isDriverOnline.value
+        )
+
+        // Rule B.3: Driver can ONLY go Online if verificationStatus == APPROVED and accountStatus != SUSPENDED / FLAGGED
+        val canGoOnline = (verStatus == com.example.data.model.DriverVerificationStatus.APPROVED) &&
+                (accStatus != com.example.data.model.DriverAccountStatus.SUSPENDED) &&
+                (accStatus != com.example.data.model.DriverAccountStatus.FLAGGED)
+
+        if (!canGoOnline) {
             _isDriverOnline.value = false
             return
         }

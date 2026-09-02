@@ -1992,6 +1992,172 @@ class FirebaseRepository private constructor(private val context: Context) {
     }
 
     /**
+     * Real-time stream of the unified user record at users/{userId}.
+     */
+    fun listenToUserRecord(userId: String): Flow<UserRecord?> = callbackFlow {
+        if (userId.isBlank()) {
+            trySend(null)
+            close()
+            return@callbackFlow
+        }
+
+        val db = try {
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+        } catch (_: Exception) {
+            try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+        }
+
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                if (!snapshot.exists()) {
+                    trySend(null)
+                    return
+                }
+                val role = snapshot.child("role").getValue(String::class.java) ?: snapshot.child("mode").getValue(String::class.java) ?: "PASSENGER"
+                val name = snapshot.child("name").getValue(String::class.java) ?: snapshot.child("fullName").getValue(String::class.java) ?: ""
+                val email = snapshot.child("email").getValue(String::class.java) ?: ""
+                val phone = snapshot.child("phone").getValue(String::class.java) ?: ""
+                val rawAccountStatus = snapshot.child("accountStatus").getValue(String::class.java) ?: snapshot.child("status").getValue(String::class.java) ?: "ACTIVE"
+                val rawVerStatus = snapshot.child("verificationStatus").getValue(String::class.java) ?: snapshot.child("driverVerificationStatus").getValue(String::class.java) ?: "PENDING"
+                val isOnline = snapshot.child("isOnline").getValue(Boolean::class.java) ?: false
+                val mode = snapshot.child("mode").getValue(String::class.java) ?: role
+
+                val userRec = UserRecord(
+                    uid = userId,
+                    name = name,
+                    email = email,
+                    phone = phone,
+                    role = role,
+                    accountStatus = rawAccountStatus,
+                    verificationStatus = rawVerStatus,
+                    isOnline = isOnline,
+                    mode = mode,
+                    updatedAt = System.currentTimeMillis()
+                )
+                trySend(userRec)
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Log.w(TAG, "listenToUserRecord RTDB cancelled: ${error.message}")
+            }
+        }
+
+        val queryRef = db?.getReference("users")?.child(userId)
+        queryRef?.addValueEventListener(listener)
+
+        awaitClose {
+            queryRef?.removeEventListener(listener)
+        }
+    }
+
+    /**
+     * Updates passenger account status (ACTIVE, ON_TRIP, SUSPENDED, FLAGGED, INACTIVE, DEACTIVATED).
+     */
+    suspend fun updatePassengerAccountStatus(userId: String, accountStatus: String): Result<Unit> {
+        return try {
+            val safeUid = userId.ifBlank { return Result.failure(IllegalArgumentException("Invalid UID")) }
+            val updates = mapOf<String, Any>(
+                "accountStatus" to accountStatus,
+                "updatedAt" to System.currentTimeMillis()
+            )
+
+            if (isAvailable() && firestore != null) {
+                try {
+                    firestore!!.collection("users").document(safeUid).update(updates).await()
+                    firestore!!.collection("riders").document(safeUid).update(updates).await()
+                } catch (_: Exception) {}
+            }
+
+            try {
+                val db = try {
+                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                } catch (_: Exception) {
+                    FirebaseDatabase.getInstance()
+                }
+                db.getReference("users").child(safeUid).updateChildren(updates).await()
+                db.getReference("riders").child(safeUid).updateChildren(updates).await()
+            } catch (_: Exception) {}
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Suspends a driver account without clearing or deleting verificationStatus or KYC documents.
+     */
+    suspend fun suspendDriverAccount(uid: String, reason: String = "Account Suspended by Admin"): Result<Unit> {
+        return try {
+            val safeUid = uid.ifBlank { return Result.failure(IllegalArgumentException("Invalid UID")) }
+            val updates = mapOf<String, Any>(
+                "accountStatus" to "SUSPENDED",
+                "isOnline" to false,
+                "rejectionReason" to reason
+            )
+
+            if (isAvailable() && firestore != null) {
+                try {
+                    firestore!!.collection("driver_verifications").document(safeUid).update(updates).await()
+                    firestore!!.collection("drivers").document(safeUid).update(updates).await()
+                } catch (_: Exception) {}
+            }
+
+            try {
+                val db = try {
+                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                } catch (_: Exception) {
+                    FirebaseDatabase.getInstance()
+                }
+                db.getReference("driver_verifications").child(safeUid).updateChildren(updates).await()
+                db.getReference("users").child(safeUid).child("driverVerification").updateChildren(updates).await()
+                db.getReference("users").child(safeUid).updateChildren(updates).await()
+                db.getReference("drivers").child(safeUid).updateChildren(updates).await()
+            } catch (_: Exception) {}
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Reactivates a suspended driver account ONLY IF verificationStatus == APPROVED.
+     */
+    suspend fun reactivateDriverAccount(uid: String): Result<Unit> {
+        return try {
+            val safeUid = uid.ifBlank { return Result.failure(IllegalArgumentException("Invalid UID")) }
+            val updates = mapOf<String, Any>(
+                "accountStatus" to "ACTIVE",
+                "isOnline" to false
+            )
+
+            if (isAvailable() && firestore != null) {
+                try {
+                    firestore!!.collection("driver_verifications").document(safeUid).update(updates).await()
+                    firestore!!.collection("drivers").document(safeUid).update(updates).await()
+                } catch (_: Exception) {}
+            }
+
+            try {
+                val db = try {
+                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                } catch (_: Exception) {
+                    FirebaseDatabase.getInstance()
+                }
+                db.getReference("driver_verifications").child(safeUid).updateChildren(updates).await()
+                db.getReference("users").child(safeUid).child("driverVerification").updateChildren(updates).await()
+                db.getReference("users").child(safeUid).updateChildren(updates).await()
+                db.getReference("drivers").child(safeUid).updateChildren(updates).await()
+            } catch (_: Exception) {}
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Real-time stream of all driver verifications for Admin Verification Screen.
      */
     fun listenToAllDriverVerifications(): Flow<List<DriverVerification>> = callbackFlow {

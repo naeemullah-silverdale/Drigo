@@ -854,17 +854,95 @@ fun DriverModeView(
             }
         }
 
+        // Account Status Checks
+        val parsedVerStatus = remember(driverVerification) {
+            parseDriverVerificationStatus(
+                driverVerification?.verificationStatus,
+                driverVerification?.status,
+                driverVerification?.confirmtion ?: false
+            )
+        }
+        val parsedAccStatus = remember(driverVerification, isDriverOnline) {
+            parseDriverAccountStatus(
+                driverVerification?.accountStatus,
+                driverVerification?.status,
+                parsedVerStatus,
+                isDriverOnline
+            )
+        }
+
+        // Dedicated Account Suspended / Flagged Overlay
+        if (parsedAccStatus == DriverAccountStatus.SUSPENDED || parsedAccStatus == DriverAccountStatus.FLAGGED) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.9f))
+                    .padding(24.dp),
+                color = Color(0xFF1E1E24),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.5.dp, Color(0xFFE53935))
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Block,
+                        contentDescription = "Account Suspended",
+                        tint = Color(0xFFE53935),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = if (parsedAccStatus == DriverAccountStatus.SUSPENDED) "Account Suspended" else "Account Flagged",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = driverVerification?.rejectionReason?.ifBlank {
+                            "Your driver account has been suspended by support compliance. Please contact support for account review."
+                        } ?: "Your driver account has been suspended by support compliance. Please contact support for account review.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                data = Uri.parse("mailto:support@drigo.com?subject=Account%20Suspension%20Appeal%20UID%20${user?.uid}")
+                            }
+                            try { context.startActivity(intent) } catch (_: Exception) {}
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE53935)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Email, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Contact Support", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onSwitchToPassenger,
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Switch to Passenger Mode", color = Color.White)
+                    }
+                }
+            }
+        }
+
         // Verified Driver Success Banner
         var showVerifiedBanner by remember { mutableStateOf(true) }
-        val isVerifiedOrApproved = driverVerification != null && (
-            driverVerification.verificationStatus == "APPROVED" ||
-            driverVerification.verificationStatus == "VERIFIED" ||
-            driverVerification.status == "APPROVED" ||
-            driverVerification.status == "VERIFIED" ||
-            driverVerification.accountStatus == "ACTIVE" ||
-            driverVerification.accountStatus == "ONLINE" ||
-            driverVerification.isVerified
-        )
+        val isVerifiedOrApproved = parsedVerStatus == DriverVerificationStatus.APPROVED
 
         if (isVerifiedOrApproved && showVerifiedBanner && activeDriverTrip == null) {
             Surface(
