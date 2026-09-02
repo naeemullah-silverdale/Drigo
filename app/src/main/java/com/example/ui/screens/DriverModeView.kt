@@ -2473,127 +2473,327 @@ fun DriverRideRequestCard(
     onCounterOffer: (Int) -> Unit
 ) {
     var expandedBidding by remember { mutableStateOf(false) }
+    var customBidText by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+
+    val categoryIcon = when (request.rideCategory.lowercase()) {
+        "bike" -> Icons.Default.TwoWheeler
+        "mini" -> Icons.Default.DirectionsCar
+        "ride a/c" -> Icons.Default.AcUnit
+        "courier" -> Icons.Default.LocalShipping
+        "city to city" -> Icons.Default.AltRoute
+        else -> Icons.Default.LocalTaxi
+    }
 
     Surface(
         onClick = onSelect,
-        shape = RoundedCornerShape(16.dp),
-        color = if (isSelected) Color(0xFF2A2D3A) else Color(0xFF222530),
-        border = BorderStroke(1.5.dp, if (isSelected) DrigoBrandPurple else Color(0xFF333748)),
+        shape = RoundedCornerShape(20.dp),
+        color = if (isSelected) Color(0xFF242735) else Color(0xFF1B1D26),
+        border = BorderStroke(
+            if (isSelected) 2.dp else 1.dp,
+            if (isSelected) DrigoBrandPurple else Color(0xFF2E3345)
+        ),
+        shadowElevation = if (isSelected) 8.dp else 2.dp,
         modifier = Modifier
             .fillMaxWidth()
             .testTag("driver_ride_card_${request.id}")
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            // Header: Category, Distance away, and Proposed Fare
+            // Header Row: Passenger Profile & Rating + Offered Fare Container
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Passenger Avatar & Rating
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = DrigoBrandPurple.copy(alpha = 0.3f),
-                        border = BorderStroke(1.dp, DrigoBrandPurple)
+                        shape = CircleShape,
+                        color = DrigoBrandPurple.copy(alpha = 0.25f),
+                        border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.5f)),
+                        modifier = Modifier.size(36.dp)
                     ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = request.passengerName.take(1).uppercase().ifBlank { "P" },
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = request.passengerName.ifBlank { "Passenger" },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF2B2510),
+                                modifier = Modifier.padding(top = 2.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFFC107),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text(
+                                        text = "4.9",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFFFC107)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "• Cash",
+                                fontSize = 11.sp,
+                                color = Color(0xFF90A4AE)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Proposed Fare Container
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF0D331B),
+                    border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        Text(
+                            text = "OFFERED FARE",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00E676).copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = "PKR ${request.estimatedFare}",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF00E676)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Sub-Bar: Category Pill + Trip Distance & Duration
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DrigoBrandPurple.copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = categoryIcon,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = request.rideCategory,
                             color = Color.White,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km",
-                        fontSize = 11.sp,
-                        color = Color(0xFF00E676),
-                        fontWeight = FontWeight.Medium
-                    )
                 }
 
-                Text(
-                    text = "PKR ${request.estimatedFare}",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF00E676)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Passenger Info
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    shape = CircleShape,
-                    color = Color(0xFF37474F),
-                    modifier = Modifier.size(24.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(imageVector = Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF262B38)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NearMe,
+                                contentDescription = null,
+                                tint = Color(0xFF29B6F6),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFE0E0E0)
+                            )
+                        }
+                    }
+
+                    if (request.durationMinutes > 0) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF262B38)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFB74D),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "${request.durationMinutes} min",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFE0E0E0)
+                                )
+                            }
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = request.passengerName.ifBlank { "Passenger" },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "★ 4.9",
-                    fontSize = 11.sp,
-                    color = Color(0xFFFFB300)
-                )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Route Details
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = CircleShape, color = Color(0xFF00C853), modifier = Modifier.size(8.dp)) {}
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = request.pickupTitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            // Connected Timeline Route Box
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF14161E),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp)
+                ) {
+                    // Left Timeline Graphics
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(top = 4.dp, end = 10.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF00E676),
+                            modifier = Modifier.size(10.dp)
+                        ) {}
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(22.dp)
+                                .background(Color(0xFF37474F))
+                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFFFF5252),
+                            modifier = Modifier.size(10.dp)
+                        ) {}
+                    }
+
+                    // Right Titles & Subtitles
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = request.pickupTitle.ifBlank { "Pickup Location" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (request.pickupSubtitle.isNotBlank()) {
+                            Text(
+                                text = request.pickupSubtitle,
+                                fontSize = 10.sp,
+                                color = Color(0xFF90A4AE),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = request.destinationTitle.ifBlank { "Destination Location" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.9f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (request.destinationSubtitle.isNotBlank()) {
+                            Text(
+                                text = request.destinationSubtitle,
+                                fontSize = 10.sp,
+                                color = Color(0xFF90A4AE),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = CircleShape, color = Color(0xFFE53935), modifier = Modifier.size(8.dp)) {}
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = request.destinationTitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.75f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Action Buttons
+            // Action Buttons / Bidding State
             if (isOfferSent) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFF00C853).copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF00C853).copy(alpha = 0.15f),
                     border = BorderStroke(1.dp, Color(0xFF00C853)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.padding(12.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color(0xFF00C853), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Offer Sent • Waiting for passenger acceptance...", fontSize = 12.sp, color = Color(0xFF00C853), fontWeight = FontWeight.Bold)
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF00C853),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Offer Sent • Awaiting Passenger Acceptance",
+                            fontSize = 12.sp,
+                            color = Color(0xFF00C853),
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             } else {
@@ -2601,56 +2801,84 @@ fun DriverRideRequestCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Direct Accept Button
+                    // Primary Accept CTA
                     Button(
                         onClick = onAcceptOffer,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
                         modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
+                            .weight(1.1f)
+                            .height(48.dp)
                     ) {
-                        Text(
-                            text = "Accept PKR ${request.estimatedFare}",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 13.sp,
-                            color = Color.White
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Accept PKR ${request.estimatedFare}",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
                     // Counter Offer Button
                     OutlinedButton(
                         onClick = { expandedBidding = !expandedBidding },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         border = BorderStroke(1.dp, DrigoBrandPurple),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (expandedBidding) DrigoBrandPurple.copy(alpha = 0.2f) else Color.Transparent
+                        ),
                         modifier = Modifier
                             .weight(0.9f)
-                            .height(44.dp)
+                            .height(48.dp)
                     ) {
-                        Text(
-                            text = if (expandedBidding) "Close Bid" else "Offer More",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.TrendingUp,
+                                contentDescription = null,
+                                tint = DrigoBrandPurple,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (expandedBidding) "Close Bid" else "Raise Fare",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                 }
 
-                // Expanded Bidding Pills
-                AnimatedVisibility(visible = expandedBidding) {
-                    Column(modifier = Modifier.padding(top = 10.dp)) {
+                // Expanded Bidding Controls
+                AnimatedVisibility(
+                    visible = expandedBidding,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(modifier = Modifier.padding(top = 12.dp)) {
                         Text(
-                            text = "Select Counter-Offer:",
+                            text = "Select or Enter Counter-Offer (PKR):",
                             fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontWeight = FontWeight.Medium
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        val base = request.estimatedFare
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            val base = request.estimatedFare
                             listOf(base + 30, base + 50, base + 100).forEach { fare ->
                                 Surface(
                                     onClick = {
@@ -2658,19 +2886,87 @@ fun DriverRideRequestCard(
                                         expandedBidding = false
                                     },
                                     shape = RoundedCornerShape(10.dp),
-                                    color = DrigoBrandPurple.copy(alpha = 0.25f),
+                                    color = DrigoBrandPurple.copy(alpha = 0.3f),
                                     border = BorderStroke(1.dp, DrigoBrandPurple),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text(
-                                        text = "PKR $fare",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        textAlign = TextAlign.Center,
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
                                         modifier = Modifier.padding(vertical = 8.dp)
-                                    )
+                                    ) {
+                                        Text(
+                                            text = "+${fare - base}",
+                                            fontSize = 10.sp,
+                                            color = DrigoBrandPurple.copy(alpha = 0.9f),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "PKR $fare",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 12.sp
+                                        )
+                                    }
                                 }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Custom Bid Input
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = customBidText,
+                                onValueChange = { if (it.all { char -> char.isDigit() }) customBidText = it },
+                                placeholder = { Text("Custom Fare...", fontSize = 12.sp, color = Color.Gray) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        val fare = customBidText.toIntOrNull()
+                                        if (fare != null && fare > 0) {
+                                            onCounterOffer(fare)
+                                            expandedBidding = false
+                                            focusManager.clearFocus()
+                                        }
+                                    }
+                                ),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = DrigoBrandPurple,
+                                    unfocusedBorderColor = Color(0xFF3B4052),
+                                    focusedContainerColor = Color(0xFF14161E),
+                                    unfocusedContainerColor = Color(0xFF14161E),
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp)
+                            )
+
+                            Button(
+                                onClick = {
+                                    val fare = customBidText.toIntOrNull()
+                                    if (fare != null && fare > 0) {
+                                        onCounterOffer(fare)
+                                        expandedBidding = false
+                                        focusManager.clearFocus()
+                                    }
+                                },
+                                enabled = customBidText.isNotBlank() && (customBidText.toIntOrNull() ?: 0) > 0,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                modifier = Modifier.height(50.dp)
+                            ) {
+                                Text("Send Bid", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
                     }
