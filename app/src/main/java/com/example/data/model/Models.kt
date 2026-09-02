@@ -180,6 +180,7 @@ data class RideRequest(
     val passengerId: String = "",
     val passengerName: String = "",
     val passengerEmail: String = "",
+    val passengerPhone: String = "+92 300 9876543",
     val passengerPhotoUrl: String = "",
     val passengerRating: Double = 4.9,
     val paymentMethod: String = "Cash",
@@ -195,6 +196,7 @@ data class RideRequest(
     val vehicleType: String = "Car",
     val hasAc: Boolean = false,
     val estimatedFare: Int = 0,
+    val assignedFare: Int = 0,
     val distanceKm: Double = 0.0,
     val durationMinutes: Int = 0,
     val status: String = "SEARCHING_DRIVERS",
@@ -267,7 +269,8 @@ data class EasypaisaPaymentResult(
 enum class PassengerOrderStatus(val label: String) {
     SEARCHING("Searching Drivers"),
     OFFER_RECEIVED("Offer Received"),
-    ACCEPTED("Offer Accepted"),
+    ACCEPTED("Driver on the way"),
+    DRIVER_COMING("Driver on the way"),
     DRIVER_ARRIVED("Driver Arrived"),
     IN_TRIP("On Trip"),
     COMPLETED("Completed"),
@@ -278,7 +281,9 @@ data class PassengerOrder(
     val id: String = UUID.randomUUID().toString(),
     val requestId: String = "",
     val passengerId: String = "",
+    val passengerName: String = "",
     val passengerEmail: String = "",
+    val passengerPhone: String = "+92 300 9876543",
     val pickupTitle: String = "",
     val pickupSubtitle: String = "",
     val pickupLat: Double = 0.0,
@@ -300,12 +305,15 @@ data class PassengerOrder(
     val driverVehicleColor: String = "White",
     val driverPlateNumber: String = "LEA-4521",
     val driverPhone: String = "+92 300 1234567",
-    val status: PassengerOrderStatus = PassengerOrderStatus.ACCEPTED,
+    val assignedDriverId: String = "",
+    val status: PassengerOrderStatus = PassengerOrderStatus.DRIVER_COMING,
     val etaMinutes: Int = 4,
     val scheduledTimeText: String? = null,
     val passengerCount: Int = 1,
     val comments: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val completedAt: Long = 0L,
+    val cancelledAt: Long = 0L
 )
 
 data class DriverOffer(

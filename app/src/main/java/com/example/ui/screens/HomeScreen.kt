@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import com.example.data.AppLocation
 import com.example.data.DestinationSuggestion
 import com.example.data.LocationHelper
@@ -169,6 +170,7 @@ fun HomeScreen(
 
     // Active order tracking for passenger map (Live Car visualization)
     val activePassengerOrder = passengerOrders.firstOrNull {
+        it.status == PassengerOrderStatus.DRIVER_COMING ||
         it.status == PassengerOrderStatus.ACCEPTED ||
         it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
         it.status == PassengerOrderStatus.IN_TRIP
@@ -246,10 +248,23 @@ fun HomeScreen(
         }
     }
 
-    // Live driver approaching simulation towards pickup for active accepted captain
+    // Synchronize activeRideRequestId if activePassengerOrder is loaded
+    LaunchedEffect(activePassengerOrder?.requestId, activePassengerOrder?.id) {
+        val reqId = activePassengerOrder?.requestId?.ifBlank { activePassengerOrder?.id }
+        if (reqId != null && activeRideRequestId == null) {
+            activeRideRequestId = reqId
+        }
+    }
+
+    // Live driver approaching simulation towards pickup for active accepted captain (fallback if no real driver broadcasting)
     LaunchedEffect(activePassengerOrder?.id, activePassengerOrder?.status) {
         val order = activePassengerOrder
-        if (order != null && order.status == PassengerOrderStatus.ACCEPTED) {
+        if (order != null && (order.status == PassengerOrderStatus.ACCEPTED || order.status == PassengerOrderStatus.DRIVER_COMING)) {
+            val isRealDriver = passengerMapDriverLoc != null &&
+                    !passengerMapDriverLoc!!.driverId.startsWith("driver_") &&
+                    !passengerMapDriverLoc!!.driverId.startsWith("mock_")
+            if (isRealDriver) return@LaunchedEffect
+
             val pickupPt = GeoPoint(order.pickupLat, order.pickupLon)
             val driverStartLat = if (passengerMapDriverLoc != null) {
                 passengerMapDriverLoc!!.latitude
@@ -282,7 +297,13 @@ fun HomeScreen(
                 val totalSteps = points.size
                 for (i in 0 until totalSteps) {
                     val currentOrder = passengerOrders.firstOrNull { it.id == order.id }
-                    if (currentOrder == null || currentOrder.status != PassengerOrderStatus.ACCEPTED) break
+                    if (currentOrder == null || (currentOrder.status != PassengerOrderStatus.ACCEPTED && currentOrder.status != PassengerOrderStatus.DRIVER_COMING)) break
+
+                    // Check if a real driver started broadcasting
+                    val liveReal = passengerMapDriverLoc != null &&
+                            !passengerMapDriverLoc!!.driverId.startsWith("driver_") &&
+                            !passengerMapDriverLoc!!.driverId.startsWith("mock_")
+                    if (liveReal) break
 
                     val currentPt = points[i]
                     val nextPt = if (i < totalSteps - 1) points[i + 1] else currentPt
@@ -304,7 +325,7 @@ fun HomeScreen(
                         speedKmh = 35f,
                         etaMinutes = remainingMin,
                         distanceRemainingKm = remainingKm,
-                        status = PassengerOrderStatus.ACCEPTED.name,
+                        status = PassengerOrderStatus.DRIVER_COMING.name,
                         updatedAt = System.currentTimeMillis()
                     )
                     passengerMapDriverLoc = liveLoc
@@ -318,7 +339,7 @@ fun HomeScreen(
                 }
 
                 val currentOrder = passengerOrders.firstOrNull { it.id == order.id }
-                if (currentOrder != null && currentOrder.status == PassengerOrderStatus.ACCEPTED) {
+                if (currentOrder != null && (currentOrder.status == PassengerOrderStatus.ACCEPTED || currentOrder.status == PassengerOrderStatus.DRIVER_COMING)) {
                     val arrivedOrder = order.copy(status = PassengerOrderStatus.DRIVER_ARRIVED)
                     passengerOrders = passengerOrders.map { if (it.id == order.id) arrivedOrder else it }
                     try {
@@ -497,25 +518,67 @@ fun HomeScreen(
         }
     }
 
-    // Automatically return passenger to normal home/booking screen if active ride is cancelled in Firebase
+    // Automatically keep passenger UI synchronized with Firebase ride request status
     LaunchedEffect(activeRideRequestId) {
         val reqId = activeRideRequestId ?: return@LaunchedEffect
         val repo = FirebaseRepository.getInstance(context)
         repo.listenToRideRequestStatus(reqId).collectLatest { status ->
-            if (status == "CANCELLED" || status == "REJECTED") {
-                activeRideRequestId = null
-                activeRoute = null
-                selectedDestinationLocation = null
-                passengerMapDriverLoc = null
-                incomingDriverOffer = null
-                nearbyDriverMarkers = emptyList()
-                isBookingInProgress = false
-                isRideSheetExpanded = false
-                customOfferedFare = null
-                passengerOrders = passengerOrders.map {
-                    if (it.requestId == reqId || it.id == reqId) {
-                        it.copy(status = PassengerOrderStatus.CANCELLED)
-                    } else it
+            if (status == null) return@collectLatest
+            when (status) {
+                "CANCELLED", "REJECTED" -> {
+                    activeRideRequestId = null
+                    activeRoute = null
+                    selectedDestinationLocation = null
+                    passengerMapDriverLoc = null
+                    incomingDriverOffer = null
+                    nearbyDriverMarkers = emptyList()
+                    isBookingInProgress = false
+                    isRideSheetExpanded = false
+                    customOfferedFare = null
+                    passengerOrders = passengerOrders.map {
+                        if (it.requestId == reqId || it.id == reqId) {
+                            it.copy(status = PassengerOrderStatus.CANCELLED)
+                        } else it
+                    }
+                    snackbarHostState.showSnackbar("Ride was cancelled.")
+                }
+                "COMPLETED" -> {
+                    activeRideRequestId = null
+                    activeRoute = null
+                    selectedDestinationLocation = null
+                    passengerMapDriverLoc = null
+                    incomingDriverOffer = null
+                    nearbyDriverMarkers = emptyList()
+                    isBookingInProgress = false
+                    isRideSheetExpanded = false
+                    customOfferedFare = null
+                    passengerOrders = passengerOrders.map {
+                        if (it.requestId == reqId || it.id == reqId) {
+                            it.copy(status = PassengerOrderStatus.COMPLETED)
+                        } else it
+                    }
+                    snackbarHostState.showSnackbar("Ride completed! Thank you for riding with Drigo.")
+                }
+                "DRIVER_ARRIVED" -> {
+                    passengerOrders = passengerOrders.map {
+                        if (it.requestId == reqId || it.id == reqId) {
+                            it.copy(status = PassengerOrderStatus.DRIVER_ARRIVED)
+                        } else it
+                    }
+                }
+                "IN_TRIP" -> {
+                    passengerOrders = passengerOrders.map {
+                        if (it.requestId == reqId || it.id == reqId) {
+                            it.copy(status = PassengerOrderStatus.IN_TRIP)
+                        } else it
+                    }
+                }
+                "DRIVER_COMING", "ACCEPTED" -> {
+                    passengerOrders = passengerOrders.map {
+                        if (it.requestId == reqId || it.id == reqId) {
+                            it.copy(status = PassengerOrderStatus.DRIVER_COMING)
+                        } else it
+                    }
                 }
             }
         }
@@ -2424,7 +2487,10 @@ fun HomeScreen(
         DriverOfferDialog(
             offer = currentOffer,
             onAccept = {
-                val acceptedOrder = currentOffer.copy(status = PassengerOrderStatus.ACCEPTED)
+                val acceptedOrder = currentOffer.copy(
+                    status = PassengerOrderStatus.DRIVER_COMING,
+                    assignedDriverId = currentOffer.driverPhone.ifBlank { currentOffer.driverName }
+                )
                 // 1. Immediately dismiss offer dialog on click
                 incomingDriverOffer = null
 
@@ -2440,7 +2506,7 @@ fun HomeScreen(
                     speedKmh = 35f,
                     etaMinutes = acceptedOrder.etaMinutes,
                     distanceRemainingKm = 1.2,
-                    status = PassengerOrderStatus.ACCEPTED.name,
+                    status = PassengerOrderStatus.DRIVER_COMING.name,
                     updatedAt = System.currentTimeMillis()
                 )
                 passengerMapDriverLoc = initialDriverLoc
@@ -2452,7 +2518,7 @@ fun HomeScreen(
                 val repo = FirebaseRepository.getInstance(context)
                 scope.launch {
                     repo.savePassengerOrder(acceptedOrder)
-                    repo.updateRideRequestStatus(acceptedOrder.requestId, "ACCEPTED")
+                    repo.updateRideRequestStatus(acceptedOrder.requestId, "DRIVER_COMING")
                     repo.updateLiveDriverLocation(initialDriverLoc)
                     snackbarHostState.showSnackbar(
                         message = "Captain ${currentOffer.driverName} is on the way! (~${acceptedOrder.etaMinutes} min away)",
@@ -2773,6 +2839,51 @@ fun ActiveCaptainAssignedCard(
                 fontSize = 13.sp,
                 color = Color(0xFFA0A6B5)
             )
+        }
+
+        // Waiting timer when driver arrived at pickup
+        if (isArrived && !isInTrip) {
+            var secondsWaiting by remember { mutableStateOf(0) }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    delay(1000L)
+                    secondsWaiting++
+                }
+            }
+            val freeWaitSeconds = 300 // 5 mins free wait
+            val remainingWaitSeconds = (freeWaitSeconds - secondsWaiting).coerceAtLeast(0)
+            val waitMins = remainingWaitSeconds / 60
+            val waitSecs = remainingWaitSeconds % 60
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF2E7D32).copy(alpha = 0.25f),
+                border = BorderStroke(1.dp, Color(0xFF00E676)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = "Waiting timer",
+                        tint = Color(0xFF00E676),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (remainingWaitSeconds > 0) {
+                            "Captain is waiting • Free wait time: ${String.format(Locale.US, "%02d:%02d", waitMins, waitSecs)}"
+                        } else {
+                            val paidWaitMins = (secondsWaiting - freeWaitSeconds) / 60
+                            "Free wait time ended • Paid wait: +$paidWaitMins min"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (remainingWaitSeconds > 0) Color(0xFF00E676) else Color(0xFFFFB74D)
+                    )
+                }
+            }
         }
 
         // 2. Driver & Vehicle Profile Card

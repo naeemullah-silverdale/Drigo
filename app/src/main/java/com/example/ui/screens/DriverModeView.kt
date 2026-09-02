@@ -401,29 +401,29 @@ fun DriverModeView(
     var lastKnownDriverTripStatus by remember { mutableStateOf<PassengerOrderStatus?>(null) }
     var lastKnownDriverTripId by remember { mutableStateOf<String?>(null) }
 
-    // Auto-restore active driver trip on launch / reconnect if present in repository
-    LaunchedEffect(driverId) {
-        repo.listenToPassengerOrders(user?.uid ?: driverId, user?.email ?: "").collectLatest { orders ->
-            if (activeDriverTrip == null) {
-                val active = orders.firstOrNull { order ->
-                    (order.driverPhone == driverPhone || order.driverName == driverName || order.id == lastKnownDriverTripId) &&
-                    (order.status == PassengerOrderStatus.ACCEPTED || order.status == PassengerOrderStatus.DRIVER_ARRIVED || order.status == PassengerOrderStatus.IN_TRIP)
+    // Real-time synchronization & restoration of Active Driver Trip from Firebase (single source of truth)
+    LaunchedEffect(driverId, driverPhone) {
+        repo.listenToDriverActiveTrip(driverId, driverPhone).collectLatest { remoteTrip ->
+            if (remoteTrip != null) {
+                if (activeDriverTrip == null || activeDriverTrip?.id != remoteTrip.id || activeDriverTrip?.status != remoteTrip.status) {
+                    activeDriverTrip = remoteTrip
+                    offerSentRequestId = remoteTrip.requestId.ifBlank { remoteTrip.id }
+                    driverRecenterTrigger++
                 }
-                if (active != null) {
-                    activeDriverTrip = active
-                }
-            } else {
-                val current = orders.firstOrNull { it.id == activeDriverTrip?.id || it.requestId == activeDriverTrip?.requestId }
-                if (current != null && (current.status == PassengerOrderStatus.CANCELLED || current.status == PassengerOrderStatus.COMPLETED)) {
-                    activeDriverTrip = null
-                    driverRouteResult = null
+            } else if (activeDriverTrip != null) {
+                // Trip was completed or cancelled remotely
+                if (activeDriverTrip?.status != PassengerOrderStatus.COMPLETED) {
                     Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
                 }
+                activeDriverTrip = null
+                driverRouteResult = null
+                offerSentRequestId = null
+                driverRecenterTrigger++
             }
         }
     }
 
-    // Real-time trip status listener on RTDB ride_requests (clears active trip immediately on cancellation)
+    // Real-time trip status listener on RTDB ride_requests (clears active trip immediately on cancellation or completion)
     LaunchedEffect(activeDriverTrip?.id, activeDriverTrip?.requestId) {
         val trip = activeDriverTrip
         val reqId = trip?.requestId?.ifBlank { trip.id }
@@ -441,11 +441,18 @@ fun DriverModeView(
                         if (status == "CANCELLED") {
                             activeDriverTrip = null
                             driverRouteResult = null
+                            offerSentRequestId = null
+                            driverRecenterTrigger++
                             Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
                             notifManager.notifyDriverRideCancelled(
-                                passengerName = trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" },
+                                passengerName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
                                 rideId = trip.id
                             )
+                        } else if (status == "COMPLETED" && activeDriverTrip?.status != PassengerOrderStatus.COMPLETED) {
+                            activeDriverTrip = null
+                            driverRouteResult = null
+                            offerSentRequestId = null
+                            driverRecenterTrigger++
                         }
                     }
                     override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
@@ -535,26 +542,51 @@ fun DriverModeView(
     LaunchedEffect(activeDriverTrip?.id, activeDriverTrip?.status) {
         val trip = activeDriverTrip
         if (trip != null) {
-            if (trip.status == PassengerOrderStatus.ACCEPTED) {
+            val pLat = if (trip.pickupLat != 0.0) trip.pickupLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151)
+            val pLon = if (trip.pickupLon != 0.0) trip.pickupLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249)
+            val dLat = if (trip.destinationLat != 0.0) trip.destinationLat else pLat + 0.02
+            val dLon = if (trip.destinationLon != 0.0) trip.destinationLon else pLon + 0.02
+
+            // ALWAYS calculate the passenger's ride route (Pickup -> Destination) so both locations are marked and route is colored!
+            val pickupPt = GeoPoint(pLat, pLon)
+            val destPt = GeoPoint(dLat, dLon)
+
+            val passengerRoute = routeService.calculateRoute(
+                startPoint = pickupPt,
+                destPoint = destPt,
+                startAddress = trip.pickupTitle,
+                destinationAddress = trip.destinationTitle
+            )
+            driverRouteResult = passengerRoute ?: RouteResult(
+                points = listOf(pickupPt, destPt),
+                distanceKm = trip.distanceKm,
+                durationMinutes = trip.durationMinutes,
+                startAddress = trip.pickupTitle,
+                destinationAddress = trip.destinationTitle,
+                startPoint = pickupPt,
+                destinationPoint = destPt
+            )
+            driverRecenterTrigger++
+
+            if (trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING) {
                 // 1. STAGE: DRIVER -> PICKUP LOCATION
-                val startLat = driverGeoPoint.latitude
-                val startLon = driverGeoPoint.longitude
+                val startLat = if (driverGeoPoint.latitude != 0.0) driverGeoPoint.latitude else (trip.pickupLat - 0.015)
+                val startLon = if (driverGeoPoint.longitude != 0.0) driverGeoPoint.longitude else (trip.pickupLon - 0.015)
                 val targetLat = trip.pickupLat
                 val targetLon = trip.pickupLon
 
-                val r = routeService.calculateRoute(
+                val pickupNavRoute = routeService.calculateRoute(
                     startPoint = GeoPoint(startLat, startLon),
                     destPoint = GeoPoint(targetLat, targetLon),
                     startAddress = "Current Location",
                     destinationAddress = trip.pickupTitle
                 )
-                driverRouteResult = r
                 currentNavInstruction = "Drive to Pickup: ${trip.pickupTitle}"
 
-                val points = r?.points ?: listOf(GeoPoint(startLat, startLon), GeoPoint(targetLat, targetLon))
+                val points = pickupNavRoute?.points ?: listOf(GeoPoint(startLat, startLon), GeoPoint(targetLat, targetLon))
                 if (points.isNotEmpty()) {
                     for (i in 0 until points.size) {
-                        if (activeDriverTrip == null || activeDriverTrip?.status != PassengerOrderStatus.ACCEPTED) {
+                        if (activeDriverTrip == null || (activeDriverTrip?.status != PassengerOrderStatus.ACCEPTED && activeDriverTrip?.status != PassengerOrderStatus.DRIVER_COMING)) {
                             break
                         }
                         val currentPt = points[i]
@@ -571,8 +603,8 @@ fun DriverModeView(
                         driverBearing = computedBearing
 
                         val remainingFraction = 1f - (i.toFloat() / points.size.coerceAtLeast(1))
-                        val remainingKm = (r?.distanceKm ?: 4.0) * remainingFraction
-                        val remainingMin = ((r?.durationMinutes ?: 10) * remainingFraction).toInt().coerceAtLeast(1)
+                        val remainingKm = (pickupNavRoute?.distanceKm ?: 4.0) * remainingFraction
+                        val remainingMin = ((pickupNavRoute?.durationMinutes ?: 10) * remainingFraction).toInt().coerceAtLeast(1)
                         distanceRemainingText = "${String.format(java.util.Locale.US, "%.1f", remainingKm)} km to Pickup • $remainingMin min"
                         currentSpeedKmh = (32f + (i % 5) * 2f)
 
@@ -601,15 +633,6 @@ fun DriverModeView(
                 currentNavInstruction = "Waiting for passenger at Pickup"
                 distanceRemainingText = "Arrived at Pickup • Waiting for Rider"
                 currentSpeedKmh = 0f
-
-                // Preview route to destination
-                val r = routeService.calculateRoute(
-                    startPoint = GeoPoint(trip.pickupLat, trip.pickupLon),
-                    destPoint = GeoPoint(trip.destinationLat, trip.destinationLon),
-                    startAddress = trip.pickupTitle,
-                    destinationAddress = trip.destinationTitle
-                )
-                driverRouteResult = r
 
                 repo.updateLiveDriverLocation(
                     LiveDriverLocation(
@@ -726,16 +749,16 @@ fun DriverModeView(
             fromLocation = if (activeDriverTrip != null) AppLocation(
                 title = activeDriverTrip!!.pickupTitle,
                 subtitle = activeDriverTrip!!.pickupSubtitle,
-                latitude = activeDriverTrip!!.pickupLat,
-                longitude = activeDriverTrip!!.pickupLon
+                latitude = if (activeDriverTrip!!.pickupLat != 0.0) activeDriverTrip!!.pickupLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151),
+                longitude = if (activeDriverTrip!!.pickupLon != 0.0) activeDriverTrip!!.pickupLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249)
             ) else selectedRequestForOffer?.let {
                 AppLocation(title = it.pickupTitle, subtitle = it.pickupSubtitle, latitude = it.pickupLat, longitude = it.pickupLon)
             },
             toLocation = if (activeDriverTrip != null) AppLocation(
                 title = activeDriverTrip!!.destinationTitle,
                 subtitle = activeDriverTrip!!.destinationSubtitle,
-                latitude = activeDriverTrip!!.destinationLat,
-                longitude = activeDriverTrip!!.destinationLon
+                latitude = if (activeDriverTrip!!.destinationLat != 0.0) activeDriverTrip!!.destinationLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151) + 0.02,
+                longitude = if (activeDriverTrip!!.destinationLon != 0.0) activeDriverTrip!!.destinationLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249) + 0.02
             ) else selectedRequestForOffer?.let {
                 AppLocation(title = it.destinationTitle, subtitle = it.destinationSubtitle, latitude = it.destinationLat, longitude = it.destinationLon)
             },
@@ -973,7 +996,7 @@ fun DriverModeView(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = if (trip.status == PassengerOrderStatus.ACCEPTED) Icons.Default.Navigation else Icons.Default.DirectionsCar,
+                                imageVector = if (trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING) Icons.Default.Navigation else Icons.Default.DirectionsCar,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(18.dp)
@@ -1001,9 +1024,10 @@ fun DriverModeView(
                     // External GPS App Launcher Button (Google Maps / Waze)
                     Surface(
                         onClick = {
-                            val targetLat = if (trip.status == PassengerOrderStatus.ACCEPTED) trip.pickupLat else trip.destinationLat
-                            val targetLon = if (trip.status == PassengerOrderStatus.ACCEPTED) trip.pickupLon else trip.destinationLon
-                            val targetTitle = if (trip.status == PassengerOrderStatus.ACCEPTED) trip.pickupTitle else trip.destinationTitle
+                            val isHeadingToPickup = trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING
+                            val targetLat = if (isHeadingToPickup) trip.pickupLat else trip.destinationLat
+                            val targetLon = if (isHeadingToPickup) trip.pickupLon else trip.destinationLon
+                            val targetTitle = if (isHeadingToPickup) trip.pickupTitle else trip.destinationTitle
                             launchExternalGpsNavigation(targetLat, targetLon, targetTitle)
                         },
                         shape = RoundedCornerShape(10.dp),
@@ -1251,7 +1275,7 @@ fun DriverModeView(
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" },
+                                    text = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White
@@ -1279,13 +1303,16 @@ fun DriverModeView(
                         }
 
                         // Call Passenger Button
+                        val passPhone = trip.passengerPhone.ifBlank { "+92 300 9876543" }
+                        val passName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } }
                         IconButton(
                             onClick = {
                                 try {
-                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:+923009876543"))
+                                    val cleanPhone = passPhone.replace(" ", "")
+                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
                                     context.startActivity(intent)
                                 } catch (_: Exception) {
-                                    Toast.makeText(context, "Calling Passenger (+92 300 9876543)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Calling $passName ($passPhone)", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier
@@ -1308,9 +1335,9 @@ fun DriverModeView(
                             onClick = {
                                 onOpenChat(
                                     trip.id,
-                                    trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" },
+                                    passName,
                                     "Passenger",
-                                    "+92 300 9876543",
+                                    passPhone,
                                     trip.pickupTitle,
                                     trip.destinationTitle
                                 )
@@ -1447,13 +1474,18 @@ fun DriverModeView(
 
                     // Dynamic InDrive Action Step Button
                     when (trip.status) {
-                        PassengerOrderStatus.ACCEPTED -> {
+                        PassengerOrderStatus.ACCEPTED, PassengerOrderStatus.DRIVER_COMING -> {
                             Button(
                                 onClick = {
                                     val updated = trip.copy(status = PassengerOrderStatus.DRIVER_ARRIVED)
                                     activeDriverTrip = updated
                                     scope.launch {
-                                        repo.updateDriverTripStatus(trip.id, PassengerOrderStatus.DRIVER_ARRIVED)
+                                        repo.updateDriverTripStatus(
+                                            trip.id,
+                                            PassengerOrderStatus.DRIVER_ARRIVED,
+                                            requestId = trip.requestId,
+                                            passengerId = trip.passengerId
+                                        )
                                         Toast.makeText(context, "Passenger notified: You have arrived!", Toast.LENGTH_SHORT).show()
                                     }
                                 },
@@ -1475,25 +1507,53 @@ fun DriverModeView(
                             }
                         }
                         PassengerOrderStatus.DRIVER_ARRIVED -> {
-                            Button(
-                                onClick = {
-                                    showPinVerificationDialog = true
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp)
-                                    .testTag("driver_start_trip_button")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(imageVector = Icons.Default.Shield, contentDescription = null, tint = Color.White)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "VERIFY PIN & START TRIP",
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 14.sp,
-                                    color = Color.White
-                                )
+                                OutlinedButton(
+                                    onClick = { showPinVerificationDialog = true },
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, DrigoBrandPurple),
+                                    modifier = Modifier
+                                        .weight(0.32f)
+                                        .height(50.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.Shield, contentDescription = null, tint = DrigoBrandPurple, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("PIN", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DrigoBrandPurple)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        val updated = trip.copy(status = PassengerOrderStatus.IN_TRIP)
+                                        activeDriverTrip = updated
+                                        scope.launch {
+                                            repo.updateDriverTripStatus(
+                                                trip.id,
+                                                PassengerOrderStatus.IN_TRIP,
+                                                requestId = trip.requestId,
+                                                passengerId = trip.passengerId
+                                            )
+                                            Toast.makeText(context, "Ride Started! Head to destination.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                    modifier = Modifier
+                                        .weight(0.68f)
+                                        .height(50.dp)
+                                        .testTag("driver_start_trip_button")
+                                ) {
+                                    Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = Color.White)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "START RIDE",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 14.sp,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                         PassengerOrderStatus.IN_TRIP -> {
@@ -1507,7 +1567,7 @@ fun DriverModeView(
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(1.dp, Color(0xFF4FC3F7)),
                                     modifier = Modifier
-                                        .weight(0.45f)
+                                        .weight(0.38f)
                                         .height(50.dp)
                                 ) {
                                     Text(
@@ -1522,13 +1582,20 @@ fun DriverModeView(
                                     onClick = {
                                         val updated = trip.copy(status = PassengerOrderStatus.COMPLETED, agreedFare = totalCashToCollect)
                                         activeDriverTrip = null
+                                        driverRouteResult = null
+                                        offerSentRequestId = null
                                         todayEarnings += totalCashToCollect
                                         completedTripsCount += 1
                                         completedTripForRating = updated
                                         showPassengerRatingDialog = true
                                         audioHelper.playTripCompleteChime(totalCashToCollect)
                                         scope.launch {
-                                            repo.updateDriverTripStatus(trip.id, PassengerOrderStatus.COMPLETED)
+                                            repo.updateDriverTripStatus(
+                                                trip.id,
+                                                PassengerOrderStatus.COMPLETED,
+                                                requestId = trip.requestId,
+                                                passengerId = trip.passengerId
+                                            )
                                             repo.creditDriverEarnings(
                                                 userId = walletUserId,
                                                 tripId = trip.id,
@@ -1554,12 +1621,12 @@ fun DriverModeView(
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
                                     modifier = Modifier
-                                        .weight(0.55f)
+                                        .weight(0.62f)
                                         .height(50.dp)
                                         .testTag("driver_complete_trip_button")
                                 ) {
                                     Text(
-                                        text = "COLLECT PKR $totalCashToCollect",
+                                        text = "COMPLETE RIDE",
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 13.sp,
                                         color = Color.White
@@ -1868,7 +1935,9 @@ fun DriverModeView(
                                                 id = req.id,
                                                 requestId = req.id,
                                                 passengerId = req.passengerId,
+                                                passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
                                                 passengerEmail = req.passengerEmail,
+                                                passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
                                                 pickupTitle = req.pickupTitle,
                                                 pickupSubtitle = req.pickupSubtitle,
                                                 pickupLat = req.pickupLat,
@@ -1889,17 +1958,24 @@ fun DriverModeView(
                                                 driverVehicleModel = driverVehicleModel,
                                                 driverPlateNumber = driverVehicleNumber,
                                                 driverPhone = driverPhone,
-                                                status = PassengerOrderStatus.ACCEPTED,
+                                                assignedDriverId = driverId,
+                                                status = PassengerOrderStatus.DRIVER_COMING,
                                                 etaMinutes = etaMins
                                             )
+                                            // Immediately show Active Ride view on driver screen
+                                            activeDriverTrip = order
+                                            offerSentRequestId = req.id
+                                            selectedRequestForOffer = null
+                                            tollSurchargesPkr = 0
+                                            driverRecenterTrigger++
+                                            Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
+
                                             val result = repo.acceptRideRequest(req.id, offer, order)
                                             isSendingOffer = false
-                                            if (result.isSuccess && result.getOrDefault(false)) {
-                                                activeDriverTrip = order
-                                                offerSentRequestId = req.id
-                                                tollSurchargesPkr = 0
-                                                Toast.makeText(context, "Ride request accepted for PKR ${req.estimatedFare}! Navigating to pickup...", Toast.LENGTH_SHORT).show()
-                                            } else {
+                                            if (!result.isSuccess || !result.getOrDefault(false)) {
+                                                activeDriverTrip = null
+                                                offerSentRequestId = null
+                                                driverRecenterTrigger++
                                                 Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
                                             }
                                         }
@@ -2621,7 +2697,12 @@ fun DriverModeView(
                             showPinVerificationDialog = false
                             enteredPassengerPin = ""
                             scope.launch {
-                                repo.updateDriverTripStatus(trip.id, PassengerOrderStatus.IN_TRIP)
+                                repo.updateDriverTripStatus(
+                                    trip.id,
+                                    PassengerOrderStatus.IN_TRIP,
+                                    requestId = trip.requestId,
+                                    passengerId = trip.passengerId
+                                )
                                 Toast.makeText(context, "PIN Verified! Trip Started.", Toast.LENGTH_SHORT).show()
                             }
                         },
@@ -2639,7 +2720,12 @@ fun DriverModeView(
                             showPinVerificationDialog = false
                             enteredPassengerPin = ""
                             scope.launch {
-                                repo.updateDriverTripStatus(trip.id, PassengerOrderStatus.IN_TRIP)
+                                repo.updateDriverTripStatus(
+                                    trip.id,
+                                    PassengerOrderStatus.IN_TRIP,
+                                    requestId = trip.requestId,
+                                    passengerId = trip.passengerId
+                                )
                                 Toast.makeText(context, "Trip Started without PIN.", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -2754,10 +2840,17 @@ fun DriverModeView(
                             val tripToCancel = activeDriverTrip
                             if (tripToCancel != null) {
                                 scope.launch {
-                                    repo.updateDriverTripStatus(tripToCancel.id, PassengerOrderStatus.CANCELLED)
+                                    repo.updateDriverTripStatus(
+                                        tripToCancel.id,
+                                        PassengerOrderStatus.CANCELLED,
+                                        requestId = tripToCancel.requestId,
+                                        passengerId = tripToCancel.passengerId
+                                    )
                                 }
                             }
                             activeDriverTrip = null
+                            driverRouteResult = null
+                            offerSentRequestId = null
                             showCancelTripDialog = false
                             Toast.makeText(context, "Trip cancelled ($selectedCancelReason)", Toast.LENGTH_SHORT).show()
                         },
@@ -2804,13 +2897,15 @@ fun DriverRideRequestCard(
         calculateDistanceKm(driverLat, driverLon, request.pickupLat, request.pickupLon)
     } else 0.0
 
+    val formattedFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(request.estimatedFare)
+
     Surface(
         onClick = onSelect,
         shape = RoundedCornerShape(20.dp),
-        color = if (isSelected) Color(0xFF242735) else Color(0xFF1B1D26),
+        color = if (isSelected) Color(0xFF222634) else Color(0xFF191B24),
         border = BorderStroke(
             if (isSelected) 2.dp else 1.dp,
-            if (isSelected) DrigoBrandPurple else Color(0xFF2E3345)
+            if (isSelected) DrigoBrandPurple else Color(0xFF2D3244)
         ),
         shadowElevation = if (isSelected) 8.dp else 2.dp,
         modifier = Modifier
@@ -2827,13 +2922,13 @@ fun DriverRideRequestCard(
                 // Passenger Avatar & Rating
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f, fill = false)
+                    modifier = Modifier.weight(1f)
                 ) {
                     Surface(
                         shape = CircleShape,
                         color = DrigoBrandPurple.copy(alpha = 0.25f),
-                        border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.5f)),
-                        modifier = Modifier.size(38.dp)
+                        border = BorderStroke(1.5.dp, DrigoBrandPurple),
+                        modifier = Modifier.size(42.dp)
                     ) {
                         if (request.passengerPhotoUrl.isNotBlank()) {
                             AsyncImage(
@@ -2850,13 +2945,13 @@ fun DriverRideRequestCard(
                                     text = request.passengerName.trim().take(1).uppercase().ifBlank { "P" },
                                     color = Color.White,
                                     fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 15.sp
+                                    fontSize = 16.sp
                                 )
                             }
                         }
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
                         Text(
                             text = request.passengerName.ifBlank { "Passenger" },
                             style = MaterialTheme.typography.titleMedium,
@@ -2865,11 +2960,12 @@ fun DriverRideRequestCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
                                 color = Color(0xFF2B2510),
-                                modifier = Modifier.padding(top = 2.dp)
+                                border = BorderStroke(0.5.dp, Color(0xFFFFC107).copy(alpha = 0.4f))
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
@@ -2879,7 +2975,7 @@ fun DriverRideRequestCard(
                                         imageVector = Icons.Default.Star,
                                         contentDescription = null,
                                         tint = Color(0xFFFFC107),
-                                        modifier = Modifier.size(12.dp)
+                                        modifier = Modifier.size(11.dp)
                                     )
                                     Spacer(modifier = Modifier.width(3.dp))
                                     Text(
@@ -2894,16 +2990,9 @@ fun DriverRideRequestCard(
                             Text(
                                 text = "• ${request.paymentMethod.ifBlank { "Cash" }}",
                                 fontSize = 11.sp,
-                                color = Color(0xFF90A4AE)
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFB0BEC5)
                             )
-                            if (distAwayKm > 0.0) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "• ${String.format(java.util.Locale.US, "%.1f", distAwayKm)} km away",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF29B6F6)
-                                )
-                            }
                         }
                     }
                 }
@@ -2913,22 +3002,23 @@ fun DriverRideRequestCard(
                 // Proposed Fare Container
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF0D331B),
-                    border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.5f))
+                    color = Color(0xFF092913),
+                    border = BorderStroke(1.5.dp, Color(0xFF00E676))
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         horizontalAlignment = Alignment.End
                     ) {
                         Text(
                             text = "OFFERED FARE",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E676).copy(alpha = 0.8f)
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF00E676).copy(alpha = 0.85f),
+                            letterSpacing = 0.5.sp
                         )
                         Text(
-                            text = "PKR ${request.estimatedFare}",
-                            fontSize = 18.sp,
+                            text = "PKR $formattedFare",
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Black,
                             color = Color(0xFF00E676)
                         )
@@ -2936,9 +3026,9 @@ fun DriverRideRequestCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Sub-Bar: Category Pill + Trip Distance & Duration
+            // Sub-Bar: Category Pill + Distance Away + Trip Distance & Duration
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -2961,7 +3051,7 @@ fun DriverRideRequestCard(
                                 imageVector = categoryIcon,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
                             Text(
@@ -2992,82 +3082,77 @@ fun DriverRideRequestCard(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (distAwayKm > 0.0) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF1E293B)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NearMe,
+                                    contentDescription = null,
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.1f", distAwayKm)} km away",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF38BDF8)
+                                )
+                            }
+                        }
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = Color(0xFF262B38)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.NearMe,
-                                contentDescription = null,
-                                tint = Color(0xFF29B6F6),
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = "${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km • ${request.durationMinutes} min",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFFE0E0E0)
                             )
-                        }
-                    }
-
-                    if (request.durationMinutes > 0) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF262B38)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Schedule,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFFB74D),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "${request.durationMinutes} min",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFE0E0E0)
-                                )
-                            }
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Connected Timeline Route Box
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF14161E),
+                color = Color(0xFF13151D),
+                border = BorderStroke(1.dp, Color(0xFF25293A)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp)
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Left Timeline Graphics
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(top = 4.dp, end = 10.dp)
+                        modifier = Modifier.padding(top = 2.dp, end = 10.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
                             color = Color(0xFF00E676),
-                            modifier = Modifier.size(10.dp)
+                            modifier = Modifier.size(9.dp)
                         ) {}
                         Box(
                             modifier = Modifier
@@ -3078,7 +3163,7 @@ fun DriverRideRequestCard(
                         Surface(
                             shape = CircleShape,
                             color = Color(0xFFFF5252),
-                            modifier = Modifier.size(10.dp)
+                            modifier = Modifier.size(9.dp)
                         ) {}
                     }
 
@@ -3102,7 +3187,7 @@ fun DriverRideRequestCard(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         Text(
                             text = request.destinationTitle.ifBlank { "Destination Location" },
@@ -3165,10 +3250,10 @@ fun DriverRideRequestCard(
                         onClick = onAcceptOffer,
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
                         modifier = Modifier
-                            .weight(1.15f)
-                            .heightIn(min = 44.dp)
+                            .weight(1.2f)
+                            .heightIn(min = 46.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -3180,19 +3265,11 @@ fun DriverRideRequestCard(
                                 tint = Color.White,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Accept",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = Color.White,
-                                maxLines = 1
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "PKR ${request.estimatedFare}",
+                                text = "Accept PKR $formattedFare",
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 color = Color.White,
                                 maxLines = 1
                             )
@@ -3203,14 +3280,14 @@ fun DriverRideRequestCard(
                     OutlinedButton(
                         onClick = { expandedBidding = !expandedBidding },
                         shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, DrigoBrandPurple),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        border = BorderStroke(1.2.dp, DrigoBrandPurple),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = if (expandedBidding) DrigoBrandPurple.copy(alpha = 0.2f) else Color.Transparent
                         ),
                         modifier = Modifier
-                            .weight(0.85f)
-                            .heightIn(min = 44.dp)
+                            .weight(0.8f)
+                            .heightIn(min = 46.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -3254,7 +3331,8 @@ fun DriverRideRequestCard(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            listOf(base + 30, base + 50, base + 100).forEach { fare ->
+                            listOf(base + 50, base + 100, base + 150).forEach { fare ->
+                                val formattedCounterFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(fare)
                                 Surface(
                                     onClick = {
                                         onCounterOffer(fare)
@@ -3276,10 +3354,10 @@ fun DriverRideRequestCard(
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = "PKR $fare",
+                                            text = "PKR $formattedCounterFare",
                                             color = Color.White,
                                             fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 12.sp
+                                            fontSize = 11.5.sp
                                         )
                                     }
                                 }
@@ -3297,51 +3375,35 @@ fun DriverRideRequestCard(
                             OutlinedTextField(
                                 value = customBidText,
                                 onValueChange = { if (it.all { char -> char.isDigit() }) customBidText = it },
-                                placeholder = { Text("Custom Fare...", fontSize = 12.sp, color = Color.Gray) },
+                                placeholder = { Text("Custom PKR", color = Color.Gray, fontSize = 12.sp) },
                                 singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Number,
-                                    imeAction = ImeAction.Done
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
-                                        val fare = customBidText.toIntOrNull()
-                                        if (fare != null && fare > 0) {
-                                            onCounterOffer(fare)
-                                            expandedBidding = false
-                                            focusManager.clearFocus()
-                                        }
-                                    }
-                                ),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = DrigoBrandPurple,
-                                    unfocusedBorderColor = Color(0xFF3B4052),
-                                    focusedContainerColor = Color(0xFF14161E),
-                                    unfocusedContainerColor = Color(0xFF14161E),
+                                    unfocusedBorderColor = Color(0xFF37474F),
                                     focusedTextColor = Color.White,
                                     unfocusedTextColor = Color.White
                                 ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(50.dp)
+                                shape = RoundedCornerShape(10.dp)
                             )
-
                             Button(
                                 onClick = {
-                                    val fare = customBidText.toIntOrNull()
-                                    if (fare != null && fare > 0) {
-                                        onCounterOffer(fare)
+                                    val customFare = customBidText.toIntOrNull()
+                                    if (customFare != null && customFare > 0) {
+                                        onCounterOffer(customFare)
                                         expandedBidding = false
+                                        customBidText = ""
                                         focusManager.clearFocus()
                                     }
                                 },
-                                enabled = customBidText.isNotBlank() && (customBidText.toIntOrNull() ?: 0) > 0,
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
-                                modifier = Modifier.height(50.dp)
+                                modifier = Modifier.height(48.dp)
                             ) {
-                                Text("Send Bid", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Send", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
                     }

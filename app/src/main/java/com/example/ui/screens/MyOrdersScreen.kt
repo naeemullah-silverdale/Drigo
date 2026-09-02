@@ -59,7 +59,7 @@ val PassengerOrderStatus.badgeColor: Color
     get() = when (this) {
         PassengerOrderStatus.SEARCHING -> Color(0xFFFFB300)
         PassengerOrderStatus.OFFER_RECEIVED -> InDriveLimeGreen
-        PassengerOrderStatus.ACCEPTED -> InDriveLimeGreen
+        PassengerOrderStatus.ACCEPTED, PassengerOrderStatus.DRIVER_COMING -> InDriveLimeGreen
         PassengerOrderStatus.DRIVER_ARRIVED -> Color(0xFF00E676)
         PassengerOrderStatus.IN_TRIP -> Color(0xFF29B6F6)
         PassengerOrderStatus.COMPLETED -> Color(0xFF81C784)
@@ -70,7 +70,7 @@ val PassengerOrderStatus.displayName: String
     get() = when (this) {
         PassengerOrderStatus.SEARCHING -> "Searching Drivers"
         PassengerOrderStatus.OFFER_RECEIVED -> "Offer Received"
-        PassengerOrderStatus.ACCEPTED -> "Offer Accepted"
+        PassengerOrderStatus.ACCEPTED, PassengerOrderStatus.DRIVER_COMING -> "Driver on the way"
         PassengerOrderStatus.DRIVER_ARRIVED -> "Driver Arrived"
         PassengerOrderStatus.IN_TRIP -> "On Trip"
         PassengerOrderStatus.COMPLETED -> "Completed"

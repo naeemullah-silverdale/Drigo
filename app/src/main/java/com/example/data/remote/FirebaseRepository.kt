@@ -14,6 +14,7 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -741,12 +742,17 @@ class FirebaseRepository private constructor(private val context: Context) {
                     return Result.success(false)
                 }
 
-                // Atomically update request to ACCEPTED
+                // Atomically update request to DRIVER_COMING
                 val updates = mapOf(
-                    "status" to "ACCEPTED",
+                    "status" to "DRIVER_COMING",
                     "assignedDriverId" to driverOffer.driverId,
                     "assignedDriverName" to driverOffer.driverName,
+                    "driverPhone" to driverOffer.driverPhone,
+                    "driverVehicleMake" to driverOffer.driverVehicleMake,
+                    "driverVehicleModel" to driverOffer.driverVehicleModel,
+                    "driverPlateNumber" to driverOffer.driverPlateNumber,
                     "assignedFare" to driverOffer.offeredFare,
+                    "agreedFare" to driverOffer.offeredFare,
                     "acceptedAt" to System.currentTimeMillis()
                 )
                 reqRef.updateChildren(updates).await()
@@ -757,10 +763,16 @@ class FirebaseRepository private constructor(private val context: Context) {
                 try {
                     firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(requestId).update(
                         mapOf(
-                            "status" to "ACCEPTED",
+                            "status" to "DRIVER_COMING",
                             "assignedDriverId" to driverOffer.driverId,
                             "assignedDriverName" to driverOffer.driverName,
-                            "assignedFare" to driverOffer.offeredFare
+                            "driverPhone" to driverOffer.driverPhone,
+                            "driverVehicleMake" to driverOffer.driverVehicleMake,
+                            "driverVehicleModel" to driverOffer.driverVehicleModel,
+                            "driverPlateNumber" to driverOffer.driverPlateNumber,
+                            "assignedFare" to driverOffer.offeredFare,
+                            "agreedFare" to driverOffer.offeredFare,
+                            "acceptedAt" to System.currentTimeMillis()
                         )
                     ).await()
                 } catch (_: Exception) {}
@@ -1193,7 +1205,9 @@ class FirebaseRepository private constructor(private val context: Context) {
                 "id" to order.id,
                 "requestId" to order.requestId,
                 "passengerId" to order.passengerId,
+                "passengerName" to order.passengerName,
                 "passengerEmail" to order.passengerEmail,
+                "passengerPhone" to order.passengerPhone,
                 "pickupTitle" to order.pickupTitle,
                 "pickupSubtitle" to order.pickupSubtitle,
                 "pickupLat" to order.pickupLat,
@@ -1206,8 +1220,10 @@ class FirebaseRepository private constructor(private val context: Context) {
                 "durationMinutes" to order.durationMinutes,
                 "rideCategory" to order.rideCategory,
                 "agreedFare" to order.agreedFare,
+                "assignedFare" to order.agreedFare,
                 "paymentMethod" to order.paymentMethod,
                 "driverName" to order.driverName,
+                "assignedDriverName" to order.driverName,
                 "driverRating" to order.driverRating,
                 "driverTotalRides" to order.driverTotalRides,
                 "driverVehicleMake" to order.driverVehicleMake,
@@ -1215,6 +1231,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                 "driverVehicleColor" to order.driverVehicleColor,
                 "driverPlateNumber" to order.driverPlateNumber,
                 "driverPhone" to order.driverPhone,
+                "assignedDriverId" to order.assignedDriverId.ifBlank { order.driverPhone },
                 "status" to order.status.name,
                 "etaMinutes" to order.etaMinutes,
                 "scheduledTimeText" to (order.scheduledTimeText ?: ""),
@@ -1228,20 +1245,27 @@ class FirebaseRepository private constructor(private val context: Context) {
                 val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
                 if (order.passengerId.isNotBlank()) {
                     db.getReference("users").child(order.passengerId).child("ride_history").child(order.id).setValue(orderMap)
-                    if (order.status == PassengerOrderStatus.ACCEPTED || order.status == PassengerOrderStatus.SEARCHING || order.status == PassengerOrderStatus.DRIVER_ARRIVED || order.status == PassengerOrderStatus.IN_TRIP) {
+                    if (order.status == PassengerOrderStatus.DRIVER_COMING || order.status == PassengerOrderStatus.ACCEPTED || order.status == PassengerOrderStatus.SEARCHING || order.status == PassengerOrderStatus.DRIVER_ARRIVED || order.status == PassengerOrderStatus.IN_TRIP) {
                         db.getReference("users").child(order.passengerId).child("active_ride_request").setValue(orderMap)
                     } else {
                         db.getReference("users").child(order.passengerId).child("active_ride_request").removeValue()
                     }
                 }
-                db.getReference("ride_requests").child(order.requestId.ifBlank { order.id }).setValue(orderMap)
+                val reqKey = order.requestId.ifBlank { order.id }
+                db.getReference("ride_requests").child(reqKey).updateChildren(orderMap)
+                db.getReference("passenger_orders").child(order.id).updateChildren(orderMap)
+                if (reqKey != order.id) {
+                    db.getReference("passenger_orders").child(reqKey).updateChildren(orderMap)
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "RTDB save passenger order notice: ${e.message}")
             }
 
             if (isAvailable()) {
                 try {
-                    firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(order.requestId.ifBlank { order.id }).set(orderMap).await()
+                    val reqKey = order.requestId.ifBlank { order.id }
+                    firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(reqKey).set(orderMap, SetOptions.merge()).await()
+                    firestore!!.collection("passenger_orders").document(order.id).set(orderMap, SetOptions.merge()).await()
                 } catch (e: Exception) {
                     Log.w(TAG, "Firestore save passenger order notice: ${e.message}")
                 }
@@ -2990,12 +3014,25 @@ class FirebaseRepository private constructor(private val context: Context) {
     /**
      * Driver updates active trip status: ARRIVED -> IN_TRIP -> COMPLETED -> CANCELLED
      */
-    suspend fun updateDriverTripStatus(orderId: String, status: PassengerOrderStatus) {
-        val updates = mapOf<String, Any>(
+    suspend fun updateDriverTripStatus(
+        orderId: String,
+        status: PassengerOrderStatus,
+        requestId: String = "",
+        passengerId: String = ""
+    ) {
+        val now = System.currentTimeMillis()
+        val updates = mutableMapOf<String, Any>(
             "status" to status.name,
             "statusLabel" to status.label,
-            "updatedAt" to System.currentTimeMillis()
+            "updatedAt" to now
         )
+        if (status == PassengerOrderStatus.COMPLETED) {
+            updates["completedAt"] = now
+        } else if (status == PassengerOrderStatus.CANCELLED) {
+            updates["cancelledAt"] = now
+        }
+
+        val safeReqId = requestId.ifBlank { orderId }
 
         try {
             val db = try {
@@ -3004,12 +3041,39 @@ class FirebaseRepository private constructor(private val context: Context) {
                 FirebaseDatabase.getInstance()
             }
             db.getReference("passenger_orders").child(orderId).updateChildren(updates).await()
-            db.getReference("ride_requests").child(orderId).child("status").setValue(status.name).await()
+            if (safeReqId.isNotBlank() && safeReqId != orderId) {
+                try {
+                    db.getReference("passenger_orders").child(safeReqId).updateChildren(updates).await()
+                } catch (_: Exception) {}
+            }
+
+            db.getReference("ride_requests").child(orderId).updateChildren(updates).await()
+            if (safeReqId.isNotBlank() && safeReqId != orderId) {
+                try {
+                    db.getReference("ride_requests").child(safeReqId).updateChildren(updates).await()
+                } catch (_: Exception) {}
+            }
+
+            if (passengerId.isNotBlank()) {
+                if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
+                    try {
+                        db.getReference("users").child(passengerId).child("active_ride_request").removeValue().await()
+                    } catch (_: Exception) {}
+                } else {
+                    try {
+                        db.getReference("users").child(passengerId).child("active_ride_request").updateChildren(updates).await()
+                    } catch (_: Exception) {}
+                }
+            }
 
             if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
                 try {
                     db.getReference("live_driver_locations").child(orderId).removeValue().await()
                     db.getReference("driver_offers").child(orderId).removeValue().await()
+                    if (safeReqId.isNotBlank() && safeReqId != orderId) {
+                        db.getReference("live_driver_locations").child(safeReqId).removeValue().await()
+                        db.getReference("driver_offers").child(safeReqId).removeValue().await()
+                    }
                 } catch (_: Exception) {}
             }
         } catch (_: Exception) {}
@@ -3017,10 +3081,232 @@ class FirebaseRepository private constructor(private val context: Context) {
         if (isAvailable() && firestore != null) {
             try {
                 firestore!!.collection("passenger_orders").document(orderId).update(updates).await()
+                if (safeReqId.isNotBlank() && safeReqId != orderId) {
+                    firestore!!.collection("passenger_orders").document(safeReqId).update(updates).await()
+                }
             } catch (_: Exception) {}
             try {
-                firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(orderId).update("status", status.name).await()
+                firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(orderId).update(updates).await()
+                if (safeReqId.isNotBlank() && safeReqId != orderId) {
+                    firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(safeReqId).update(updates).await()
+                }
             } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Real-time listener for the Driver's Active Trip (single source of truth).
+     * Listens to RTDB passenger_orders, ride_requests, and Firestore to guarantee the driver's
+     * active ride view is restored and stays synchronized across all state changes.
+     */
+    fun listenToDriverActiveTrip(driverId: String, driverPhone: String): Flow<PassengerOrder?> = callbackFlow {
+        val cleanDriverId = driverId.trim()
+        val cleanPhone = driverPhone.trim().replace(" ", "").replace("-", "")
+
+        val db = try {
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+        } catch (_: Exception) {
+            try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+        }
+
+        var rtdbActiveTrip: PassengerOrder? = null
+        var firestoreActiveTrip: PassengerOrder? = null
+
+        fun checkAndEmit() {
+            val chosen = rtdbActiveTrip ?: firestoreActiveTrip
+            trySend(chosen)
+        }
+
+        fun parseFlexibleDouble(snap: com.google.firebase.database.DataSnapshot, key: String, defaultVal: Double): Double {
+            val v = snap.child(key).value ?: return defaultVal
+            return when (v) {
+                is Double -> v
+                is Float -> v.toDouble()
+                is Long -> v.toDouble()
+                is Int -> v.toDouble()
+                is String -> v.toDoubleOrNull() ?: defaultVal
+                else -> defaultVal
+            }
+        }
+
+        fun parseOrder(child: com.google.firebase.database.DataSnapshot): PassengerOrder? {
+            return try {
+                val assigned = child.child("assignedDriverId").getValue(String::class.java) ?: ""
+                val phone = child.child("driverPhone").getValue(String::class.java) ?: ""
+                val cleanAssigned = assigned.trim().replace(" ", "").replace("-", "")
+                val cleanItemPhone = phone.trim().replace(" ", "").replace("-", "")
+
+                val matches = (cleanDriverId.isNotBlank() && (cleanAssigned == cleanDriverId || assigned == driverId)) ||
+                        (cleanPhone.isNotBlank() && (cleanAssigned == cleanPhone || cleanItemPhone == cleanPhone || phone == driverPhone))
+
+                val statusStr = child.child("status").getValue(String::class.java) ?: ""
+                val isActive = statusStr == "DRIVER_COMING" || statusStr == "ACCEPTED" || statusStr == "DRIVER_ARRIVED" || statusStr == "IN_TRIP"
+
+                if (matches && isActive) {
+                    val statusEnum = when (statusStr) {
+                        "DRIVER_ARRIVED" -> PassengerOrderStatus.DRIVER_ARRIVED
+                        "IN_TRIP" -> PassengerOrderStatus.IN_TRIP
+                        "COMPLETED" -> PassengerOrderStatus.COMPLETED
+                        "CANCELLED" -> PassengerOrderStatus.CANCELLED
+                        else -> PassengerOrderStatus.DRIVER_COMING
+                    }
+                    val id = child.child("id").getValue(String::class.java) ?: child.key ?: ""
+                    val reqId = child.child("requestId").getValue(String::class.java) ?: id
+                    PassengerOrder(
+                        id = id,
+                        requestId = reqId,
+                        passengerId = child.child("passengerId").getValue(String::class.java) ?: "",
+                        passengerName = child.child("passengerName").getValue(String::class.java) ?: "Passenger",
+                        passengerEmail = child.child("passengerEmail").getValue(String::class.java) ?: "",
+                        passengerPhone = child.child("passengerPhone").getValue(String::class.java) ?: "+92 300 9876543",
+                        pickupTitle = child.child("pickupTitle").getValue(String::class.java) ?: "Pickup Location",
+                        pickupSubtitle = child.child("pickupSubtitle").getValue(String::class.java) ?: "",
+                        pickupLat = parseFlexibleDouble(child, "pickupLat", 34.0151),
+                        pickupLon = parseFlexibleDouble(child, "pickupLon", 71.5249),
+                        destinationTitle = child.child("destinationTitle").getValue(String::class.java) ?: "Destination",
+                        destinationSubtitle = child.child("destinationSubtitle").getValue(String::class.java) ?: "",
+                        destinationLat = parseFlexibleDouble(child, "destinationLat", 34.0351),
+                        destinationLon = parseFlexibleDouble(child, "destinationLon", 71.5449),
+                        distanceKm = parseFlexibleDouble(child, "distanceKm", 2.5),
+                        durationMinutes = (child.child("durationMinutes").getValue(Long::class.java) ?: 5).toInt(),
+                        rideCategory = child.child("rideCategory").getValue(String::class.java) ?: "Ride A/C",
+                        agreedFare = (child.child("agreedFare").getValue(Long::class.java) ?: (child.child("assignedFare").getValue(Long::class.java) ?: (child.child("estimatedFare").getValue(Long::class.java) ?: 0))).toInt(),
+                        paymentMethod = child.child("paymentMethod").getValue(String::class.java) ?: "Cash",
+                        driverName = child.child("driverName").getValue(String::class.java) ?: "",
+                        driverRating = child.child("driverRating").getValue(Double::class.java) ?: 4.9,
+                        driverTotalRides = (child.child("driverTotalRides").getValue(Long::class.java) ?: 1400).toInt(),
+                        driverVehicleMake = child.child("driverVehicleMake").getValue(String::class.java) ?: "",
+                        driverVehicleModel = child.child("driverVehicleModel").getValue(String::class.java) ?: "",
+                        driverVehicleColor = child.child("driverVehicleColor").getValue(String::class.java) ?: "",
+                        driverPlateNumber = child.child("driverPlateNumber").getValue(String::class.java) ?: "",
+                        driverPhone = phone.ifBlank { driverPhone },
+                        assignedDriverId = assigned.ifBlank { cleanDriverId },
+                        status = statusEnum,
+                        etaMinutes = (child.child("etaMinutes").getValue(Long::class.java) ?: 5).toInt(),
+                        scheduledTimeText = child.child("scheduledTimeText").getValue(String::class.java),
+                        createdAt = child.child("createdAt").getValue(Long::class.java) ?: System.currentTimeMillis()
+                    )
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        // 1. RTDB listener on passenger_orders
+        val rtdbOrdersRef = db?.getReference("passenger_orders")
+        val rtdbOrdersListener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                var found: PassengerOrder? = null
+                if (snapshot.exists()) {
+                    for (child in snapshot.children) {
+                        val parsed = parseOrder(child)
+                        if (parsed != null) {
+                            found = parsed
+                            break
+                        }
+                    }
+                }
+                rtdbActiveTrip = found
+                checkAndEmit()
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Log.w(TAG, "RTDB listenToDriverActiveTrip error: ${error.message}")
+            }
+        }
+        rtdbOrdersRef?.addValueEventListener(rtdbOrdersListener)
+
+        // 2. Secondary RTDB listener on ride_requests
+        val rtdbReqsRef = db?.getReference("ride_requests")
+        val rtdbReqsListener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                if (rtdbActiveTrip != null) return
+                var found: PassengerOrder? = null
+                if (snapshot.exists()) {
+                    for (child in snapshot.children) {
+                        val parsed = parseOrder(child)
+                        if (parsed != null) {
+                            found = parsed
+                            break
+                        }
+                    }
+                }
+                if (rtdbActiveTrip == null && found != null) {
+                    rtdbActiveTrip = found
+                    checkAndEmit()
+                }
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        }
+        rtdbReqsRef?.addValueEventListener(rtdbReqsListener)
+
+        // 3. Firestore fallback
+        var firestoreReg: ListenerRegistration? = null
+        if (isAvailable() && firestore != null) {
+            try {
+                firestoreReg = firestore!!.collection(RIDE_REQUESTS_COLLECTION)
+                    .whereIn("status", listOf("DRIVER_COMING", "ACCEPTED", "DRIVER_ARRIVED", "IN_TRIP"))
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null || snapshot == null) return@addSnapshotListener
+                        var found: PassengerOrder? = null
+                        for (doc in snapshot.documents) {
+                            val assigned = doc.getString("assignedDriverId") ?: ""
+                            val phone = doc.getString("driverPhone") ?: ""
+                            val cleanAssigned = assigned.trim().replace(" ", "").replace("-", "")
+                            val cleanItemPhone = phone.trim().replace(" ", "").replace("-", "")
+
+                            val matches = (cleanDriverId.isNotBlank() && (cleanAssigned == cleanDriverId || assigned == driverId)) ||
+                                    (cleanPhone.isNotBlank() && (cleanAssigned == cleanPhone || cleanItemPhone == cleanPhone || phone == driverPhone))
+
+                            if (matches) {
+                                val statusStr = doc.getString("status") ?: "DRIVER_COMING"
+                                val statusEnum = when (statusStr) {
+                                    "DRIVER_ARRIVED" -> PassengerOrderStatus.DRIVER_ARRIVED
+                                    "IN_TRIP" -> PassengerOrderStatus.IN_TRIP
+                                    "COMPLETED" -> PassengerOrderStatus.COMPLETED
+                                    "CANCELLED" -> PassengerOrderStatus.CANCELLED
+                                    else -> PassengerOrderStatus.DRIVER_COMING
+                                }
+                                found = PassengerOrder(
+                                    id = doc.id,
+                                    requestId = doc.getString("requestId") ?: doc.id,
+                                    passengerId = doc.getString("passengerId") ?: "",
+                                    passengerName = doc.getString("passengerName") ?: "Passenger",
+                                    passengerEmail = doc.getString("passengerEmail") ?: "",
+                                    passengerPhone = doc.getString("passengerPhone") ?: "+92 300 9876543",
+                                    pickupTitle = doc.getString("pickupTitle") ?: "Pickup Location",
+                                    pickupSubtitle = doc.getString("pickupSubtitle") ?: "",
+                                    pickupLat = doc.getDouble("pickupLat") ?: 0.0,
+                                    pickupLon = doc.getDouble("pickupLon") ?: 0.0,
+                                    destinationTitle = doc.getString("destinationTitle") ?: "Destination",
+                                    destinationSubtitle = doc.getString("destinationSubtitle") ?: "",
+                                    destinationLat = doc.getDouble("destinationLat") ?: 0.0,
+                                    destinationLon = doc.getDouble("destinationLon") ?: 0.0,
+                                    distanceKm = doc.getDouble("distanceKm") ?: 1.0,
+                                    durationMinutes = (doc.getLong("durationMinutes") ?: 5).toInt(),
+                                    rideCategory = doc.getString("rideCategory") ?: "Ride A/C",
+                                    agreedFare = (doc.getLong("agreedFare") ?: (doc.getLong("assignedFare") ?: (doc.getLong("estimatedFare") ?: 0))).toInt(),
+                                    paymentMethod = doc.getString("paymentMethod") ?: "Cash",
+                                    driverName = doc.getString("driverName") ?: "",
+                                    driverPhone = phone.ifBlank { driverPhone },
+                                    assignedDriverId = assigned.ifBlank { cleanDriverId },
+                                    status = statusEnum,
+                                    etaMinutes = (doc.getLong("etaMinutes") ?: 5).toInt()
+                                )
+                                break
+                            }
+                        }
+                        firestoreActiveTrip = found
+                        checkAndEmit()
+                    }
+            } catch (_: Exception) {}
+        }
+
+        awaitClose {
+            rtdbOrdersRef?.removeEventListener(rtdbOrdersListener)
+            rtdbReqsRef?.removeEventListener(rtdbReqsListener)
+            firestoreReg?.remove()
         }
     }
 
