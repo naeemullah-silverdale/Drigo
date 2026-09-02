@@ -675,135 +675,141 @@ fun DriverModeView(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .align(Alignment.TopCenter)
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 36.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .align(Alignment.TopCenter)
             ) {
-                // Menu Button
-                Surface(
-                    onClick = onOpenDrawer,
-                    shape = CircleShape,
-                    color = DrigoBrandPurple,
-                    shadowElevation = 6.dp,
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "Menu",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-
-                // Driver Online / Offline Pill Button
-                Surface(
-                    onClick = onToggleOnline,
-                    shape = RoundedCornerShape(100.dp),
-                    color = if (isDriverOnline) Color(0xFF00C853) else Color(0xFF37474F),
-                    border = BorderStroke(1.5.dp, if (isDriverOnline) Color(0xFF69F0AE) else Color(0xFF78909C)),
-                    shadowElevation = 6.dp,
-                    modifier = Modifier.testTag("driver_online_toggle_chip")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isDriverOnline) Color.White else Color(0xFFB0BEC5),
-                            modifier = Modifier.size(8.dp)
-                        ) {}
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isDriverOnline) "ONLINE" else "OFFLINE",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                }
-
-                // Top Right Action Buttons: Voice Toggle + SOS + Wallet
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Voice Alert Toggle Button (Item 5)
+                    // Menu Button
                     Surface(
-                        onClick = {
-                            isVoiceAlertsEnabled = !isVoiceAlertsEnabled
-                            audioHelper.setVoiceEnabled(isVoiceAlertsEnabled)
-                            Toast.makeText(
-                                context,
-                                if (isVoiceAlertsEnabled) "Voice announcements ON" else "Voice announcements MUTED",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
+                        onClick = onOpenDrawer,
                         shape = CircleShape,
-                        color = if (isVoiceAlertsEnabled) Color(0xFF2C303E) else Color(0xFF424754),
-                        border = BorderStroke(1.dp, if (isVoiceAlertsEnabled) DrigoBrandPurple else Color.Gray),
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isVoiceAlertsEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                                contentDescription = "Voice Alerts",
-                                tint = if (isVoiceAlertsEnabled) Color.White else Color(0xFFB0BEC5),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    // SOS / Safety Center Button (Item 4)
-                    Surface(
-                        onClick = { showSafetySosSheet = true },
-                        shape = CircleShape,
-                        color = Color(0xFFD32F2F),
+                        color = DrigoBrandPurple,
                         shadowElevation = 6.dp,
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = Icons.Default.Shield,
-                                contentDescription = "Driver SOS Safety",
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Menu",
                                 tint = Color.White,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
                     }
 
-                    // Driver Earnings / Wallet Button
+                    // Driver Online / Offline Pill Button
                     Surface(
-                        onClick = onNavigateToWallet,
-                        shape = RoundedCornerShape(18.dp),
-                        color = Color(0xFF1E2026).copy(alpha = 0.92f),
-                        border = BorderStroke(1.dp, Color(0xFF00E676)),
+                        onClick = onToggleOnline,
+                        shape = RoundedCornerShape(100.dp),
+                        color = if (isDriverOnline) Color(0xFF00C853) else Color(0xFF37474F),
+                        border = BorderStroke(1.5.dp, if (isDriverOnline) Color(0xFF69F0AE) else Color(0xFF78909C)),
                         shadowElevation = 6.dp,
-                        modifier = Modifier.height(38.dp)
+                        modifier = Modifier.testTag("driver_online_toggle_chip")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountBalanceWallet,
-                                contentDescription = "Wallet",
-                                tint = Color(0xFF00E676),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isDriverOnline) Color.White else Color(0xFFB0BEC5),
+                                modifier = Modifier.size(7.dp)
+                            ) {}
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "PKR $todayEarnings",
+                                text = if (isDriverOnline) "ONLINE" else "OFFLINE",
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 12.sp,
-                                color = Color.White
+                                color = Color.White,
+                                letterSpacing = 0.5.sp
                             )
+                        }
+                    }
+
+                    // Top Right Action Buttons: Voice Toggle + SOS + Wallet
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        // Voice Alert Toggle Button (Item 5)
+                        Surface(
+                            onClick = {
+                                isVoiceAlertsEnabled = !isVoiceAlertsEnabled
+                                audioHelper.setVoiceEnabled(isVoiceAlertsEnabled)
+                                Toast.makeText(
+                                    context,
+                                    if (isVoiceAlertsEnabled) "Voice announcements ON" else "Voice announcements MUTED",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            shape = CircleShape,
+                            color = if (isVoiceAlertsEnabled) Color(0xFF2C303E) else Color(0xFF424754),
+                            border = BorderStroke(1.dp, if (isVoiceAlertsEnabled) DrigoBrandPurple else Color.Gray),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isVoiceAlertsEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                                    contentDescription = "Voice Alerts",
+                                    tint = if (isVoiceAlertsEnabled) Color.White else Color(0xFFB0BEC5),
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+
+                        // SOS / Safety Center Button (Item 4)
+                        Surface(
+                            onClick = { showSafetySosSheet = true },
+                            shape = CircleShape,
+                            color = Color(0xFFD32F2F),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = "Driver SOS Safety",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        // Driver Earnings / Wallet Button
+                        Surface(
+                            onClick = onNavigateToWallet,
+                            shape = RoundedCornerShape(18.dp),
+                            color = Color(0xFF1E2026).copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, Color(0xFF00E676)),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalanceWallet,
+                                    contentDescription = "Wallet",
+                                    tint = Color(0xFF00E676),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = "PKR $todayEarnings",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 11.sp,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -1435,7 +1441,7 @@ fun DriverModeView(
                     .offset(y = sheetTranslationY)
                     .then(
                         if (isRequestsFeedExpanded) Modifier.fillMaxHeight(0.92f)
-                        else Modifier.fillMaxHeight(0.52f)
+                        else Modifier.fillMaxHeight(0.55f)
                     )
                     .align(Alignment.BottomCenter)
                     .testTag("driver_requests_feed_panel")
@@ -1443,7 +1449,8 @@ fun DriverModeView(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     // Drag / Tap to Expand or Collapse Handle
                     Row(
@@ -1456,8 +1463,8 @@ fun DriverModeView(
                     ) {
                         Box(
                             modifier = Modifier
-                                .width(44.dp)
-                                .height(4.5.dp)
+                                .width(40.dp)
+                                .height(4.dp)
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.4f))
                         )
@@ -1473,15 +1480,19 @@ fun DriverModeView(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { isRequestsFeedExpanded = !isRequestsFeedExpanded }
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .clickable { isRequestsFeedExpanded = !isRequestsFeedExpanded }
                         ) {
                             Text(
                                 text = "Ride Requests Nearby",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Surface(
                                 shape = CircleShape,
                                 color = DrigoBrandPurple,
@@ -1502,22 +1513,6 @@ fun DriverModeView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            // Expand/Collapse Fullscreen Toggle Button
-                            IconButton(
-                                onClick = { isRequestsFeedExpanded = !isRequestsFeedExpanded },
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF282B35))
-                            ) {
-                                Icon(
-                                    imageVector = if (isRequestsFeedExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                                    contentDescription = if (isRequestsFeedExpanded) "Collapse Feed" else "Expand Fullscreen",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
                             // Filter Button Trigger
                             Surface(
                                 onClick = { showFilterSheet = true },
@@ -1526,7 +1521,7 @@ fun DriverModeView(
                                 border = BorderStroke(1.dp, if (selectedCategoryFilter != "All" || selectedMaxDistanceFilterKm != null || destinationModeActive) DrigoBrandPurple else Color(0xFF3B4052))
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
@@ -1540,9 +1535,27 @@ fun DriverModeView(
                                         text = "Filters",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
+                            }
+
+                            // Expand/Collapse Fullscreen Toggle Button
+                            IconButton(
+                                onClick = { isRequestsFeedExpanded = !isRequestsFeedExpanded },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF282B35))
+                            ) {
+                                Icon(
+                                    imageVector = if (isRequestsFeedExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                    contentDescription = if (isRequestsFeedExpanded) "Collapse Feed" else "Expand Fullscreen",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
                         }
                     }
@@ -1550,6 +1563,7 @@ fun DriverModeView(
                     // Active Filters Quick Chips (Item 3)
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 6.dp)
@@ -1617,6 +1631,7 @@ fun DriverModeView(
                     } else {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
+                            contentPadding = PaddingValues(bottom = 24.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
@@ -2846,27 +2861,38 @@ fun DriverRideRequestCard(
                     // Primary Accept CTA
                     Button(
                         onClick = onAcceptOffer,
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         modifier = Modifier
-                            .weight(1.1f)
-                            .height(48.dp)
+                            .weight(1.15f)
+                            .heightIn(min = 44.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Accept PKR ${request.estimatedFare}",
-                                fontWeight = FontWeight.ExtraBold,
+                                text = "Accept",
+                                fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "PKR ${request.estimatedFare}",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 12.sp,
+                                color = Color.White,
+                                maxLines = 1
                             )
                         }
                     }
@@ -2874,28 +2900,33 @@ fun DriverRideRequestCard(
                     // Counter Offer Button
                     OutlinedButton(
                         onClick = { expandedBidding = !expandedBidding },
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, DrigoBrandPurple),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             containerColor = if (expandedBidding) DrigoBrandPurple.copy(alpha = 0.2f) else Color.Transparent
                         ),
                         modifier = Modifier
-                            .weight(0.9f)
-                            .height(48.dp)
+                            .weight(0.85f)
+                            .heightIn(min = 44.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.TrendingUp,
                                 contentDescription = null,
                                 tint = DrigoBrandPurple,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (expandedBidding) "Close Bid" else "Raise Fare",
+                                text = if (expandedBidding) "Close" else "Raise",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                fontSize = 13.sp,
+                                maxLines = 1
                             )
                         }
                     }
