@@ -1,42 +1,34 @@
 {
   "project_info": {
-    "project_number": "250625869331",
-    "firebase_url": "https://drigo-8b15c-default-rtdb.firebaseio.com",
-    "project_id": "drigo-8b15c",
-    "storage_bucket": "drigo-8b15c.firebasestorage.app"
+    "project_number": "412324660500",
+    "firebase_url": "https://drigo-2a3a3-default-rtdb.firebaseio.com",
+    "project_id": "drigo-2a3a3",
+    "storage_bucket": "drigo-2a3a3.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:250625869331:android:a9d03bcc51e0e4bbc221e6",
+        "mobilesdk_app_id": "1:412324660500:android:968a77d894f1bd14b0ee01",
         "android_client_info": {
           "package_name": "com.drigo.app"
         }
       },
       "oauth_client": [
         {
-          "client_id": "250625869331-qo8fdh1jf27l7lifcbfhmb88d8ecd437.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.drigo.app",
-            "certificate_hash": "1ddf1375fdf5c23fa530382c9b28d8a8cc2b6b86"
-          }
-        },
-        {
-          "client_id": "250625869331-bnashirm7ttvnouop28hbl3hq203n0rf.apps.googleusercontent.com",
+          "client_id": "412324660500-kq6daqp5pfg7mrp7ta9d4l33so1g1r4s.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyBypFSH7BN6JuCTmQafTI0W0Gv0NMNMOwE"
+          "current_key": "AIzaSyAkZse6eEqmfk1DLpSw3xXy_wprzwY8mhU"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "250625869331-bnashirm7ttvnouop28hbl3hq203n0rf.apps.googleusercontent.com",
+              "client_id": "412324660500-kq6daqp5pfg7mrp7ta9d4l33so1g1r4s.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

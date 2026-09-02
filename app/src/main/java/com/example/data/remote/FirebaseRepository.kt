@@ -347,7 +347,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
         // 1. Write to Firebase Realtime Database for instant push
         try {
-            val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            val db = FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
             db.getReference("ride_chats").child(message.tripId).child(message.id).setValue(messageMap)
             Log.d(TAG, "Chat message pushed to Realtime Database for trip: ${message.tripId}")
         } catch (rtdbErr: Exception) {
@@ -378,7 +378,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
         // Listen on Firebase Realtime Database for instant live stream
         val rtdbRef = try {
-            val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            val db = FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
             db.getReference("ride_chats").child(tripId)
         } catch (_: Exception) {
             null
@@ -541,7 +541,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             // 1. Write to Firebase Realtime Database
             try {
-                val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                val db = FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 val reqRef = db.getReference("ride_requests").child(request.id)
                 reqRef.setValue(requestMap)
                 if (request.passengerId.isNotBlank()) {
@@ -623,7 +623,7 @@ class FirebaseRepository private constructor(private val context: Context) {
     suspend fun updateRideRequestStatus(requestId: String, status: String) {
         try {
             val db = try {
-                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
             } catch (_: Exception) {
                 try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
             }
@@ -652,7 +652,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             return@callbackFlow
         }
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -824,7 +824,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
         // 1. Listen to Realtime Database user ride history and active ride
         val rtdb = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -1066,7 +1066,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             )
 
             try {
-                val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                val db = FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 if (order.passengerId.isNotBlank()) {
                     db.getReference("users").child(order.passengerId).child("ride_history").child(order.id).setValue(orderMap)
                     if (order.status == PassengerOrderStatus.ACCEPTED || order.status == PassengerOrderStatus.SEARCHING || order.status == PassengerOrderStatus.DRIVER_ARRIVED || order.status == PassengerOrderStatus.IN_TRIP) {
@@ -1100,7 +1100,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             val safeReqId = requestId.ifBlank { orderId }
             val safeOrderId = orderId.ifBlank { requestId }
             val db = try {
-                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
             } catch (_: Exception) {
                 try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
             }
@@ -1245,7 +1245,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                 )
                 docRef.set(walletMap)
                 try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                         .getReference("wallets").child(safeUserId).setValue(walletMap)
                 } catch (_: Exception) {}
                 trySend(initialWallet)
@@ -1409,7 +1409,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                 firestore!!.collection(WALLET_TRANSACTIONS_COLLECTION).document(transactionId).set(txnMap).await()
 
                 try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                         .getReference("wallet_transactions").child(transactionId).setValue(txnMap)
                 } catch (_: Exception) {}
             }
@@ -1566,7 +1566,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                 firestore!!.collection(WALLETS_COLLECTION).document(safeUserId).set(walletMap).await()
 
                 try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                         .getReference("wallets").child(safeUserId).setValue(walletMap)
                 } catch (_: Exception) {}
             }
@@ -1744,7 +1744,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                 firestore!!.collection(WALLET_TRANSACTIONS_COLLECTION).document(txn.transactionId).set(txnMap).await()
             } catch (_: Exception) {}
             try {
-                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                     .getReference("wallet_transactions").child(txn.transactionId).setValue(txnMap)
             } catch (_: Exception) {}
         }
@@ -1854,7 +1854,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             // Save to Realtime Database with timeout fallback
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -1929,7 +1929,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -1979,7 +1979,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2000,7 +2000,7 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
 
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -2134,7 +2134,7 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
 
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -2202,7 +2202,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2237,7 +2237,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2273,7 +2273,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2294,7 +2294,7 @@ class FirebaseRepository private constructor(private val context: Context) {
      */
     fun listenToAllDriverVerifications(): Flow<List<DriverVerification>> = callbackFlow {
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -2418,7 +2418,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2505,7 +2505,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2559,7 +2559,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             // Save to Firebase Realtime Database
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2585,7 +2585,7 @@ class FirebaseRepository private constructor(private val context: Context) {
      */
     fun listenToDriverOffers(requestId: String): Flow<List<DriverOffer>> = callbackFlow {
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -2654,7 +2654,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
         try {
             val db = try {
-                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
             } catch (_: Exception) {
                 FirebaseDatabase.getInstance()
             }
@@ -2673,7 +2673,7 @@ class FirebaseRepository private constructor(private val context: Context) {
      */
     fun listenToLiveDriverLocation(rideId: String): Flow<LiveDriverLocation?> = callbackFlow {
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -2728,7 +2728,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
         try {
             val db = try {
-                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
             } catch (_: Exception) {
                 FirebaseDatabase.getInstance()
             }
@@ -2797,7 +2797,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             // 2. Save to Firebase Realtime Database
             try {
                 val rtdb = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2883,7 +2883,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             // 2. Realtime Database
             try {
                 val rtdb = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2939,7 +2939,7 @@ class FirebaseRepository private constructor(private val context: Context) {
             // 1. Save to Realtime Database
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
@@ -2975,7 +2975,7 @@ class FirebaseRepository private constructor(private val context: Context) {
         val safeUserId = userId.ifBlank { "user_default" }
 
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
@@ -3029,7 +3029,7 @@ class FirebaseRepository private constructor(private val context: Context) {
 
             try {
                 val db = try {
-                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                    FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
                 } catch (_: Exception) {
                     FirebaseDatabase.getInstance()
                 }
