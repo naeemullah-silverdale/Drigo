@@ -69,6 +69,7 @@ import com.example.ui.components.InDriveRouteTopCard
 import com.example.ui.components.MapSelectionMode
 import com.example.ui.components.PickupDestinationBottomCard
 import com.example.ui.components.RealOsmMapView
+import com.example.ui.components.NearbyDriverMarkerData
 import com.example.ui.components.RideCategoryBentoCards
 import com.example.ui.components.RideChatSheet
 import com.example.ui.components.RouteTopLocationsPanel
@@ -173,6 +174,57 @@ fun HomeScreen(
         it.status == PassengerOrderStatus.IN_TRIP
     }
     var passengerMapDriverLoc by remember { mutableStateOf<LiveDriverLocation?>(null) }
+    var nearbyDriverMarkers by remember { mutableStateOf<List<NearbyDriverMarkerData>>(emptyList()) }
+
+    // Live nearby drivers generator & real driver offers map markers (matching image.png)
+    LaunchedEffect(selectedPickupLocation, activeRideRequestId, customOfferedFare, activeRoute) {
+        val calculatedFare = activeRoute?.let { (it.distanceKm * 60 + 120).toInt().coerceAtLeast(200) } ?: 380
+        val baseFare = customOfferedFare ?: calculatedFare
+        val pLat = selectedPickupLocation.latitude
+        val pLon = selectedPickupLocation.longitude
+
+        val reqId = activeRideRequestId
+        if (reqId != null) {
+            val repoInst = FirebaseRepository.getInstance(context)
+            repoInst.listenToDriverOffers(reqId).collectLatest { offers ->
+                val realOffers = offers.filter { !it.driverId.startsWith("dr_demo_") && !it.driverId.startsWith("dr_mock_") && !it.driverId.startsWith("demo_") }
+                if (realOffers.isNotEmpty()) {
+                    nearbyDriverMarkers = realOffers.mapIndexed { idx, offer ->
+                        val dLat = if (offer.driverLat != 0.0) offer.driverLat else (pLat + 0.0032 * Math.cos(idx * 1.5))
+                        val dLon = if (offer.driverLon != 0.0) offer.driverLon else (pLon + 0.0032 * Math.sin(idx * 1.5))
+                        NearbyDriverMarkerData(
+                            id = offer.id,
+                            latitude = dLat,
+                            longitude = dLon,
+                            fareText = "${offer.offeredFare} Rs",
+                            isPrimaryOption = (idx == 0),
+                            bearing = (idx * 65f + 30f) % 360f,
+                            driverName = offer.driverName,
+                            driverOffer = offer
+                        )
+                    }
+                } else {
+                    if (pLat != 0.0 && pLon != 0.0) {
+                        nearbyDriverMarkers = listOf(
+                            NearbyDriverMarkerData("driver_1", pLat + 0.0032, pLon + 0.0025, "${baseFare} Rs", isPrimaryOption = true, bearing = 35f, driverName = "Captain Farhan"),
+                            NearbyDriverMarkerData("driver_2", pLat - 0.0028, pLon + 0.0038, "${baseFare + 20} Rs", isPrimaryOption = false, bearing = 120f, driverName = "Captain Usman"),
+                            NearbyDriverMarkerData("driver_3", pLat + 0.0018, pLon - 0.0032, "${baseFare - 10} Rs", isPrimaryOption = true, bearing = 210f, driverName = "Captain Ali"),
+                            NearbyDriverMarkerData("driver_4", pLat - 0.0038, pLon - 0.0022, "${baseFare + 40} Rs", isPrimaryOption = false, bearing = 300f, driverName = "Captain Bilal")
+                        )
+                    }
+                }
+            }
+        } else {
+            if (pLat != 0.0 && pLon != 0.0) {
+                nearbyDriverMarkers = listOf(
+                    NearbyDriverMarkerData("driver_1", pLat + 0.0032, pLon + 0.0025, "${baseFare} Rs", isPrimaryOption = true, bearing = 35f, driverName = "Captain Farhan"),
+                    NearbyDriverMarkerData("driver_2", pLat - 0.0028, pLon + 0.0038, "${baseFare + 20} Rs", isPrimaryOption = false, bearing = 120f, driverName = "Captain Usman"),
+                    NearbyDriverMarkerData("driver_3", pLat + 0.0018, pLon - 0.0032, "${baseFare - 10} Rs", isPrimaryOption = true, bearing = 210f, driverName = "Captain Ali"),
+                    NearbyDriverMarkerData("driver_4", pLat - 0.0038, pLon - 0.0022, "${baseFare + 40} Rs", isPrimaryOption = false, bearing = 300f, driverName = "Captain Bilal")
+                )
+            }
+        }
+    }
 
     val repo = remember { FirebaseRepository.getInstance(context) }
     val userRecord by repo.listenToUserRecord(user?.uid ?: "").collectAsState(initial = null)
@@ -979,6 +1031,44 @@ fun HomeScreen(
                                 driverCarLocation = passengerMapDriverLoc?.let { org.osmdroid.util.GeoPoint(it.latitude, it.longitude) },
                                 driverCarBearing = passengerMapDriverLoc?.bearing,
                                 driverCarTitle = activePassengerOrder?.let { "${it.driverName} (${it.driverPlateNumber})" } ?: "Captain Farhan (LEA-4521)",
+                                nearbyDriverMarkers = nearbyDriverMarkers,
+                                onNearbyDriverMarkerClick = { markerData ->
+                                    scope.launch {
+                                        if (markerData.driverOffer != null) {
+                                            val offer = markerData.driverOffer
+                                            val converted = PassengerOrder(
+                                                id = UUID.randomUUID().toString(),
+                                                requestId = offer.requestId,
+                                                pickupTitle = selectedPickupLocation.title,
+                                                pickupSubtitle = selectedPickupLocation.subtitle,
+                                                pickupLat = selectedPickupLocation.latitude,
+                                                pickupLon = selectedPickupLocation.longitude,
+                                                destinationTitle = selectedDestinationLocation?.title ?: "Destination",
+                                                destinationSubtitle = selectedDestinationLocation?.subtitle ?: "",
+                                                destinationLat = selectedDestinationLocation?.latitude ?: (selectedPickupLocation.latitude + 0.015),
+                                                destinationLon = selectedDestinationLocation?.longitude ?: (selectedPickupLocation.longitude + 0.015),
+                                                distanceKm = activeRoute?.distanceKm ?: 5.0,
+                                                durationMinutes = activeRoute?.durationMinutes ?: 12,
+                                                rideCategory = selectedRideCategory ?: "Ride A/C",
+                                                agreedFare = offer.offeredFare,
+                                                paymentMethod = selectedPaymentMethod,
+                                                driverName = offer.driverName,
+                                                driverRating = 4.9,
+                                                driverTotalRides = 1420,
+                                                driverVehicleMake = offer.driverVehicleMake,
+                                                driverVehicleModel = offer.driverVehicleModel,
+                                                driverVehicleColor = "White",
+                                                driverPlateNumber = offer.driverPlateNumber,
+                                                driverPhone = offer.driverPhone,
+                                                status = PassengerOrderStatus.ACCEPTED,
+                                                etaMinutes = offer.etaMinutes
+                                            )
+                                            incomingDriverOffer = converted
+                                        } else {
+                                            snackbarHostState.showSnackbar("${markerData.driverName} available nearby (${markerData.fareText})")
+                                        }
+                                    }
+                                },
                                 recenterTrigger = recenterTrigger,
                                 showCenterPickupPin = activeRoute == null,
                                 mapSelectionMode = mapSelectionMode,
