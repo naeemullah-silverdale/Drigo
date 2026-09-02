@@ -612,7 +612,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                                 timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
                             )
                         } catch (e: Exception) { null }
-                    }
+                    }.filter { it.status != "CANCELLED" && it.status != "COMPLETED" && it.status != "REJECTED" }
                     trySend(requests)
                 }
             }
@@ -749,7 +749,21 @@ class FirebaseRepository private constructor(private val context: Context) {
         defaultOrders.forEach { historyOrdersMap[it.id] = it }
 
         fun emitCombined() {
-            val all = (activeOrdersMap.values + historyOrdersMap.values).sortedByDescending { it.createdAt }
+            val cancelledOrCompletedReqIds = historyOrdersMap.values
+                .filter { it.status == PassengerOrderStatus.CANCELLED || it.status == PassengerOrderStatus.COMPLETED }
+                .map { it.requestId.ifBlank { it.id } }
+                .toSet()
+
+            activeOrdersMap.entries.removeAll {
+                it.key in cancelledOrCompletedReqIds ||
+                it.value.requestId in cancelledOrCompletedReqIds ||
+                it.value.status == PassengerOrderStatus.CANCELLED ||
+                it.value.status == PassengerOrderStatus.COMPLETED
+            }
+
+            val all = (activeOrdersMap.values + historyOrdersMap.values)
+                .distinctBy { it.id.ifBlank { it.requestId } }
+                .sortedByDescending { it.createdAt }
             trySend(all)
         }
 
@@ -770,6 +784,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                     if (snapshot.exists()) {
                         val id = snapshot.child("id").getValue(String::class.java) ?: "active_rtdb"
+                        val reqId = snapshot.child("requestId").getValue(String::class.java) ?: id
                         val statusStr = snapshot.child("status").getValue(String::class.java) ?: "ACCEPTED"
                         val status = try {
                             PassengerOrderStatus.valueOf(statusStr)
@@ -778,7 +793,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                         }
                         val order = PassengerOrder(
                             id = id,
-                            requestId = id,
+                            requestId = reqId,
                             passengerId = safeUserId,
                             passengerEmail = safeEmail,
                             pickupTitle = snapshot.child("pickupTitle").getValue(String::class.java) ?: "Pickup Location",
@@ -804,9 +819,15 @@ class FirebaseRepository private constructor(private val context: Context) {
                             driverPhone = snapshot.child("driverPhone").getValue(String::class.java) ?: "+92 300 1234567",
                             createdAt = snapshot.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
                         )
-                        activeOrdersMap[id] = order
+                        if (status == PassengerOrderStatus.CANCELLED || status == PassengerOrderStatus.COMPLETED) {
+                            activeOrdersMap.remove(id)
+                            activeOrdersMap.remove(reqId)
+                            historyOrdersMap[id] = order
+                        } else {
+                            activeOrdersMap[id] = order
+                        }
                     } else {
-                        activeOrdersMap.remove("active_rtdb")
+                        activeOrdersMap.clear()
                     }
                     emitCombined()
                 }
@@ -822,6 +843,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                     if (snapshot.exists()) {
                         for (child in snapshot.children) {
                             val id = child.child("id").getValue(String::class.java) ?: child.key ?: UUID.randomUUID().toString()
+                            val reqId = child.child("requestId").getValue(String::class.java) ?: id
                             val statusStr = child.child("status").getValue(String::class.java) ?: "COMPLETED"
                             val status = try {
                                 PassengerOrderStatus.valueOf(statusStr)
@@ -830,7 +852,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                             }
                             val order = PassengerOrder(
                                 id = id,
-                                requestId = id,
+                                requestId = reqId,
                                 passengerId = safeUserId,
                                 passengerEmail = safeEmail,
                                 pickupTitle = child.child("pickupTitle").getValue(String::class.java) ?: "Pickup",
@@ -857,6 +879,8 @@ class FirebaseRepository private constructor(private val context: Context) {
                                 createdAt = child.child("timestamp").getValue(Long::class.java) ?: child.child("createdAt").getValue(Long::class.java) ?: System.currentTimeMillis()
                             )
                             if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
+                                activeOrdersMap.remove(id)
+                                activeOrdersMap.remove(reqId)
                                 historyOrdersMap[id] = order
                             } else {
                                 activeOrdersMap[id] = order
@@ -888,18 +912,21 @@ class FirebaseRepository private constructor(private val context: Context) {
                             for (doc in snapshot.documents) {
                                 val pId = doc.getString("passengerId") ?: ""
                                 val pEmail = doc.getString("passengerEmail") ?: ""
-                                val matchesUser = pId == safeUserId || (pEmail.isNotBlank() && pEmail.equals(safeEmail, ignoreCase = true))
-                                if (matchesUser || pId.isNotBlank()) {
+                                val matchesUser = (safeUserId.isNotBlank() && pId == safeUserId) || (safeEmail.isNotBlank() && pEmail.equals(safeEmail, ignoreCase = true))
+                                if (matchesUser) {
                                     val id = doc.getString("id") ?: doc.id
+                                    val reqId = doc.getString("requestId") ?: id
                                     val statusStr = doc.getString("status") ?: "SEARCHING_DRIVERS"
                                     val status = try {
                                         PassengerOrderStatus.valueOf(statusStr)
                                     } catch (_: Exception) {
-                                        if (statusStr == "SEARCHING_DRIVERS") PassengerOrderStatus.SEARCHING else PassengerOrderStatus.ACCEPTED
+                                        if (statusStr == "SEARCHING_DRIVERS") PassengerOrderStatus.SEARCHING
+                                        else if (statusStr == "CANCELLED") PassengerOrderStatus.CANCELLED
+                                        else PassengerOrderStatus.ACCEPTED
                                     }
                                     val order = PassengerOrder(
                                         id = id,
-                                        requestId = id,
+                                        requestId = reqId,
                                         passengerId = pId,
                                         passengerEmail = pEmail,
                                         pickupTitle = doc.getString("pickupTitle") ?: "Pickup",
@@ -926,6 +953,8 @@ class FirebaseRepository private constructor(private val context: Context) {
                                         createdAt = doc.getLong("timestamp") ?: System.currentTimeMillis()
                                     )
                                     if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
+                                        activeOrdersMap.remove(id)
+                                        activeOrdersMap.remove(reqId)
                                         historyOrdersMap[id] = order
                                     } else {
                                         activeOrdersMap[id] = order
@@ -1015,16 +1044,66 @@ class FirebaseRepository private constructor(private val context: Context) {
 
     suspend fun cancelPassengerOrder(orderId: String, requestId: String, userId: String): Result<Unit> {
         return try {
-            val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
-            if (userId.isNotBlank()) {
-                db.getReference("users").child(userId).child("active_ride_request").removeValue()
-                db.getReference("users").child(userId).child("ride_history").child(orderId).child("status").setValue("CANCELLED")
+            val safeReqId = requestId.ifBlank { orderId }
+            val safeOrderId = orderId.ifBlank { requestId }
+            val db = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
             }
-            db.getReference("ride_requests").child(requestId.ifBlank { orderId }).child("status").setValue("CANCELLED")
 
-            if (isAvailable()) {
+            if (db != null) {
+                if (userId.isNotBlank()) {
+                    try {
+                        db.getReference("users").child(userId).child("active_ride_request").removeValue().await()
+                    } catch (_: Exception) {}
+                    if (safeOrderId.isNotBlank()) {
+                        try {
+                            db.getReference("users").child(userId).child("ride_history").child(safeOrderId).child("status").setValue("CANCELLED").await()
+                        } catch (_: Exception) {}
+                    }
+                    if (safeReqId.isNotBlank() && safeReqId != safeOrderId) {
+                        try {
+                            db.getReference("users").child(userId).child("ride_history").child(safeReqId).child("status").setValue("CANCELLED").await()
+                        } catch (_: Exception) {}
+                    }
+                }
+                if (safeReqId.isNotBlank()) {
+                    try {
+                        db.getReference("ride_requests").child(safeReqId).child("status").setValue("CANCELLED").await()
+                        db.getReference("driver_offers").child(safeReqId).removeValue().await()
+                        db.getReference("live_driver_locations").child(safeReqId).removeValue().await()
+                    } catch (_: Exception) {}
+                }
+                if (safeOrderId.isNotBlank() && safeOrderId != safeReqId) {
+                    try {
+                        db.getReference("ride_requests").child(safeOrderId).child("status").setValue("CANCELLED").await()
+                        db.getReference("driver_offers").child(safeOrderId).removeValue().await()
+                        db.getReference("live_driver_locations").child(safeOrderId).removeValue().await()
+                    } catch (_: Exception) {}
+                }
+                if (safeOrderId.isNotBlank()) {
+                    try {
+                        db.getReference("passenger_orders").child(safeOrderId).child("status").setValue("CANCELLED").await()
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (isAvailable() && firestore != null) {
                 try {
-                    firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(requestId.ifBlank { orderId }).update("status", "CANCELLED").await()
+                    if (safeReqId.isNotBlank()) {
+                        firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(safeReqId).update("status", "CANCELLED").await()
+                    }
+                } catch (_: Exception) {}
+                try {
+                    if (safeOrderId.isNotBlank() && safeOrderId != safeReqId) {
+                        firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(safeOrderId).update("status", "CANCELLED").await()
+                    }
+                } catch (_: Exception) {}
+                try {
+                    if (safeOrderId.isNotBlank()) {
+                        firestore!!.collection("passenger_orders").document(safeOrderId).update("status", "CANCELLED").await()
+                    }
                 } catch (_: Exception) {}
             }
             Result.success(Unit)
@@ -2585,7 +2664,7 @@ class FirebaseRepository private constructor(private val context: Context) {
     }
 
     /**
-     * Driver updates active trip status: ARRIVED -> IN_TRIP -> COMPLETED
+     * Driver updates active trip status: ARRIVED -> IN_TRIP -> COMPLETED -> CANCELLED
      */
     suspend fun updateDriverTripStatus(orderId: String, status: PassengerOrderStatus) {
         val updates = mapOf<String, Any>(
@@ -2601,11 +2680,22 @@ class FirebaseRepository private constructor(private val context: Context) {
                 FirebaseDatabase.getInstance()
             }
             db.getReference("passenger_orders").child(orderId).updateChildren(updates).await()
+            db.getReference("ride_requests").child(orderId).child("status").setValue(status.name).await()
+
+            if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
+                try {
+                    db.getReference("live_driver_locations").child(orderId).removeValue().await()
+                    db.getReference("driver_offers").child(orderId).removeValue().await()
+                } catch (_: Exception) {}
+            }
         } catch (_: Exception) {}
 
         if (isAvailable() && firestore != null) {
             try {
                 firestore!!.collection("passenger_orders").document(orderId).update(updates).await()
+            } catch (_: Exception) {}
+            try {
+                firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(orderId).update("status", status.name).await()
             } catch (_: Exception) {}
         }
     }

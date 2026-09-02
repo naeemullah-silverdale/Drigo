@@ -49,6 +49,7 @@ import com.example.ui.theme.DrigoBrandPurple
 import com.example.util.DriverAudioHelper
 import com.example.util.RideNotificationManager
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -163,7 +164,9 @@ fun DriverModeView(
     // Combined active requests list
     val allRequests = remember(firebaseRequests, seedRequests) {
         val fbIds = firebaseRequests.map { it.id }.toSet()
-        firebaseRequests + seedRequests.filter { it.id !in fbIds }
+        (firebaseRequests + seedRequests.filter { it.id !in fbIds }).filter {
+            it.status != "CANCELLED" && it.status != "COMPLETED" && it.status != "REJECTED"
+        }
     }
 
     // Centralized Ride Notification Manager
@@ -314,6 +317,45 @@ fun DriverModeView(
                 if (active != null) {
                     activeDriverTrip = active
                 }
+            } else {
+                val current = orders.firstOrNull { it.id == activeDriverTrip?.id || it.requestId == activeDriverTrip?.requestId }
+                if (current != null && (current.status == PassengerOrderStatus.CANCELLED || current.status == PassengerOrderStatus.COMPLETED)) {
+                    activeDriverTrip = null
+                    driverRouteResult = null
+                    Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Real-time trip status listener on RTDB ride_requests (clears active trip immediately on cancellation)
+    LaunchedEffect(activeDriverTrip?.id, activeDriverTrip?.requestId) {
+        val trip = activeDriverTrip
+        val reqId = trip?.requestId?.ifBlank { trip.id }
+        if (reqId != null) {
+            val db = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+            }
+            if (db != null) {
+                val statusRef = db.getReference("ride_requests").child(reqId).child("status")
+                val statusListener = object : com.google.firebase.database.ValueEventListener {
+                    override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                        val status = snapshot.getValue(String::class.java)
+                        if (status == "CANCELLED") {
+                            activeDriverTrip = null
+                            driverRouteResult = null
+                            Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
+                            notifManager.notifyDriverRideCancelled(
+                                passengerName = trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" },
+                                rideId = trip.id
+                            )
+                        }
+                    }
+                    override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+                }
+                statusRef.addValueEventListener(statusListener)
             }
         }
     }
