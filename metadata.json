@@ -1,0 +1,6 @@
+{
+  "name": "Drigo",
+  "description": "Drigo - Smart mobility and ridesharing platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
