@@ -172,7 +172,7 @@ class MainViewModel(
 
     private fun fetchUserModeFromDb(uid: String) {
         val db = try {
-            FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
         } catch (_: Exception) {
             FirebaseDatabase.getInstance()
         }

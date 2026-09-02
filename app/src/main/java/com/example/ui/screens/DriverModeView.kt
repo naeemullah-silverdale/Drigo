@@ -334,7 +334,7 @@ fun DriverModeView(
         val reqId = trip?.requestId?.ifBlank { trip.id }
         if (reqId != null) {
             val db = try {
-                FirebaseDatabase.getInstance("https://drigo-2a3a3-default-rtdb.firebaseio.com")
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
             } catch (_: Exception) {
                 try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
             }

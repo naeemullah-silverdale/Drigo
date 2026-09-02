@@ -31,8 +31,8 @@ class GoogleAuthClient(
             val resClientId = context.getString(resId)
             if (resClientId.isNotBlank()) return resClientId
         }
-        // Web Client ID (client_type 3) from Firebase project 412324660500 (drigo-2a3a3)
-        return "412324660500-kq6daqp5pfg7mrp7ta9d4l33so1g1r4s.apps.googleusercontent.com"
+        // Web Client ID (client_type 3) from Firebase project 250625869331 (drigo-8b15c)
+        return "250625869331-bnashirm7ttvnouop28hbl3hq203n0rf.apps.googleusercontent.com"
     }
 
     suspend fun signInWithGoogle(customServerClientId: String? = null): Result<FirebaseUser?> {

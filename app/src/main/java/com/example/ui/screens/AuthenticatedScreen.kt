@@ -204,7 +204,7 @@ fun AuthenticatedScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Project: drigo-2a3a3",
+                        text = "Project: drigo-8b15c",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
