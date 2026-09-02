@@ -45,6 +45,7 @@ fun SignInScreen(
     onSignInWithEmail: suspend (String, String) -> Result<Unit>,
     onSignInWithGoogle: suspend () -> Result<Unit>,
     onForgotPassword: suspend (String) -> Result<Unit>,
+    onContinueAsGuest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var email by remember { mutableStateOf("") }
@@ -65,11 +66,13 @@ fun SignInScreen(
     val scrollState = rememberScrollState()
 
     fun performSignIn() {
-        if (email.isBlank()) {
+        val cleanEmail = email.trim().lowercase()
+        val cleanPassword = password.trim()
+        if (cleanEmail.isBlank()) {
             errorMessage = "Please enter your email address"
             return
         }
-        if (password.isBlank()) {
+        if (cleanPassword.isBlank()) {
             errorMessage = "Please enter your password"
             return
         }
@@ -77,7 +80,7 @@ fun SignInScreen(
         successMessage = null
         isLoading = true
         coroutineScope.launch {
-            val result = onSignInWithEmail(email.trim(), password)
+            val result = onSignInWithEmail(cleanEmail, cleanPassword)
             isLoading = false
             if (result.isSuccess) {
                 onSignInSuccess()
@@ -260,19 +263,52 @@ fun SignInScreen(
             // Error Message banner
             if (errorMessage != null) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp)
                 ) {
-                    Text(
-                        text = errorMessage ?: "",
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodySmall,
+                    Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        textAlign = TextAlign.Center
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = errorMessage ?: "",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                        val isCredIssue = errorMessage?.contains("incorrect", ignoreCase = true) == true ||
+                                errorMessage?.contains("sign up", ignoreCase = true) == true ||
+                                errorMessage?.contains("account", ignoreCase = true) == true ||
+                                errorMessage?.contains("credentials", ignoreCase = true) == true
+                        if (isCredIssue) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onNavigateToSignUp() },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Create Account", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                FilledTonalButton(
+                                    onClick = onContinueAsGuest,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Continue as Guest", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -531,6 +567,28 @@ fun SignInScreen(
                         .clickable { onNavigateToSignUp() }
                         .testTag("navigate_signup_btn")
                         .padding(4.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Continue as Guest button
+            OutlinedButton(
+                onClick = onContinueAsGuest,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .testTag("signin_continue_guest_btn")
+            ) {
+                Text(
+                    text = "Continue as Guest",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium
                 )
             }
 

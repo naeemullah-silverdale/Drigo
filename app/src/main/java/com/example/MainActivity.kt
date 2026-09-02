@@ -119,6 +119,9 @@ fun DrigoApp(viewModel: MainViewModel) {
                     },
                     onForgotPassword = { email ->
                         viewModel.sendPasswordReset(email)
+                    },
+                    onContinueAsGuest = {
+                        viewModel.continueAsGuest()
                     }
                 )
             }
@@ -138,6 +141,9 @@ fun DrigoApp(viewModel: MainViewModel) {
                     },
                     onSignInWithGoogle = {
                         viewModel.signInWithGoogle(context)
+                    },
+                    onContinueAsGuest = {
+                        viewModel.continueAsGuest()
                     }
                 )
             }

@@ -45,6 +45,7 @@ fun SignUpScreen(
     onSignUpSuccess: () -> Unit,
     onSignUpWithEmail: suspend (String, String, String) -> Result<Unit>,
     onSignInWithGoogle: suspend () -> Result<Unit>,
+    onContinueAsGuest: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var fullName by remember { mutableStateOf("") }
@@ -61,23 +62,28 @@ fun SignUpScreen(
     val scrollState = rememberScrollState()
 
     fun performSignUp() {
-        if (fullName.isBlank()) {
+        val cleanName = fullName.trim()
+        val cleanEmail = email.trim().lowercase()
+        val cleanPassword = password.trim()
+        val cleanConfirm = confirmPassword.trim()
+
+        if (cleanName.isBlank()) {
             errorMessage = "Please enter your full name"
             return
         }
-        if (email.isBlank()) {
+        if (cleanEmail.isBlank()) {
             errorMessage = "Please enter your email address"
             return
         }
-        if (password.isBlank()) {
+        if (cleanPassword.isBlank()) {
             errorMessage = "Please enter a password"
             return
         }
-        if (password.length < 6) {
+        if (cleanPassword.length < 6) {
             errorMessage = "Password must be at least 6 characters"
             return
         }
-        if (password != confirmPassword) {
+        if (cleanPassword != cleanConfirm) {
             errorMessage = "Passwords do not match"
             return
         }
@@ -85,7 +91,7 @@ fun SignUpScreen(
         errorMessage = null
         isLoading = true
         coroutineScope.launch {
-            val result = onSignUpWithEmail(fullName.trim(), email.trim(), password)
+            val result = onSignUpWithEmail(cleanName, cleanEmail, cleanPassword)
             isLoading = false
             if (result.isSuccess) {
                 onSignUpSuccess()
@@ -180,19 +186,50 @@ fun SignUpScreen(
 
             if (errorMessage != null) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.95f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 16.dp)
                 ) {
-                    Text(
-                        text = errorMessage ?: "",
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodySmall,
+                    Column(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        textAlign = TextAlign.Center
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = errorMessage ?: "",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                        val isExistingUser = errorMessage?.contains("already exists", ignoreCase = true) == true ||
+                                errorMessage?.contains("sign in instead", ignoreCase = true) == true
+                        if (isExistingUser) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onNavigateToSignIn() },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Go to Sign In", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                FilledTonalButton(
+                                    onClick = onContinueAsGuest,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("Continue as Guest", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -497,6 +534,28 @@ fun SignUpScreen(
                         .clickable { onNavigateToSignIn() }
                         .testTag("navigate_signin_btn")
                         .padding(4.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Continue as Guest button
+            OutlinedButton(
+                onClick = onContinueAsGuest,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .testTag("signup_continue_guest_btn")
+            ) {
+                Text(
+                    text = "Continue as Guest",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium
                 )
             }
 

@@ -358,6 +358,12 @@ class MainViewModel(
         _currentScreen.value = AppScreen.WELCOME
     }
 
+    fun continueAsGuest() {
+        _currentUser.value = null
+        _userMode.value = UserMode.PASSENGER
+        _currentScreen.value = AppScreen.HOME_PLACEHOLDER
+    }
+
     suspend fun createRideRequest(
         context: Context,
         pickupTitle: String,
