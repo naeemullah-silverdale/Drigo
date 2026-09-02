@@ -988,9 +988,31 @@ fun DriverModeView(
             }
         }
 
-        // Verified Driver Success Banner
-        var showVerifiedBanner by remember { mutableStateOf(true) }
+        // Verified Driver Success Banner (Shown only ONCE upon approval, not every mode switch)
+        val driverPrefs = remember(context) { context.getSharedPreferences("driver_prefs", Context.MODE_PRIVATE) }
+        val bannerKey = remember(driverId) { "verified_banner_shown_$driverId" }
         val isVerifiedOrApproved = parsedVerStatus == DriverVerificationStatus.APPROVED
+
+        var showVerifiedBanner by remember(driverId, parsedVerStatus) {
+            val alreadyShown = driverPrefs.getBoolean(bannerKey, false)
+            mutableStateOf(isVerifiedOrApproved && !alreadyShown)
+        }
+
+        // Reset persistent flag if status is no longer approved (so future re-approval can notify once)
+        LaunchedEffect(parsedVerStatus, bannerKey) {
+            if (parsedVerStatus != DriverVerificationStatus.APPROVED) {
+                driverPrefs.edit().putBoolean(bannerKey, false).apply()
+            }
+        }
+
+        // Auto-dismiss banner after 8 seconds and persist dismissal
+        LaunchedEffect(showVerifiedBanner, bannerKey) {
+            if (showVerifiedBanner) {
+                delay(8000L)
+                showVerifiedBanner = false
+                driverPrefs.edit().putBoolean(bannerKey, true).apply()
+            }
+        }
 
         if (isVerifiedOrApproved && showVerifiedBanner && activeDriverTrip == null) {
             Surface(
@@ -1023,7 +1045,10 @@ fun DriverModeView(
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(
-                        onClick = { showVerifiedBanner = false },
+                        onClick = {
+                            showVerifiedBanner = false
+                            driverPrefs.edit().putBoolean(bannerKey, true).apply()
+                        },
                         modifier = Modifier.size(24.dp)
                     ) {
                         Icon(
