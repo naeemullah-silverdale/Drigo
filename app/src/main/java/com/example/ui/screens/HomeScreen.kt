@@ -11,6 +11,11 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -1638,6 +1643,25 @@ fun HomeScreen(
                                                 }
                                             }
                                         )
+                                    } else if (activeRideRequestId != null) {
+                                        // ===== RIDE REQUEST POSTED: Searching for real drivers =====
+                                        SearchingForDriversCard(
+                                            pickupTitle = selectedPickupLocation.title,
+                                            destinationTitle = selectedDestinationLocation?.title ?: "Destination",
+                                            rideCategory = selectedRideCategory ?: "Ride A/C",
+                                            offeredFare = effectiveCustomFare,
+                                            onCancelSearch = {
+                                                scope.launch {
+                                                    val repo = FirebaseRepository.getInstance(context)
+                                                    val reqId = activeRideRequestId
+                                                    if (reqId != null) {
+                                                        repo.updateRideRequestStatus(reqId, "CANCELLED")
+                                                    }
+                                                    activeRideRequestId = null
+                                                    snackbarHostState.showSnackbar("Ride search cancelled")
+                                                }
+                                            }
+                                        )
                                     } else if (activeRoute != null) {
                                         // ===== ROUTE ACTIVE: inDrive Full Ride Selection UI (Attachments 1, 2, 3) =====
 
@@ -2544,7 +2568,8 @@ fun DriverOfferDialog(
 
 /**
  * Modern Active Captain Assigned Card for the passenger bottom sheet.
- * Displays live ETA, distance, captain info, vehicle plate, fare, and quick actions (Call, Chat, SOS, Cancel).
+ * Displays live ETA, distance, captain info, vehicle plate, fare, and quick actions (Call, Chat, SOS, Cancel, Share).
+ * Matches trip progress screen specifications and reference layout.
  */
 @Composable
 fun ActiveCaptainAssignedCard(
@@ -2554,87 +2579,76 @@ fun ActiveCaptainAssignedCard(
     onOpenChat: () -> Unit,
     onOpenSafety: () -> Unit,
     onCancelRide: () -> Unit,
+    onShareTrip: () -> Unit = {},
+    onDetailsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val etaMins = liveLocation?.etaMinutes ?: order.etaMinutes
-    val distKm = liveLocation?.distanceRemainingKm ?: 1.2
+    val distKm = liveLocation?.distanceRemainingKm ?: order.distanceKm
     val isArrived = order.status == PassengerOrderStatus.DRIVER_ARRIVED || (liveLocation?.status == PassengerOrderStatus.DRIVER_ARRIVED.name)
+    val isInTrip = order.status == PassengerOrderStatus.IN_TRIP || (liveLocation?.status == PassengerOrderStatus.IN_TRIP.name)
+
+    var isSharingLocationWithDriver by remember { mutableStateOf(true) }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 1. Live Status & ETA Header Banner
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = if (isArrived) Color(0xFF00E676).copy(alpha = 0.15f) else Color(0xFF1E293B),
-            border = BorderStroke(1.dp, if (isArrived) Color(0xFF00E676) else InDriveLimeGreen.copy(alpha = 0.5f)),
-            modifier = Modifier.fillMaxWidth()
+        // 1. Top Header Title & ETA
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isArrived) Color(0xFF00E676) else InDriveLimeGreen,
-                        modifier = Modifier.size(10.dp)
-                    ) {}
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isArrived) "CAPTAIN ARRIVED" else "CAPTAIN COMING",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 13.sp,
-                        color = if (isArrived) Color(0xFF00E676) else InDriveLimeGreen,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF222631)
-                ) {
-                    Text(
-                        text = if (isArrived) "At Pickup Location" else "~$etaMins min (${String.format(Locale.US, "%.1f", distKm)} km)",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
+            Text(
+                text = when {
+                    isInTrip -> "Trip in progress!"
+                    isArrived -> "Driver Has Arrived!"
+                    else -> "Driver on its way!"
+                },
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isArrived) Color(0xFF00E676) else Color(0xFFFF2A2A)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = if (isArrived) "At pickup location" else "Arriving in ~$etaMins min",
+                fontSize = 13.sp,
+                color = Color(0xFFA0A6B5)
+            )
         }
 
-        // 2. Captain Profile & Vehicle Card
+        // 2. Driver & Vehicle Profile Card
         Surface(
             shape = RoundedCornerShape(18.dp),
-            color = Color(0xFF222631),
-            border = BorderStroke(1.dp, Color(0xFF333A4C)),
+            color = Color(0xFF1E222D),
+            border = BorderStroke(1.dp, Color(0xFF2C3242)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Profile Photo / Avatar
                     Surface(
                         shape = CircleShape,
-                        color = DrigoBrandPurple.copy(alpha = 0.3f),
+                        color = Color(0xFF2C303B),
                         border = BorderStroke(2.dp, InDriveLimeGreen),
-                        modifier = Modifier.size(50.dp)
+                        modifier = Modifier.size(54.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.Person,
-                                contentDescription = null,
+                                contentDescription = "Driver Avatar",
                                 tint = Color.White,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(30.dp)
                             )
                         }
                     }
@@ -2642,67 +2656,45 @@ fun ActiveCaptainAssignedCard(
                     Spacer(modifier = Modifier.width(12.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = order.driverName.ifBlank { "Captain" },
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 16.sp
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color(0xFFFFB300).copy(alpha = 0.2f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Star,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFFB300),
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Text(
-                                        text = "${order.driverRating}",
-                                        color = Color(0xFFFFB300),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(2.dp))
-
                         Text(
-                            text = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}".trim().ifBlank { "Toyota Corolla White" },
+                            text = order.driverName.ifBlank { "Captain" },
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}".trim().ifBlank { "White Suzuki Mehran" },
                             color = Color(0xFFA0A6B5),
                             fontSize = 12.sp
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = Color(0xFFFFB300),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "${order.driverRating} (${order.driverTotalRides} reviews)",
+                                color = Color(0xFFA0A6B5),
+                                fontSize = 12.sp
+                            )
+                        }
                     }
 
-                    // License Plate Badge
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF181A20),
-                        border = BorderStroke(1.dp, Color(0xFF3E4455))
-                    ) {
-                        Text(
-                            text = order.driverPlateNumber.ifBlank { "LEA-4521" },
-                            fontWeight = FontWeight.ExtraBold,
-                            color = InDriveLimeGreen,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
+                    // Right Car Icon
+                    Icon(
+                        imageVector = Icons.Default.DirectionsCar,
+                        contentDescription = "Car",
+                        tint = Color(0xFFA0A6B5),
+                        modifier = Modifier.size(36.dp)
+                    )
                 }
 
-                HorizontalDivider(color = Color(0xFF333A4C).copy(alpha = 0.6f))
-
-                // Agreed Fare & Pickup Info
+                // Plate Box & Details Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2710,93 +2702,389 @@ fun ActiveCaptainAssignedCard(
                 ) {
                     Column {
                         Text(
-                            text = "Agreed Fare (Cash / Wallet)",
+                            text = "Car Number",
                             color = Color(0xFFA0A6B5),
                             fontSize = 11.sp
                         )
-                        Text(
-                            text = "PKR ${"%,d".format(order.agreedFare)}",
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            fontSize = 18.sp
-                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF14171F),
+                            border = BorderStroke(1.dp, Color(0xFF333A4C))
+                        ) {
+                            Text(
+                                text = order.driverPlateNumber.ifBlank { "LRF3341" },
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
                     }
 
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF2C303B),
-                        modifier = Modifier.padding(2.dp)
+                    Text(
+                        text = "Details",
+                        color = Color(0xFFFF2A2A),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .clickable { onDetailsClick() }
+                            .padding(8.dp)
+                    )
+                }
+
+                // Action Buttons: Call & Message
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onCallCaptain,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2A2A)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("call_captain_btn")
                     ) {
-                        Text(
-                            text = order.rideCategory,
-                            color = Color(0xFFA0A6B5),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        Icon(Icons.Default.Phone, contentDescription = "Call", tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Call", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    Button(
+                        onClick = onOpenChat,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2A2A)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("chat_captain_btn")
+                    ) {
+                        Icon(Icons.Default.Chat, contentDescription = "Message", tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Message", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                 }
             }
         }
 
-        // 3. Quick Action Buttons Row: Call, Chat, Safety, Cancel
+        // 3. Locations Section (Pickup & Destination)
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF1E222D),
+            border = BorderStroke(1.dp, Color(0xFF2C3242)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Pickup Item
+                Row(verticalAlignment = Alignment.Top) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFF00E676),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(10.dp)
+                    ) {}
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = order.pickupTitle.ifBlank { "Pickup Location" },
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
+                        if (order.pickupSubtitle.isNotBlank()) {
+                            Text(
+                                text = order.pickupSubtitle,
+                                color = Color(0xFFA0A6B5),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    color = Color(0xFF2C3242),
+                    modifier = Modifier.padding(start = 22.dp)
+                )
+
+                // Destination Item
+                Row(verticalAlignment = Alignment.Top) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFFFF2A2A),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .size(10.dp)
+                    ) {}
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = order.destinationTitle.ifBlank { "Destination" },
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
+                        if (order.destinationSubtitle.isNotBlank()) {
+                            Text(
+                                text = order.destinationSubtitle,
+                                color = Color(0xFFA0A6B5),
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    Text(
+                        text = "${String.format(Locale.US, "%.1f", distKm)}km",
+                        color = Color(0xFFA0A6B5),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // 4. Payment Method
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF1E222D),
+            border = BorderStroke(1.dp, Color(0xFF2C3242)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Payment method",
+                        color = Color(0xFFA0A6B5),
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Cash : Rs. ${"%,d".format(order.agreedFare)}",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 15.sp
+                    )
+                }
+
+                Icon(
+                    imageVector = Icons.Default.Payments,
+                    contentDescription = "Cash",
+                    tint = Color(0xFF00E676),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        // 5. Share Location Switch Row
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF1E222D),
+            border = BorderStroke(1.dp, Color(0xFF2C3242)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Share my location with driver",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                Switch(
+                    checked = isSharingLocationWithDriver,
+                    onCheckedChange = { isSharingLocationWithDriver = it },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFFF2A2A),
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = Color(0xFF2C3242)
+                    )
+                )
+            }
+        }
+
+        // 6. Bottom Buttons Row: Cancel Ride & Share
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Call Button
             Button(
-                onClick = onCallCaptain,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C303B)),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(46.dp)
-                    .testTag("call_captain_btn"),
-                contentPadding = PaddingValues(horizontal = 8.dp)
-            ) {
-                Icon(Icons.Default.Phone, contentDescription = "Call", tint = Color(0xFF00E676), modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Call", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-
-            // Chat Button
-            Button(
-                onClick = onOpenChat,
-                colors = ButtonDefaults.buttonColors(containerColor = InDriveLimeGreen),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(46.dp)
-                    .testTag("chat_captain_btn"),
-                contentPadding = PaddingValues(horizontal = 8.dp)
-            ) {
-                Icon(Icons.Default.Chat, contentDescription = "Chat", tint = Color.White, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Chat", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-
-            // Safety / SOS Button
-            IconButton(
-                onClick = onOpenSafety,
-                modifier = Modifier
-                    .size(46.dp)
-                    .background(Color(0xFF2C303B), RoundedCornerShape(14.dp))
-                    .testTag("safety_captain_btn")
-            ) {
-                Icon(Icons.Default.Security, contentDescription = "Safety", tint = Color(0xFFFF5252), modifier = Modifier.size(20.dp))
-            }
-
-            // Cancel Button
-            IconButton(
                 onClick = onCancelRide,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2A2A)),
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
-                    .size(46.dp)
-                    .background(Color(0xFF2C303B), RoundedCornerShape(14.dp))
+                    .weight(1f)
+                    .height(48.dp)
                     .testTag("cancel_captain_ride_btn")
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Cancel Ride", tint = Color(0xFFA0A6B5), modifier = Modifier.size(20.dp))
+                Text("Cancel Ride", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
+
+            Button(
+                onClick = onShareTrip,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C3242)),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+            ) {
+                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Share", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+/**
+ * Animated Searching Card displayed when ride request is sent to Firebase.
+ */
+@Composable
+fun SearchingForDriversCard(
+    pickupTitle: String,
+    destinationTitle: String,
+    rideCategory: String,
+    offeredFare: Int,
+    onCancelSearch: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Radar / Searching Spinner
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(80.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = InDriveLimeGreen.copy(alpha = 0.15f * alpha),
+                modifier = Modifier.fillMaxSize()
+            ) {}
+            Surface(
+                shape = CircleShape,
+                color = InDriveLimeGreen.copy(alpha = 0.3f),
+                modifier = Modifier.size(56.dp)
+            ) {}
+            CircularProgressIndicator(
+                color = InDriveLimeGreen,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(44.dp)
+            )
+            Icon(
+                imageVector = Icons.Default.DirectionsCar,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "Searching for drivers...",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Connecting your request to available active captains",
+                fontSize = 12.sp,
+                color = Color(0xFFA0A6B5)
+            )
+        }
+
+        // Summary box
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFF1E222D),
+            border = BorderStroke(1.dp, Color(0xFF2C3242)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = CircleShape, color = Color(0xFF00E676), modifier = Modifier.size(8.dp)) {}
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = pickupTitle.ifBlank { "Pickup Location" },
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = CircleShape, color = Color(0xFFFF2A2A), modifier = Modifier.size(8.dp)) {}
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = destinationTitle.ifBlank { "Destination" },
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                HorizontalDivider(color = Color(0xFF2C3242))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = rideCategory, color = Color(0xFFA0A6B5), fontSize = 12.sp)
+                    Text(
+                        text = "PKR ${"%,d".format(offeredFare)}",
+                        fontWeight = FontWeight.Bold,
+                        color = InDriveLimeGreen,
+                        fontSize = 15.sp
+                    )
+                }
+            }
+        }
+
+        // Cancel Button
+        Button(
+            onClick = onCancelSearch,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C3242)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+        ) {
+            Text("Cancel Request", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold, fontSize = 14.sp)
         }
     }
 }
