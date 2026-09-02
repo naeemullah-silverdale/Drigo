@@ -456,6 +456,71 @@ fun HomeScreen(
         }
     }
 
+    // Centralized cancel function that immediately updates Passenger UI & sets Firebase status to CANCELLED
+    val cancelRideAndReturnHome: (orderId: String, requestId: String) -> Unit = { orderId, requestId ->
+        val safeReqId = requestId.ifBlank { orderId }
+        val safeOrderId = orderId.ifBlank { requestId }
+        val currentUserId = user?.uid ?: ""
+
+        // 1. Immediately reset Passenger UI to return to normal Home/booking screen
+        activeRideRequestId = null
+        activeRoute = null
+        selectedDestinationLocation = null
+        passengerMapDriverLoc = null
+        incomingDriverOffer = null
+        nearbyDriverMarkers = emptyList()
+        isBookingInProgress = false
+        isRideSheetExpanded = false
+        customOfferedFare = null
+        passengerNavTab = 0
+        showChatSheet = false
+        showSafetySheet = false
+        showSafetyReportModal = false
+        passengerOrders = passengerOrders.map {
+            if (it.id == safeOrderId || (safeReqId.isNotBlank() && (it.requestId == safeReqId || it.id == safeReqId))) {
+                it.copy(status = PassengerOrderStatus.CANCELLED)
+            } else it
+        }
+
+        // 2. Update ride status in Firebase to CANCELLED asynchronously
+        scope.launch {
+            try {
+                val repo = FirebaseRepository.getInstance(context)
+                if (safeReqId.isNotBlank()) {
+                    repo.updateRideRequestStatus(safeReqId, "CANCELLED")
+                }
+                repo.cancelPassengerOrder(safeOrderId, safeReqId, currentUserId)
+            } catch (e: Exception) {
+                android.util.Log.w("HomeScreen", "Error during cancelPassengerOrder: ${e.message}")
+            }
+            snackbarHostState.showSnackbar("Ride Cancelled")
+        }
+    }
+
+    // Automatically return passenger to normal home/booking screen if active ride is cancelled in Firebase
+    LaunchedEffect(activeRideRequestId) {
+        val reqId = activeRideRequestId ?: return@LaunchedEffect
+        val repo = FirebaseRepository.getInstance(context)
+        repo.listenToRideRequestStatus(reqId).collectLatest { status ->
+            if (status == "CANCELLED" || status == "REJECTED") {
+                activeRideRequestId = null
+                activeRoute = null
+                selectedDestinationLocation = null
+                passengerMapDriverLoc = null
+                incomingDriverOffer = null
+                nearbyDriverMarkers = emptyList()
+                isBookingInProgress = false
+                isRideSheetExpanded = false
+                customOfferedFare = null
+                passengerOrders = passengerOrders.map {
+                    if (it.requestId == reqId || it.id == reqId) {
+                        it.copy(status = PassengerOrderStatus.CANCELLED)
+                    } else it
+                }
+            }
+        }
+    }
+
     // City to City Passenger Multi-Step Flow State (Screenshots 1, 2, 3)
     var cityToCityStep by remember { mutableStateOf(CityToCityStep.WHAT_RIDE) }
     var cityRideType by remember { mutableStateOf(CityRideType.PRIVATE) }
@@ -1732,29 +1797,7 @@ fun HomeScreen(
                                                 showSafetySheet = true
                                             },
                                             onCancelRide = {
-                                                scope.launch {
-                                                    val repo = FirebaseRepository.getInstance(context)
-                                                    val orderId = order.id
-                                                    val reqId = order.requestId
-                                                    val userId = user?.uid ?: ""
-                                                    repo.cancelPassengerOrder(orderId, reqId, userId)
-                                                    passengerOrders = passengerOrders.map {
-                                                        if (it.id == orderId || (reqId.isNotBlank() && (it.requestId == reqId || it.id == reqId))) {
-                                                            it.copy(status = PassengerOrderStatus.CANCELLED)
-                                                        } else it
-                                                    }
-                                                    passengerMapDriverLoc = null
-                                                    activeRideRequestId = null
-                                                    incomingDriverOffer = null
-                                                    activeRoute = null
-                                                    selectedDestinationLocation = null
-                                                    isRideSheetExpanded = false
-                                                    customOfferedFare = null
-                                                    nearbyDriverMarkers = emptyList()
-                                                    isBookingInProgress = false
-                                                    passengerNavTab = 0
-                                                    snackbarHostState.showSnackbar("Ride Cancelled")
-                                                }
+                                                cancelRideAndReturnHome(order.id, order.requestId)
                                             }
                                         )
                                     } else if (activeRideRequestId != null) {
@@ -1765,30 +1808,7 @@ fun HomeScreen(
                                             rideCategory = selectedRideCategory ?: "Ride A/C",
                                             offeredFare = effectiveCustomFare,
                                             onCancelSearch = {
-                                                scope.launch {
-                                                    val repo = FirebaseRepository.getInstance(context)
-                                                    val reqId = activeRideRequestId
-                                                    if (reqId != null) {
-                                                        repo.cancelPassengerOrder("", reqId, user?.uid ?: "")
-                                                        repo.updateRideRequestStatus(reqId, "CANCELLED")
-                                                    }
-                                                    passengerOrders = passengerOrders.map {
-                                                        if (it.requestId == reqId || it.id == reqId) {
-                                                            it.copy(status = PassengerOrderStatus.CANCELLED)
-                                                        } else it
-                                                    }
-                                                    passengerMapDriverLoc = null
-                                                    activeRideRequestId = null
-                                                    incomingDriverOffer = null
-                                                    activeRoute = null
-                                                    selectedDestinationLocation = null
-                                                    isRideSheetExpanded = false
-                                                    customOfferedFare = null
-                                                    nearbyDriverMarkers = emptyList()
-                                                    isBookingInProgress = false
-                                                    passengerNavTab = 0
-                                                    snackbarHostState.showSnackbar("Ride Cancelled")
-                                                }
+                                                cancelRideAndReturnHome("", activeRideRequestId ?: "")
                                             }
                                         )
                                     } else if (activeRoute != null) {
@@ -2101,28 +2121,7 @@ fun HomeScreen(
                     showChatSheet = true
                 },
                 onCancelOrder = { order ->
-                    val repo = FirebaseRepository.getInstance(context)
-                    scope.launch {
-                        val orderId = order.id
-                        val reqId = order.requestId
-                        val userId = user?.uid ?: ""
-                        repo.cancelPassengerOrder(orderId, reqId, userId)
-                        passengerOrders = passengerOrders.map {
-                            if (it.id == orderId || (reqId.isNotBlank() && (it.requestId == reqId || it.id == reqId))) {
-                                it.copy(status = PassengerOrderStatus.CANCELLED)
-                            } else it
-                        }
-                        passengerMapDriverLoc = null
-                        activeRideRequestId = null
-                        incomingDriverOffer = null
-                        activeRoute = null
-                        selectedDestinationLocation = null
-                        isRideSheetExpanded = false
-                        customOfferedFare = null
-                        nearbyDriverMarkers = emptyList()
-                        isBookingInProgress = false
-                        snackbarHostState.showSnackbar("Ride Cancelled")
-                    }
+                    cancelRideAndReturnHome(order.id, order.requestId)
                 },
                 onRebookTrip = { order ->
                     passengerNavTab = 0

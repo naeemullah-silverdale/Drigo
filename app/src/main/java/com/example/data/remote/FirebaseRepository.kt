@@ -622,15 +622,68 @@ class FirebaseRepository private constructor(private val context: Context) {
 
     suspend fun updateRideRequestStatus(requestId: String, status: String) {
         try {
-            FirebaseDatabase.getInstance().getReference("ride_requests")
-                .child(requestId).child("status").setValue(status).await()
+            val db = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+            }
+            db?.getReference("ride_requests")?.child(requestId)?.child("status")?.setValue(status)?.await()
+            if (status == "CANCELLED" || status == "COMPLETED" || status == "REJECTED") {
+                db?.getReference("driver_offers")?.child(requestId)?.removeValue()?.await()
+                db?.getReference("live_driver_locations")?.child(requestId)?.removeValue()?.await()
+            }
         } catch (_: Exception) {}
 
-        if (isAvailable()) {
+        if (isAvailable() && firestore != null) {
             try {
                 firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(requestId)
                     .update("status", status).await()
             } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Real-time listener for single ride request status updates
+     */
+    fun listenToRideRequestStatus(requestId: String): Flow<String?> = callbackFlow {
+        if (requestId.isBlank()) {
+            trySend(null)
+            close()
+            return@callbackFlow
+        }
+        val db = try {
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+        } catch (_: Exception) {
+            try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+        }
+
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val status = snapshot.getValue(String::class.java)
+                trySend(status)
+            }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        }
+
+        val statusRef = db?.getReference("ride_requests")?.child(requestId)?.child("status")
+        statusRef?.addValueEventListener(listener)
+
+        var firestoreReg: ListenerRegistration? = null
+        if (isAvailable() && firestore != null) {
+            try {
+                firestoreReg = firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(requestId)
+                    .addSnapshotListener { snap, err ->
+                        if (err == null && snap != null && snap.exists()) {
+                            val st = snap.getString("status")
+                            if (st != null) trySend(st)
+                        }
+                    }
+            } catch (_: Exception) {}
+        }
+
+        awaitClose {
+            statusRef?.removeEventListener(listener)
+            firestoreReg?.remove()
         }
     }
 
