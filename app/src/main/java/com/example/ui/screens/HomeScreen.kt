@@ -331,7 +331,8 @@ fun HomeScreen(
             val repo = FirebaseRepository.getInstance(context)
             repo.listenToDriverOffers(reqId).collectLatest { offers ->
                 if (activePassengerOrder != null) return@collectLatest
-                val latestOffer = offers.lastOrNull()
+                val realOffers = offers.filter { !it.driverId.startsWith("dr_demo_") && !it.driverId.startsWith("dr_mock_") && !it.driverId.startsWith("demo_") }
+                val latestOffer = realOffers.lastOrNull()
                 if (latestOffer != null && incomingDriverOffer == null) {
                     val converted = PassengerOrder(
                         id = UUID.randomUUID().toString(),
@@ -481,61 +482,11 @@ fun HomeScreen(
             showBookingDialog = false
             activeRideRequestId = request.id
 
-            val newOrder = PassengerOrder(
-                id = UUID.randomUUID().toString(),
-                requestId = request.id,
-                pickupTitle = selectedPickupLocation.title,
-                pickupSubtitle = selectedPickupLocation.subtitle,
-                pickupLat = selectedPickupLocation.latitude,
-                pickupLon = selectedPickupLocation.longitude,
-                destinationTitle = dest.title,
-                destinationSubtitle = dest.subtitle,
-                destinationLat = dest.latitude,
-                destinationLon = dest.longitude,
-                distanceKm = dist,
-                durationMinutes = duration,
-                rideCategory = cat,
-                agreedFare = finalFare,
-                paymentMethod = selectedPaymentMethod,
-                driverName = "Captain Farhan",
-                driverRating = 4.9,
-                driverTotalRides = 1420,
-                driverVehicleMake = "Toyota",
-                driverVehicleModel = "Corolla",
-                driverVehicleColor = "White",
-                driverPlateNumber = "LEA-4521",
-                driverPhone = "+92 300 1234567",
-                status = PassengerOrderStatus.ACCEPTED,
-                etaMinutes = 4,
-                scheduledTimeText = if (!cityTimingIsNow && selectedTopCategory == "city") cityScheduledDateTimeText else null,
-                passengerCount = cityPassengerCount,
-                comments = cityComments
-            )
-
-            if (autoAcceptOffer) {
-                passengerOrders = listOf(newOrder) + passengerOrders.filter { it.id != newOrder.id }
-                repo.savePassengerOrder(newOrder)
-                snackbarHostState.showSnackbar("Offer of PKR ${finalFare} auto-accepted! View in 'My orders' tab.")
-            } else {
-                incomingDriverOffer = newOrder
-                repo.savePassengerOrder(newOrder.copy(status = PassengerOrderStatus.SEARCHING))
-            }
-
             if (result.isSuccess) {
                 val shortId = request.id.takeLast(6).uppercase()
-                snackbarHostState.showSnackbar("Ride Request #$shortId saved to Firebase! Searching for drivers...")
-                notifManager.notifyDriverFound(
-                    driverName = "Captain Farhan",
-                    etaMinutes = 4,
-                    rideId = request.id
-                )
+                snackbarHostState.showSnackbar("Ride Request #$shortId sent! Searching for real nearby drivers...")
             } else {
-                snackbarHostState.showSnackbar("Ride Request created locally. Connecting to Firebase...")
-                notifManager.notifyDriverFound(
-                    driverName = "Captain Farhan",
-                    etaMinutes = 4,
-                    rideId = request.id
-                )
+                snackbarHostState.showSnackbar("Ride Request created. Searching for real nearby drivers...")
             }
         }
     }
