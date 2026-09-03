@@ -248,6 +248,9 @@ fun RealOsmMapView(
                 }
                 pickupMarker?.position = pickupPt
                 pickupMarker?.title = "Pickup: ${fromLocation.title}"
+                if (toLocation == null && routeResult == null) {
+                    map.controller.animateTo(pickupPt)
+                }
                 map.invalidate()
             } else {
                 pickupMarker?.let { map.overlays.remove(it) }
@@ -423,6 +426,10 @@ fun RealOsmMapView(
 
                     val allLats = mutableListOf(startPt.latitude, destPt.latitude)
                     val allLngs = mutableListOf(startPt.longitude, destPt.longitude)
+                    routeResult.points.forEach { pt ->
+                        allLats.add(pt.latitude)
+                        allLngs.add(pt.longitude)
+                    }
                     toLocation?.let {
                         if (it.latitude != 0.0 || it.longitude != 0.0) {
                             allLats.add(it.latitude)
@@ -545,6 +552,12 @@ fun RealOsmMapView(
                     overlays.add(pinMarker)
                     locationMarker = pinMarker
 
+                    val centerUpdateRunnable = Runnable {
+                        mapCenter?.let { center ->
+                            currentOnMapCenterChanged(center.latitude, center.longitude)
+                        }
+                    }
+
                     // Gesture detector for instant, precise map taps
                     val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
                         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
@@ -566,6 +579,7 @@ fun RealOsmMapView(
                                 downY = event.y
                                 isDragEngaged = false
                                 interactionHandler.removeCallbacks(restoreInteractionRunnable)
+                                interactionHandler.removeCallbacks(centerUpdateRunnable)
                             }
                             MotionEvent.ACTION_POINTER_DOWN -> {
                                 v.parent?.requestDisallowInterceptTouchEvent(true)
@@ -588,6 +602,8 @@ fun RealOsmMapView(
                                     scheduleRestoration(1500L)
                                 }
                                 isDragEngaged = false
+                                interactionHandler.removeCallbacks(centerUpdateRunnable)
+                                interactionHandler.postDelayed(centerUpdateRunnable, 200L)
                             }
                         }
                         false
@@ -599,12 +615,16 @@ fun RealOsmMapView(
                             if (isInteractingRef[0]) {
                                 scheduleRestoration(1500L)
                             }
+                            interactionHandler.removeCallbacks(centerUpdateRunnable)
+                            interactionHandler.postDelayed(centerUpdateRunnable, 300L)
                             return true
                         }
 
                         override fun onZoom(event: ZoomEvent?): Boolean {
                             startInteractionOnce()
                             scheduleRestoration(1500L)
+                            interactionHandler.removeCallbacks(centerUpdateRunnable)
+                            interactionHandler.postDelayed(centerUpdateRunnable, 300L)
                             return true
                         }
                     })

@@ -29,6 +29,7 @@ import com.example.ui.screens.AdminVerificationScreen
 import com.example.ui.screens.GoogleDriveDocumentsScreen
 import com.example.ui.theme.DrigoTheme
 import com.example.util.RideNotificationManager
+import com.example.data.remote.FirebaseRepository
 import com.example.viewmodel.AppScreen
 import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.UserMode
@@ -38,6 +39,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            FirebaseRepository.getInstance(applicationContext)
+        } catch (_: Exception) {}
+        handleNotificationIntent(intent)
         // Initialize OsmDroid userAgent configuration before map views load
         try {
             Configuration.getInstance().userAgentValue = packageName
@@ -49,6 +54,19 @@ class MainActivity : ComponentActivity() {
                     DrigoApp(viewModel = viewModel)
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    private fun handleNotificationIntent(intent: android.content.Intent?) {
+        if (intent?.getBooleanExtra("OPEN_DRIVER_MODE", false) == true) {
+            viewModel.setUserMode(UserMode.DRIVER)
+            viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
         }
     }
 }
@@ -75,6 +93,7 @@ fun DrigoApp(viewModel: MainViewModel) {
     val userMode by viewModel.userMode.collectAsState()
     val isDriverOnline by viewModel.isDriverOnline.collectAsState()
     val driverVerification by viewModel.driverVerification.collectAsState()
+    val liveRideRequests by viewModel.liveRideRequests.collectAsState()
 
     // Handle back button presses according to screen stack
     BackHandler(enabled = currentScreen != AppScreen.WELCOME && currentScreen != AppScreen.HOME_PLACEHOLDER && currentScreen != AppScreen.SIGN_IN) {
@@ -167,7 +186,8 @@ fun DrigoApp(viewModel: MainViewModel) {
                     onNavigateToGoogleDrive = {
                         viewModel.navigateTo(AppScreen.GOOGLE_DRIVE_DOCUMENTS)
                     },
-                    driverVerification = driverVerification
+                    driverVerification = driverVerification,
+                    liveRideRequests = liveRideRequests
                 )
             }
             AppScreen.WALLET -> {

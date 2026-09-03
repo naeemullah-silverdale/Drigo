@@ -75,14 +75,13 @@ class LocationHelper(private val context: Context) {
         val callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 val loc = result.lastLocation ?: return
-                val geocodeResult = reverseGeocode(loc.latitude, loc.longitude)
                 trySend(
                     UserLocationData(
                         latitude = loc.latitude,
                         longitude = loc.longitude,
-                        addressLine = geocodeResult.first,
-                        areaName = geocodeResult.second,
-                        city = geocodeResult.third,
+                        addressLine = "${String.format(Locale.US, "%.5f", loc.latitude)}, ${String.format(Locale.US, "%.5f", loc.longitude)}",
+                        areaName = "Current Location",
+                        city = "Peshawar",
                         bearing = if (loc.hasBearing()) loc.bearing else 0f,
                         speedKmh = if (loc.hasSpeed()) (loc.speed * 3.6f) else 0f
                     )
@@ -97,7 +96,9 @@ class LocationHelper(private val context: Context) {
         }
 
         awaitClose {
-            fusedLocationClient.removeLocationUpdates(callback)
+            try {
+                fusedLocationClient.removeLocationUpdates(callback)
+            } catch (_: Throwable) {}
         }
     }
 

@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -98,6 +99,7 @@ fun HomeScreen(
     onNavigateToWallet: () -> Unit = {},
     onNavigateToGoogleDrive: () -> Unit = {},
     driverVerification: com.example.data.model.DriverVerification? = null,
+    liveRideRequests: List<com.example.data.model.RideRequest> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -175,11 +177,19 @@ fun HomeScreen(
         it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
         it.status == PassengerOrderStatus.IN_TRIP
     }
+    val isRideActive = activePassengerOrder != null
     var passengerMapDriverLoc by remember { mutableStateOf<LiveDriverLocation?>(null) }
     var nearbyDriverMarkers by remember { mutableStateOf<List<NearbyDriverMarkerData>>(emptyList()) }
 
+    val repo = remember { FirebaseRepository.getInstance(context) }
+    val realActiveDrivers by repo.listenToActiveOnlineDrivers().collectAsState(initial = emptyList())
+    val userRecord by repo.listenToUserRecord(user?.uid ?: "").collectAsState(initial = null)
+    val passengerAccStatus = remember(userRecord) {
+        com.example.data.model.parsePassengerAccountStatus(userRecord?.accountStatus, null)
+    }
+
     // Live nearby drivers generator & real driver offers map markers (matching image.png)
-    LaunchedEffect(selectedPickupLocation, activeRideRequestId, customOfferedFare, activeRoute) {
+    LaunchedEffect(selectedPickupLocation, activeRideRequestId, customOfferedFare, activeRoute, realActiveDrivers) {
         val calculatedFare = activeRoute?.let { (it.distanceKm * 60 + 120).toInt().coerceAtLeast(200) } ?: 380
         val baseFare = customOfferedFare ?: calculatedFare
         val pLat = selectedPickupLocation.latitude
@@ -206,7 +216,20 @@ fun HomeScreen(
                         )
                     }
                 } else {
-                    if (pLat != 0.0 && pLon != 0.0) {
+                    val availableDrivers = realActiveDrivers.filter { it.driverId != user?.uid }
+                    if (availableDrivers.isNotEmpty()) {
+                        nearbyDriverMarkers = availableDrivers.mapIndexed { idx, d ->
+                            NearbyDriverMarkerData(
+                                id = d.driverId,
+                                latitude = d.latitude,
+                                longitude = d.longitude,
+                                fareText = "${baseFare} Rs",
+                                isPrimaryOption = (idx == 0),
+                                bearing = d.bearing,
+                                driverName = d.driverName
+                            )
+                        }
+                    } else if (pLat != 0.0 && pLon != 0.0) {
                         nearbyDriverMarkers = listOf(
                             NearbyDriverMarkerData("driver_1", pLat + 0.0032, pLon + 0.0025, "${baseFare} Rs", isPrimaryOption = true, bearing = 35f, driverName = "Captain Farhan"),
                             NearbyDriverMarkerData("driver_2", pLat - 0.0028, pLon + 0.0038, "${baseFare + 20} Rs", isPrimaryOption = false, bearing = 120f, driverName = "Captain Usman"),
@@ -217,7 +240,20 @@ fun HomeScreen(
                 }
             }
         } else {
-            if (pLat != 0.0 && pLon != 0.0) {
+            val availableDrivers = realActiveDrivers.filter { it.driverId != user?.uid }
+            if (availableDrivers.isNotEmpty()) {
+                nearbyDriverMarkers = availableDrivers.mapIndexed { idx, d ->
+                    NearbyDriverMarkerData(
+                        id = d.driverId,
+                        latitude = d.latitude,
+                        longitude = d.longitude,
+                        fareText = "${baseFare} Rs",
+                        isPrimaryOption = (idx == 0),
+                        bearing = d.bearing,
+                        driverName = d.driverName
+                    )
+                }
+            } else if (pLat != 0.0 && pLon != 0.0) {
                 nearbyDriverMarkers = listOf(
                     NearbyDriverMarkerData("driver_1", pLat + 0.0032, pLon + 0.0025, "${baseFare} Rs", isPrimaryOption = true, bearing = 35f, driverName = "Captain Farhan"),
                     NearbyDriverMarkerData("driver_2", pLat - 0.0028, pLon + 0.0038, "${baseFare + 20} Rs", isPrimaryOption = false, bearing = 120f, driverName = "Captain Usman"),
@@ -228,10 +264,22 @@ fun HomeScreen(
         }
     }
 
-    val repo = remember { FirebaseRepository.getInstance(context) }
-    val userRecord by repo.listenToUserRecord(user?.uid ?: "").collectAsState(initial = null)
-    val passengerAccStatus = remember(userRecord) {
-        com.example.data.model.parsePassengerAccountStatus(userRecord?.accountStatus, null)
+    // Automatically sync passenger's selected From (pickup) and To (destination) locations to Firebase (only when not in active ride)
+    LaunchedEffect(selectedPickupLocation, selectedDestinationLocation, user?.uid, isRideActive) {
+        val uid = user?.uid
+        if (!uid.isNullOrBlank() && !isRideActive) {
+            repo.savePassengerLocations(
+                userId = uid,
+                pickupTitle = selectedPickupLocation.title,
+                pickupSubtitle = selectedPickupLocation.subtitle,
+                pickupLat = selectedPickupLocation.latitude,
+                pickupLon = selectedPickupLocation.longitude,
+                destinationTitle = selectedDestinationLocation?.title ?: "",
+                destinationSubtitle = selectedDestinationLocation?.subtitle ?: "",
+                destinationLat = selectedDestinationLocation?.latitude ?: 0.0,
+                destinationLon = selectedDestinationLocation?.longitude ?: 0.0
+            )
+        }
     }
 
     LaunchedEffect(activePassengerOrder?.requestId, activePassengerOrder?.id) {
@@ -355,21 +403,22 @@ fun HomeScreen(
     // Notification Manager Instance
     val notifManager = remember(context) { RideNotificationManager.getInstance(context) }
     var lastKnownPassengerOrderStatus by remember { mutableStateOf<PassengerOrderStatus?>(null) }
+    var lastKnownPassengerOrderId by remember { mutableStateOf<String?>(null) }
 
-    // Listen to active passenger order status changes and dispatch notifications
+    // Listen to active passenger order status changes and dispatch notifications strictly for the single active ride
     LaunchedEffect(activePassengerOrder?.id, activePassengerOrder?.status) {
         val order = activePassengerOrder
-        if (order != null && order.status != lastKnownPassengerOrderStatus) {
+        if (order != null && (order.status != lastKnownPassengerOrderStatus || order.id != lastKnownPassengerOrderId)) {
+            lastKnownPassengerOrderId = order.id
+            lastKnownPassengerOrderStatus = order.status
             when (order.status) {
                 PassengerOrderStatus.ACCEPTED -> {
-                    if (lastKnownPassengerOrderStatus != null) {
-                        notifManager.notifyDriverAccepted(
-                            driverName = order.driverName.ifBlank { "Captain" },
-                            farePkr = order.agreedFare,
-                            vehicleModel = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}".trim(),
-                            rideId = order.id
-                        )
-                    }
+                    notifManager.notifyDriverAccepted(
+                        driverName = order.driverName.ifBlank { "Captain" },
+                        farePkr = order.agreedFare,
+                        vehicleModel = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}".trim(),
+                        rideId = order.id
+                    )
                 }
                 PassengerOrderStatus.DRIVER_ARRIVED -> {
                     notifManager.notifyDriverArrived(
@@ -389,16 +438,21 @@ fun HomeScreen(
                         farePkr = order.agreedFare,
                         rideId = order.id
                     )
+                    notifManager.clearVoiceQueueAndTracking()
                 }
                 PassengerOrderStatus.CANCELLED -> {
                     notifManager.notifyPassengerRideCancelled(
                         reason = "Trip ended",
                         rideId = order.id
                     )
+                    notifManager.clearVoiceQueueAndTracking()
                 }
                 else -> Unit
             }
-            lastKnownPassengerOrderStatus = order.status
+        } else if (order == null && lastKnownPassengerOrderId != null) {
+            lastKnownPassengerOrderId = null
+            lastKnownPassengerOrderStatus = null
+            notifManager.clearVoiceQueueAndTracking()
         }
     }
 
@@ -429,13 +483,14 @@ fun HomeScreen(
                         agreedFare = latestOffer.offeredFare,
                         paymentMethod = selectedPaymentMethod,
                         driverName = latestOffer.driverName,
-                        driverRating = 4.9,
-                        driverTotalRides = 1420,
+                        driverRating = if (latestOffer.driverRating > 0) latestOffer.driverRating else 5.0,
+                        driverTotalRides = latestOffer.driverTotalRides,
                         driverVehicleMake = latestOffer.driverVehicleMake,
                         driverVehicleModel = latestOffer.driverVehicleModel,
-                        driverVehicleColor = "White",
+                        driverVehicleColor = latestOffer.driverVehicleColor,
                         driverPlateNumber = latestOffer.driverPlateNumber,
                         driverPhone = latestOffer.driverPhone,
+                        assignedDriverId = latestOffer.driverId,
                         status = PassengerOrderStatus.ACCEPTED,
                         etaMinutes = latestOffer.etaMinutes
                     )
@@ -497,6 +552,7 @@ fun HomeScreen(
         showChatSheet = false
         showSafetySheet = false
         showSafetyReportModal = false
+        notifManager.clearVoiceQueueAndTracking()
         passengerOrders = passengerOrders.map {
             if (it.id == safeOrderId || (safeReqId.isNotBlank() && (it.requestId == safeReqId || it.id == safeReqId))) {
                 it.copy(status = PassengerOrderStatus.CANCELLED)
@@ -518,13 +574,13 @@ fun HomeScreen(
         }
     }
 
-    // Automatically keep passenger UI synchronized with Firebase ride request status
+    // Automatically keep passenger UI synchronized with Firebase ride request status and real driver details
     LaunchedEffect(activeRideRequestId) {
         val reqId = activeRideRequestId ?: return@LaunchedEffect
         val repo = FirebaseRepository.getInstance(context)
-        repo.listenToRideRequestStatus(reqId).collectLatest { status ->
-            if (status == null) return@collectLatest
-            when (status) {
+        repo.listenToRideRequestUpdates(reqId).collectLatest { update ->
+            if (update == null) return@collectLatest
+            when (update.status) {
                 "CANCELLED", "REJECTED" -> {
                     activeRideRequestId = null
                     activeRoute = null
@@ -559,25 +615,82 @@ fun HomeScreen(
                     }
                     snackbarHostState.showSnackbar("Ride completed! Thank you for riding with Drigo.")
                 }
-                "DRIVER_ARRIVED" -> {
-                    passengerOrders = passengerOrders.map {
-                        if (it.requestId == reqId || it.id == reqId) {
-                            it.copy(status = PassengerOrderStatus.DRIVER_ARRIVED)
-                        } else it
+                "DRIVER_COMING", "ACCEPTED", "DRIVER_ARRIVED", "IN_TRIP" -> {
+                    var dName = update.driverName
+                    var dPhone = update.driverPhone
+                    var dPlate = update.driverPlateNumber
+                    var dMake = update.driverVehicleMake
+                    var dModel = update.driverVehicleModel
+                    var dColor = update.driverVehicleColor
+                    var dRating = update.driverRating
+                    var dRides = update.driverTotalRides
+
+                    if (update.assignedDriverId.isNotBlank() && (dName.isBlank() || dPlate.isBlank() || dMake.isBlank())) {
+                        val profile = repo.getDriverProfile(update.assignedDriverId)
+                        if (profile != null) {
+                            if (dName.isBlank()) dName = profile.name
+                            if (dPhone.isBlank()) dPhone = profile.phone
+                            if (dPlate.isBlank()) dPlate = profile.vehicleNumber
+                            if (dMake.isBlank()) dMake = profile.vehicleCompany
+                            if (dModel.isBlank()) dModel = profile.vehicleModel
+                            if (dColor.isBlank()) dColor = profile.vehicleColor
+                        }
                     }
-                }
-                "IN_TRIP" -> {
-                    passengerOrders = passengerOrders.map {
-                        if (it.requestId == reqId || it.id == reqId) {
-                            it.copy(status = PassengerOrderStatus.IN_TRIP)
-                        } else it
+
+                    val targetStatus = when (update.status) {
+                        "DRIVER_ARRIVED" -> PassengerOrderStatus.DRIVER_ARRIVED
+                        "IN_TRIP" -> PassengerOrderStatus.IN_TRIP
+                        else -> PassengerOrderStatus.DRIVER_COMING
                     }
-                }
-                "DRIVER_COMING", "ACCEPTED" -> {
-                    passengerOrders = passengerOrders.map {
-                        if (it.requestId == reqId || it.id == reqId) {
-                            it.copy(status = PassengerOrderStatus.DRIVER_COMING)
-                        } else it
+
+                    val existingIndex = passengerOrders.indexOfFirst { it.requestId == reqId || it.id == reqId }
+                    if (existingIndex >= 0) {
+                        val existing = passengerOrders[existingIndex]
+                        val updated = existing.copy(
+                            status = targetStatus,
+                            driverName = dName.ifBlank { existing.driverName },
+                            driverPhone = dPhone.ifBlank { existing.driverPhone },
+                            driverPlateNumber = dPlate.ifBlank { existing.driverPlateNumber },
+                            driverVehicleMake = dMake.ifBlank { existing.driverVehicleMake },
+                            driverVehicleModel = dModel.ifBlank { existing.driverVehicleModel },
+                            driverVehicleColor = dColor.ifBlank { existing.driverVehicleColor },
+                            driverRating = if (dRating > 0) dRating else existing.driverRating,
+                            driverTotalRides = if (dRides > 0) dRides else existing.driverTotalRides,
+                            assignedDriverId = update.assignedDriverId.ifBlank { existing.assignedDriverId },
+                            agreedFare = if (update.assignedFare > 0) update.assignedFare else existing.agreedFare,
+                            etaMinutes = if (update.etaMinutes > 0) update.etaMinutes else existing.etaMinutes
+                        )
+                        passengerOrders = passengerOrders.toMutableList().apply { set(existingIndex, updated) }
+                    } else {
+                        val newOrder = PassengerOrder(
+                            id = reqId,
+                            requestId = reqId,
+                            pickupTitle = selectedPickupLocation.title,
+                            pickupSubtitle = selectedPickupLocation.subtitle,
+                            pickupLat = selectedPickupLocation.latitude,
+                            pickupLon = selectedPickupLocation.longitude,
+                            destinationTitle = selectedDestinationLocation?.title ?: "Destination",
+                            destinationSubtitle = selectedDestinationLocation?.subtitle ?: "",
+                            destinationLat = selectedDestinationLocation?.latitude ?: (selectedPickupLocation.latitude + 0.015),
+                            destinationLon = selectedDestinationLocation?.longitude ?: (selectedPickupLocation.longitude + 0.015),
+                            distanceKm = activeRoute?.distanceKm ?: 5.0,
+                            durationMinutes = activeRoute?.durationMinutes ?: 12,
+                            rideCategory = selectedRideCategory ?: "Ride A/C",
+                            agreedFare = if (update.assignedFare > 0) update.assignedFare else 300,
+                            paymentMethod = selectedPaymentMethod,
+                            driverName = dName,
+                            driverPhone = dPhone,
+                            driverPlateNumber = dPlate,
+                            driverVehicleMake = dMake,
+                            driverVehicleModel = dModel,
+                            driverVehicleColor = dColor,
+                            driverRating = if (dRating > 0) dRating else 5.0,
+                            driverTotalRides = dRides,
+                            assignedDriverId = update.assignedDriverId,
+                            status = targetStatus,
+                            etaMinutes = update.etaMinutes
+                        )
+                        passengerOrders = listOf(newOrder) + passengerOrders
                     }
                 }
             }
@@ -715,6 +828,10 @@ fun HomeScreen(
     }
 
     fun onMapTapped(lat: Double, lng: Double) {
+        if (isRideActive) {
+            Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch {
             val (addrLine, areaName, city) = locationHelper.reverseGeocode(lat, lng)
             val tappedLocation = AppLocation(
@@ -731,6 +848,11 @@ fun HomeScreen(
                     mapSelectionMode = MapSelectionMode.NONE
                     if (selectedDestinationLocation != null) {
                         calculateAndSetRoute(tappedLocation, selectedDestinationLocation!!)
+                    } else {
+                        mapSelectionMode = MapSelectionMode.DESTINATION
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Pickup set: ${tappedLocation.title}. Now tap map for Destination.")
+                        }
                     }
                 }
                 MapSelectionMode.DESTINATION -> {
@@ -739,15 +861,29 @@ fun HomeScreen(
                     calculateAndSetRoute(selectedPickupLocation, tappedLocation)
                 }
                 MapSelectionMode.NONE -> {
-                    // Tapping map directly without mode active sets/updates destination and keeps pickup preserved
-                    selectedDestinationLocation = tappedLocation
-                    calculateAndSetRoute(selectedPickupLocation, tappedLocation)
+                    if (selectedDestinationLocation == null && !isPickupExplicitlySet) {
+                        // First tap sets FROM (Pickup) and prompts for Destination
+                        selectedPickupLocation = tappedLocation
+                        isPickupExplicitlySet = true
+                        mapSelectionMode = MapSelectionMode.DESTINATION
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Pickup set: ${tappedLocation.title}. Tap map to set Destination.")
+                        }
+                    } else {
+                        // Tapping map directly updates destination and keeps pickup preserved
+                        selectedDestinationLocation = tappedLocation
+                        calculateAndSetRoute(selectedPickupLocation, tappedLocation)
+                    }
                 }
             }
         }
     }
 
     fun swapLocations() {
+        if (isRideActive) {
+            Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+            return
+        }
         val curDest = selectedDestinationLocation ?: return
         val curPickup = selectedPickupLocation
 
@@ -1181,7 +1317,7 @@ fun HomeScreen(
                                 routeResult = activeRoute,
                                 driverCarLocation = passengerMapDriverLoc?.let { org.osmdroid.util.GeoPoint(it.latitude, it.longitude) },
                                 driverCarBearing = passengerMapDriverLoc?.bearing,
-                                driverCarTitle = activePassengerOrder?.let { "${it.driverName} (${it.driverPlateNumber})" } ?: "Captain Farhan (LEA-4521)",
+                                driverCarTitle = activePassengerOrder?.let { "${it.driverName.ifBlank { "Captain" }}${if (it.driverPlateNumber.isNotBlank()) " (${it.driverPlateNumber})" else ""}" } ?: "",
                                 nearbyDriverMarkers = nearbyDriverMarkers,
                                 onNearbyDriverMarkerClick = { markerData ->
                                     scope.launch {
@@ -1204,11 +1340,11 @@ fun HomeScreen(
                                                 agreedFare = offer.offeredFare,
                                                 paymentMethod = selectedPaymentMethod,
                                                 driverName = offer.driverName,
-                                                driverRating = 4.9,
-                                                driverTotalRides = 1420,
+                                                driverRating = if (offer.driverRating > 0) offer.driverRating else 5.0,
+                                                driverTotalRides = offer.driverTotalRides,
                                                 driverVehicleMake = offer.driverVehicleMake,
                                                 driverVehicleModel = offer.driverVehicleModel,
-                                                driverVehicleColor = "White",
+                                                driverVehicleColor = offer.driverVehicleColor,
                                                 driverPlateNumber = offer.driverPlateNumber,
                                                 driverPhone = offer.driverPhone,
                                                 status = PassengerOrderStatus.ACCEPTED,
@@ -1221,7 +1357,7 @@ fun HomeScreen(
                                     }
                                 },
                                 recenterTrigger = recenterTrigger,
-                                showCenterPickupPin = activeRoute == null,
+                                showCenterPickupPin = false,
                                 mapSelectionMode = mapSelectionMode,
                                 onMapTapped = { lat, lng -> onMapTapped(lat, lng) },
                                 onCancelMapSelection = { mapSelectionMode = MapSelectionMode.NONE },
@@ -1229,19 +1365,8 @@ fun HomeScreen(
                                     cardInitialEditPickup = true
                                     showPickupDestinationCard = true 
                                 },
-                                onMapCenterChanged = { lat, lng ->
-                                    if (activeRoute == null) {
-                                        scope.launch {
-                                            val (addrLine, areaName, city) = locationHelper.reverseGeocode(lat, lng)
-                                            selectedPickupLocation = AppLocation(
-                                                title = addrLine,
-                                                subtitle = if (areaName.isNotBlank() && areaName != addrLine) "$areaName, $city" else city,
-                                                latitude = lat,
-                                                longitude = lng
-                                            )
-                                            isPickupExplicitlySet = true
-                                        }
-                                    }
+                                onMapCenterChanged = { _, _ ->
+                                    // User-selected locations are strictly preserved during map panning/interaction
                                 },
                                 onMapInteractionChange = { isInteracting ->
                                     isMapInteracting = isInteracting
@@ -1327,12 +1452,18 @@ fun HomeScreen(
                             cardInitialEditPickup = false
                             showPickupDestinationCard = true
                         },
+                        onPickPickupOnMap = {
+                            mapSelectionMode = MapSelectionMode.PICKUP
+                        },
+                        onPickDestinationOnMap = {
+                            mapSelectionMode = MapSelectionMode.DESTINATION
+                        },
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .padding(top = 50.dp, start = 14.dp, end = 14.dp)
                     )
-                } else if (selectedDestinationLocation != null) {
-                    // Top Bar with Hamburger Menu + Direct "From" & "To" Location Selector Card (visible when destination chosen)
+                } else {
+                    // Top Bar with Hamburger Menu + Direct "From" & "To" Location Selector Card
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
@@ -1364,12 +1495,16 @@ fun HomeScreen(
                         // Top Compact Location Card showing From and To
                         Surface(
                             onClick = {
-                                cardInitialEditPickup = false
-                                showPickupDestinationCard = true
+                                if (isRideActive) {
+                                    Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    cardInitialEditPickup = selectedDestinationLocation != null
+                                    showPickupDestinationCard = true
+                                }
                             },
                             shape = RoundedCornerShape(16.dp),
                             color = Color(0xFF1E2026).copy(alpha = 0.96f),
-                            border = BorderStroke(1.2.dp, DrigoBrandPurple.copy(alpha = 0.6f)),
+                            border = BorderStroke(1.2.dp, if (isRideActive) Color(0xFFFFB74D).copy(alpha = 0.6f) else DrigoBrandPurple.copy(alpha = 0.6f)),
                             shadowElevation = 8.dp,
                             modifier = Modifier
                                 .weight(1f)
@@ -1386,8 +1521,12 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            cardInitialEditPickup = true
-                                            showPickupDestinationCard = true
+                                            if (isRideActive) {
+                                                Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                cardInitialEditPickup = true
+                                                showPickupDestinationCard = true
+                                            }
                                         }
                                 ) {
                                     Surface(
@@ -1405,17 +1544,26 @@ fun HomeScreen(
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f)
                                     )
-                                    IconButton(
-                                        onClick = {
-                                            mapSelectionMode = MapSelectionMode.PICKUP
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
+                                    if (!isRideActive) {
+                                        IconButton(
+                                            onClick = {
+                                                mapSelectionMode = MapSelectionMode.PICKUP
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Place,
+                                                contentDescription = "Set Pickup on Map",
+                                                tint = Color(0xFF81C784),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    } else {
                                         Icon(
-                                            imageVector = Icons.Default.Place,
-                                            contentDescription = "Set Pickup on Map",
-                                            tint = Color(0xFF81C784),
-                                            modifier = Modifier.size(16.dp)
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = "Locked",
+                                            tint = Color(0xFFFFB74D),
+                                            modifier = Modifier.size(14.dp)
                                         )
                                     }
                                 }
@@ -1430,8 +1578,12 @@ fun HomeScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            cardInitialEditPickup = false
-                                            showPickupDestinationCard = true
+                                            if (isRideActive) {
+                                                Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                cardInitialEditPickup = false
+                                                showPickupDestinationCard = true
+                                            }
                                         }
                                 ) {
                                     Surface(
@@ -1441,54 +1593,37 @@ fun HomeScreen(
                                     ) {}
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "To: ${selectedDestinationLocation!!.title}",
+                                        text = if (selectedDestinationLocation != null) "To: ${selectedDestinationLocation!!.title}" else "To: Tap on map / choose destination",
                                         style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
+                                        fontWeight = if (selectedDestinationLocation != null) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (selectedDestinationLocation != null) Color.White else Color(0xFFB0B3B8),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f)
                                     )
-                                    IconButton(
-                                        onClick = {
-                                            mapSelectionMode = MapSelectionMode.DESTINATION
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    ) {
+                                    if (!isRideActive) {
+                                        IconButton(
+                                            onClick = {
+                                                mapSelectionMode = MapSelectionMode.DESTINATION
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Flag,
+                                                contentDescription = "Set Destination on Map",
+                                                tint = Color(0xFFFF80AB),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    } else {
                                         Icon(
-                                            imageVector = Icons.Default.Flag,
-                                            contentDescription = "Set Destination on Map",
-                                            tint = Color(0xFFFF80AB),
-                                            modifier = Modifier.size(16.dp)
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = "Locked",
+                                            tint = Color(0xFFFFB74D),
+                                            modifier = Modifier.size(14.dp)
                                         )
                                     }
                                 }
-                            }
-                        }
-                    }
-                } else {
-                    // Initial State: Hamburger Menu button
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(top = 50.dp, start = 14.dp)
-                    ) {
-                        Surface(
-                            onClick = { scope.launch { drawerState.open() } },
-                            shape = CircleShape,
-                            color = DrigoBrandPurple,
-                            shadowElevation = 6.dp,
-                            modifier = Modifier
-                                .size(46.dp)
-                                .testTag("menu_hamburger_btn")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Menu,
-                                    contentDescription = "Menu",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
-                                )
                             }
                         }
                     }
@@ -2127,9 +2262,9 @@ fun HomeScreen(
                     FloatingActionButton(
                         onClick = {
                             chatTripId = activeRideRequestId!!
-                            chatPartnerName = "Captain Farhan"
+                            chatPartnerName = activePassengerOrder?.driverName?.ifBlank { "Captain" } ?: "Captain"
                             chatPartnerRole = "Driver"
-                            chatPartnerPhone = "+92 300 1234567"
+                            chatPartnerPhone = activePassengerOrder?.driverPhone ?: ""
                             chatPickupTitle = selectedPickupLocation.title
                             chatDestinationTitle = selectedDestinationLocation?.title ?: "Destination"
                             showChatSheet = true
@@ -2259,6 +2394,7 @@ fun HomeScreen(
                     showChatSheet = true
                 },
                 initialUserLocation = userLocationData,
+                liveRideRequests = liveRideRequests,
                 modifier = modifier
             )
         }
@@ -2271,23 +2407,36 @@ fun HomeScreen(
             destinationLocation = selectedDestinationLocation,
             initialEditingPickup = cardInitialEditPickup,
             initialWhereToText = if (cardInitialEditPickup) "" else (selectedDestinationLocation?.title ?: ""),
+            isLocked = isRideActive,
             onDismiss = { showPickupDestinationCard = false },
             onDestinationSelected = { destination ->
-                selectedDestinationLocation = destination
-                showPickupDestinationCard = false
-                calculateAndSetRoute(selectedPickupLocation, destination)
+                if (!isRideActive) {
+                    selectedDestinationLocation = destination
+                    showPickupDestinationCard = false
+                    calculateAndSetRoute(selectedPickupLocation, destination)
+                } else {
+                    Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+                }
             },
             onPickupSelected = { newPickup ->
-                selectedPickupLocation = newPickup
-                isPickupExplicitlySet = true
-                showPickupDestinationCard = false
-                if (selectedDestinationLocation != null) {
-                    calculateAndSetRoute(newPickup, selectedDestinationLocation!!)
+                if (!isRideActive) {
+                    selectedPickupLocation = newPickup
+                    isPickupExplicitlySet = true
+                    showPickupDestinationCard = false
+                    if (selectedDestinationLocation != null) {
+                        calculateAndSetRoute(newPickup, selectedDestinationLocation!!)
+                    }
+                } else {
+                    Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
                 }
             },
             onPickOnMap = { isPickup ->
-                showPickupDestinationCard = false
-                mapSelectionMode = if (isPickup) MapSelectionMode.PICKUP else MapSelectionMode.DESTINATION
+                if (!isRideActive) {
+                    showPickupDestinationCard = false
+                    mapSelectionMode = if (isPickup) MapSelectionMode.PICKUP else MapSelectionMode.DESTINATION
+                } else {
+                    Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+                }
             }
         )
     }
@@ -2442,11 +2591,11 @@ fun HomeScreen(
         UniversalSafetyModalSheet(
             rideId = activeOrder?.id ?: (activeRideRequestId ?: "trip_${System.currentTimeMillis()}"),
             userRole = if (userMode == UserMode.DRIVER) "DRIVER" else "PASSENGER",
-            partnerName = if (userMode == UserMode.DRIVER) "Passenger" else (activeOrder?.driverName?.ifBlank { "Captain Farhan" } ?: "Driver Captain"),
-            partnerPhone = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverPhone ?: "+92 300 1234567"),
-            vehicleMake = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverVehicleMake ?: "Toyota"),
-            vehicleModel = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverVehicleModel ?: "Corolla"),
-            vehiclePlate = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverPlateNumber ?: "LEA-2024"),
+            partnerName = if (userMode == UserMode.DRIVER) "Passenger" else (activeOrder?.driverName?.ifBlank { "Captain" } ?: "Captain"),
+            partnerPhone = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverPhone ?: ""),
+            vehicleMake = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverVehicleMake ?: ""),
+            vehicleModel = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverVehicleModel ?: ""),
+            vehiclePlate = if (userMode == UserMode.DRIVER) "" else (activeOrder?.driverPlateNumber ?: ""),
             pickupAddress = activeOrder?.pickupTitle?.ifBlank { selectedPickupLocation.title } ?: selectedPickupLocation.title,
             destinationAddress = activeOrder?.destinationTitle?.ifBlank { selectedDestinationLocation?.title ?: "Not Set" } ?: (selectedDestinationLocation?.title ?: "Not Set"),
             onDismiss = { showSafetySheet = false },
@@ -2489,7 +2638,7 @@ fun HomeScreen(
             onAccept = {
                 val acceptedOrder = currentOffer.copy(
                     status = PassengerOrderStatus.DRIVER_COMING,
-                    assignedDriverId = currentOffer.driverPhone.ifBlank { currentOffer.driverName }
+                    assignedDriverId = currentOffer.assignedDriverId.ifBlank { currentOffer.driverPhone.ifBlank { currentOffer.driverName } }
                 )
                 // 1. Immediately dismiss offer dialog on click
                 incomingDriverOffer = null
@@ -2929,7 +3078,7 @@ fun ActiveCaptainAssignedCard(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}".trim().ifBlank { "White Suzuki Mehran" },
+                            text = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}".trim().ifBlank { "Standard Vehicle" },
                             color = Color(0xFFA0A6B5),
                             fontSize = 12.sp
                         )
@@ -2943,7 +3092,7 @@ fun ActiveCaptainAssignedCard(
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "${order.driverRating} (${order.driverTotalRides} reviews)",
+                                text = "${if (order.driverRating > 0) order.driverRating else 5.0}${if (order.driverTotalRides > 0) " (${order.driverTotalRides} reviews)" else ""}",
                                 color = Color(0xFFA0A6B5),
                                 fontSize = 12.sp
                             )
@@ -2978,7 +3127,7 @@ fun ActiveCaptainAssignedCard(
                             border = BorderStroke(1.dp, Color(0xFF333A4C))
                         ) {
                             Text(
-                                text = order.driverPlateNumber.ifBlank { "LRF3341" },
+                                text = order.driverPlateNumber.ifBlank { "N/A" },
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White,
                                 fontSize = 14.sp,

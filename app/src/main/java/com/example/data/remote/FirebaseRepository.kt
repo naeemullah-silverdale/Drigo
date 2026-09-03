@@ -50,6 +50,47 @@ data class LiveDriverTelemetry(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+private fun com.google.firebase.database.DataSnapshot.getDoubleVal(key: String, default: Double = 0.0): Double {
+    val child = this.child(key)
+    val valObj = child.value ?: return default
+    return when (valObj) {
+        is Number -> valObj.toDouble()
+        is String -> valObj.toDoubleOrNull() ?: default
+        else -> default
+    }
+}
+
+private fun com.google.firebase.database.DataSnapshot.getLongVal(key: String, default: Long = 0L): Long {
+    val child = this.child(key)
+    val valObj = child.value ?: return default
+    return when (valObj) {
+        is Number -> valObj.toLong()
+        is String -> valObj.toLongOrNull() ?: default
+        else -> default
+    }
+}
+
+private fun com.google.firebase.database.DataSnapshot.getIntVal(key: String, default: Int = 0): Int {
+    return getLongVal(key, default.toLong()).toInt()
+}
+
+private fun com.google.firebase.database.DataSnapshot.getStringVal(key: String, default: String = ""): String {
+    val child = this.child(key)
+    val valObj = child.value ?: return default
+    return valObj.toString()
+}
+
+private fun com.google.firebase.database.DataSnapshot.getBooleanVal(key: String, default: Boolean = false): Boolean {
+    val child = this.child(key)
+    val valObj = child.value ?: return default
+    return when (valObj) {
+        is Boolean -> valObj
+        is String -> valObj.toBoolean()
+        is Number -> valObj.toInt() != 0
+        else -> default
+    }
+}
+
 class FirebaseRepository private constructor(private val context: Context) {
 
     companion object {
@@ -65,6 +106,10 @@ class FirebaseRepository private constructor(private val context: Context) {
 
         @Volatile
         private var INSTANCE: FirebaseRepository? = null
+
+        // In-memory shared registry of active ride requests across app lifecycle
+        private val localActiveRequestsMap = java.util.concurrent.ConcurrentHashMap<String, RideRequest>()
+        private val localRequestsNotifier = MutableStateFlow<Long>(System.currentTimeMillis())
 
         fun getInstance(context: Context? = null): FirebaseRepository {
             return INSTANCE ?: synchronized(this) {
@@ -91,6 +136,7 @@ class FirebaseRepository private constructor(private val context: Context) {
     val currentUserProfile = _currentUserProfile.asStateFlow()
 
     init {
+        loadLocalRideRequests()
         try {
             val apps = FirebaseApp.getApps(context)
             if (apps.isNotEmpty()) {
@@ -108,6 +154,90 @@ class FirebaseRepository private constructor(private val context: Context) {
             Log.w(TAG, "Firebase initialization fallback: ${e.message}")
             _syncStatus.value = CloudSyncStatus.OFFLINE_LOCAL
         }
+    }
+
+    private fun saveLocalRideRequests() {
+        try {
+            val prefs = context.getSharedPreferences("drigo_ride_requests_cache", Context.MODE_PRIVATE)
+            val array = org.json.JSONArray()
+            for (req in localActiveRequestsMap.values) {
+                val obj = org.json.JSONObject().apply {
+                    put("id", req.id)
+                    put("passengerId", req.passengerId)
+                    put("passengerName", req.passengerName)
+                    put("passengerEmail", req.passengerEmail)
+                    put("passengerPhone", req.passengerPhone)
+                    put("passengerPhotoUrl", req.passengerPhotoUrl)
+                    put("passengerRating", req.passengerRating)
+                    put("paymentMethod", req.paymentMethod)
+                    put("pickupTitle", req.pickupTitle)
+                    put("pickupSubtitle", req.pickupSubtitle)
+                    put("pickupLat", req.pickupLat)
+                    put("pickupLon", req.pickupLon)
+                    put("destinationTitle", req.destinationTitle)
+                    put("destinationSubtitle", req.destinationSubtitle)
+                    put("destinationLat", req.destinationLat)
+                    put("destinationLon", req.destinationLon)
+                    put("rideCategory", req.rideCategory)
+                    put("vehicleType", req.vehicleType)
+                    put("hasAc", req.hasAc)
+                    put("estimatedFare", req.estimatedFare)
+                    put("distanceKm", req.distanceKm)
+                    put("durationMinutes", req.durationMinutes)
+                    put("status", req.status)
+                    put("assignedDriverId", req.assignedDriverId)
+                    put("timestamp", req.timestamp)
+                    put("expiresAt", req.expiresAt)
+                }
+                array.put(obj)
+            }
+            prefs.edit().putString("cached_requests_json", array.toString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    private fun loadLocalRideRequests() {
+        try {
+            val prefs = context.getSharedPreferences("drigo_ride_requests_cache", Context.MODE_PRIVATE)
+            val jsonStr = prefs.getString("cached_requests_json", null)
+            if (!jsonStr.isNullOrBlank()) {
+                val array = org.json.JSONArray(jsonStr)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val id = obj.optString("id")
+                    if (id.isNotBlank() && !id.startsWith("req_seed_", ignoreCase = true) && !id.startsWith("demo_", ignoreCase = true) && !id.startsWith("mock_", ignoreCase = true)) {
+                        val req = RideRequest(
+                            id = id,
+                            passengerId = obj.optString("passengerId"),
+                            passengerName = obj.optString("passengerName", "Passenger"),
+                            passengerEmail = obj.optString("passengerEmail"),
+                            passengerPhone = obj.optString("passengerPhone", "+92 300 9876543"),
+                            passengerPhotoUrl = obj.optString("passengerPhotoUrl"),
+                            passengerRating = obj.optDouble("passengerRating", 4.9),
+                            paymentMethod = obj.optString("paymentMethod", "Cash"),
+                            pickupTitle = obj.optString("pickupTitle"),
+                            pickupSubtitle = obj.optString("pickupSubtitle"),
+                            pickupLat = obj.optDouble("pickupLat", 0.0),
+                            pickupLon = obj.optDouble("pickupLon", 0.0),
+                            destinationTitle = obj.optString("destinationTitle"),
+                            destinationSubtitle = obj.optString("destinationSubtitle"),
+                            destinationLat = obj.optDouble("destinationLat", 0.0),
+                            destinationLon = obj.optDouble("destinationLon", 0.0),
+                            rideCategory = obj.optString("rideCategory", "Share Ride"),
+                            vehicleType = obj.optString("vehicleType", "Car"),
+                            hasAc = obj.optBoolean("hasAc", false),
+                            estimatedFare = obj.optInt("estimatedFare", 0),
+                            distanceKm = obj.optDouble("distanceKm", 0.0),
+                            durationMinutes = obj.optInt("durationMinutes", 0),
+                            status = obj.optString("status", "SEARCHING_DRIVERS"),
+                            assignedDriverId = obj.optString("assignedDriverId", ""),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                            expiresAt = obj.optLong("expiresAt", 0L)
+                        )
+                        localActiveRequestsMap[id] = req
+                    }
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     fun isAvailable(): Boolean = isFirebaseInitialized && firestore != null
@@ -515,15 +645,72 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
     }
 
+    suspend fun savePassengerLocations(
+        userId: String,
+        pickupTitle: String,
+        pickupSubtitle: String,
+        pickupLat: Double,
+        pickupLon: Double,
+        destinationTitle: String,
+        destinationSubtitle: String,
+        destinationLat: Double,
+        destinationLon: Double
+    ) {
+        if (userId.isBlank()) return
+        try {
+            val locMap = mapOf(
+                "userId" to userId,
+                "pickupTitle" to pickupTitle,
+                "pickupSubtitle" to pickupSubtitle,
+                "pickupLat" to pickupLat,
+                "pickupLon" to pickupLon,
+                "destinationTitle" to destinationTitle,
+                "destinationSubtitle" to destinationSubtitle,
+                "destinationLat" to destinationLat,
+                "destinationLon" to destinationLon,
+                "timestamp" to System.currentTimeMillis()
+            )
+            try {
+                val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                db.getReference("users").child(userId).child("selected_locations").setValue(locMap)
+            } catch (rtdbErr: Exception) {
+                Log.w(TAG, "RTDB selected_locations save notice: ${rtdbErr.message}")
+            }
+            if (isAvailable()) {
+                firestore!!.collection("user_locations").document(userId).set(locMap).await()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error saving passenger locations: ${e.message}")
+        }
+    }
+
+    private fun getDatabase(): FirebaseDatabase? {
+        return try {
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+        } catch (_: Exception) {
+            try {
+                FirebaseDatabase.getInstance()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
     // --- Passenger Ride Requests (Realtime Database & Firestore Sync) ---
 
     suspend fun createRideRequest(request: RideRequest): Result<String> {
         return try {
+            // Immediate local sync so driver mode sees the request without any network delay
+            localActiveRequestsMap[request.id] = request
+            saveLocalRideRequests()
+            localRequestsNotifier.value = System.currentTimeMillis()
+
             val requestMap = mapOf(
                 "id" to request.id,
                 "passengerId" to request.passengerId,
                 "passengerName" to request.passengerName,
                 "passengerEmail" to request.passengerEmail,
+                "passengerPhone" to request.passengerPhone,
                 "passengerPhotoUrl" to request.passengerPhotoUrl,
                 "passengerRating" to request.passengerRating,
                 "paymentMethod" to request.paymentMethod,
@@ -548,17 +735,19 @@ class FirebaseRepository private constructor(private val context: Context) {
             )
 
             // 1. Write to Firebase Realtime Database
-            try {
-                val db = FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
-                val reqRef = db.getReference("ride_requests").child(request.id)
-                reqRef.setValue(requestMap)
-                if (request.passengerId.isNotBlank()) {
-                    db.getReference("users").child(request.passengerId).child("active_ride_request")
-                        .setValue(requestMap)
+            val db = getDatabase()
+            if (db != null) {
+                try {
+                    val reqRef = db.getReference("ride_requests").child(request.id)
+                    reqRef.setValue(requestMap)
+                    if (request.passengerId.isNotBlank()) {
+                        db.getReference("users").child(request.passengerId).child("active_ride_request")
+                            .setValue(requestMap)
+                    }
+                    Log.d(TAG, "Ride request created in Firebase Realtime Database: ${request.id}")
+                } catch (rtdbErr: Exception) {
+                    Log.w(TAG, "Realtime Database write notice: ${rtdbErr.message}")
                 }
-                Log.d(TAG, "Ride request created in Firebase Realtime Database: ${request.id}")
-            } catch (rtdbErr: Exception) {
-                Log.w(TAG, "Realtime Database write notice: ${rtdbErr.message}")
             }
 
             // 2. Write to Cloud Firestore if available
@@ -580,144 +769,7 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
     }
 
-    fun listenToRideRequests(): Flow<List<RideRequest>> = callbackFlow {
-        val rtdbRequestsMap = mutableMapOf<String, RideRequest>()
-        val firestoreRequestsMap = mutableMapOf<String, RideRequest>()
-
-        fun emitCombinedRequests() {
-            val now = System.currentTimeMillis()
-            val combined = (firestoreRequestsMap + rtdbRequestsMap).values
-                .filter { req ->
-                    val isActive = (req.status == "SEARCHING_DRIVERS" || req.status == "SEARCHING") &&
-                            req.status != "CANCELLED" && req.status != "COMPLETED" && req.status != "REJECTED" && req.status != "ACCEPTED"
-                    val notExpired = (req.expiresAt == 0L || req.expiresAt > now) && (now - req.timestamp < 30 * 60 * 1000L)
-                    val notAssigned = req.assignedDriverId.isBlank()
-                    isActive && notExpired && notAssigned
-                }
-                .sortedByDescending { it.timestamp }
-            trySend(combined)
-        }
-
-        // 1. Firebase Realtime Database Listener
-        val db = try {
-            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
-        } catch (_: Exception) {
-            try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
-        }
-
-        val rtdbListener = object : com.google.firebase.database.ValueEventListener {
-            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                rtdbRequestsMap.clear()
-                if (snapshot.exists()) {
-                    for (child in snapshot.children) {
-                        try {
-                            val id = child.child("id").getValue(String::class.java) ?: child.key ?: continue
-                            val status = child.child("status").getValue(String::class.java) ?: "SEARCHING_DRIVERS"
-                            val assignedDriverId = child.child("assignedDriverId").getValue(String::class.java) ?: ""
-                            val timestamp = child.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
-                            val expiresAt = child.child("expiresAt").getValue(Long::class.java) ?: 0L
-
-                            val req = RideRequest(
-                                id = id,
-                                passengerId = child.child("passengerId").getValue(String::class.java) ?: "",
-                                passengerName = child.child("passengerName").getValue(String::class.java) ?: "Passenger",
-                                passengerEmail = child.child("passengerEmail").getValue(String::class.java) ?: "",
-                                passengerPhotoUrl = child.child("passengerPhotoUrl").getValue(String::class.java) ?: "",
-                                passengerRating = child.child("passengerRating").getValue(Double::class.java) ?: 4.9,
-                                paymentMethod = child.child("paymentMethod").getValue(String::class.java) ?: "Cash",
-                                pickupTitle = child.child("pickupTitle").getValue(String::class.java) ?: "",
-                                pickupSubtitle = child.child("pickupSubtitle").getValue(String::class.java) ?: "",
-                                pickupLat = child.child("pickupLat").getValue(Double::class.java) ?: 0.0,
-                                pickupLon = child.child("pickupLon").getValue(Double::class.java) ?: 0.0,
-                                destinationTitle = child.child("destinationTitle").getValue(String::class.java) ?: "",
-                                destinationSubtitle = child.child("destinationSubtitle").getValue(String::class.java) ?: "",
-                                destinationLat = child.child("destinationLat").getValue(Double::class.java) ?: 0.0,
-                                destinationLon = child.child("destinationLon").getValue(Double::class.java) ?: 0.0,
-                                rideCategory = child.child("rideCategory").getValue(String::class.java) ?: "Share Ride",
-                                vehicleType = child.child("vehicleType").getValue(String::class.java) ?: "Car",
-                                hasAc = child.child("hasAc").getValue(Boolean::class.java) ?: false,
-                                estimatedFare = (child.child("estimatedFare").getValue(Long::class.java) ?: 0).toInt(),
-                                distanceKm = child.child("distanceKm").getValue(Double::class.java) ?: 0.0,
-                                durationMinutes = (child.child("durationMinutes").getValue(Long::class.java) ?: 0).toInt(),
-                                status = status,
-                                assignedDriverId = assignedDriverId,
-                                timestamp = timestamp,
-                                expiresAt = expiresAt
-                            )
-                            rtdbRequestsMap[id] = req
-                        } catch (_: Exception) {}
-                    }
-                }
-                emitCombinedRequests()
-            }
-
-            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
-                Log.w(TAG, "RTDB listenToRideRequests error: ${error.message}")
-            }
-        }
-
-        val rtdbRef = db?.getReference("ride_requests")
-        rtdbRef?.addValueEventListener(rtdbListener)
-
-        // 2. Cloud Firestore Listener (if available)
-        var firestoreReg: com.google.firebase.firestore.ListenerRegistration? = null
-        if (isAvailable() && firestore != null) {
-            try {
-                firestoreReg = firestore!!.collection(RIDE_REQUESTS_COLLECTION)
-                    .orderBy("timestamp", Query.Direction.DESCENDING)
-                    .limit(30)
-                    .addSnapshotListener { snapshot, error ->
-                        if (error != null) {
-                            Log.w(TAG, "Firestore listen to ride requests error: ${error.message}")
-                            return@addSnapshotListener
-                        }
-
-                        if (snapshot != null) {
-                            firestoreRequestsMap.clear()
-                            for (doc in snapshot.documents) {
-                                try {
-                                    val id = doc.getString("id") ?: doc.id
-                                    val req = RideRequest(
-                                        id = id,
-                                        passengerId = doc.getString("passengerId") ?: "",
-                                        passengerName = doc.getString("passengerName") ?: "Passenger",
-                                        passengerEmail = doc.getString("passengerEmail") ?: "",
-                                        passengerPhotoUrl = doc.getString("passengerPhotoUrl") ?: "",
-                                        passengerRating = doc.getDouble("passengerRating") ?: 4.9,
-                                        paymentMethod = doc.getString("paymentMethod") ?: "Cash",
-                                        pickupTitle = doc.getString("pickupTitle") ?: "",
-                                        pickupSubtitle = doc.getString("pickupSubtitle") ?: "",
-                                        pickupLat = doc.getDouble("pickupLat") ?: 0.0,
-                                        pickupLon = doc.getDouble("pickupLon") ?: 0.0,
-                                        destinationTitle = doc.getString("destinationTitle") ?: "",
-                                        destinationSubtitle = doc.getString("destinationSubtitle") ?: "",
-                                        destinationLat = doc.getDouble("destinationLat") ?: 0.0,
-                                        destinationLon = doc.getDouble("destinationLon") ?: 0.0,
-                                        rideCategory = doc.getString("rideCategory") ?: "Share Ride",
-                                        vehicleType = doc.getString("vehicleType") ?: "Car",
-                                        hasAc = doc.getBoolean("hasAc") ?: false,
-                                        estimatedFare = (doc.getLong("estimatedFare") ?: 0).toInt(),
-                                        distanceKm = doc.getDouble("distanceKm") ?: 0.0,
-                                        durationMinutes = (doc.getLong("durationMinutes") ?: 0).toInt(),
-                                        status = doc.getString("status") ?: "SEARCHING_DRIVERS",
-                                        assignedDriverId = doc.getString("assignedDriverId") ?: "",
-                                        timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis(),
-                                        expiresAt = doc.getLong("expiresAt") ?: 0L
-                                    )
-                                    firestoreRequestsMap[id] = req
-                                } catch (_: Exception) {}
-                            }
-                            emitCombinedRequests()
-                        }
-                    }
-            } catch (_: Exception) {}
-        }
-
-        awaitClose {
-            rtdbRef?.removeEventListener(rtdbListener)
-            firestoreReg?.remove()
-        }
-    }
+    fun listenToRideRequests(): Flow<List<RideRequest>> = RideRequestRepository.getInstance().getLiveRideRequests()
 
     suspend fun acceptRideRequest(
         requestId: String,
@@ -725,6 +777,16 @@ class FirebaseRepository private constructor(private val context: Context) {
         order: PassengerOrder
     ): Result<Boolean> {
         return try {
+            // Update local cache immediately
+            localActiveRequestsMap[requestId]?.let { existing ->
+                localActiveRequestsMap[requestId] = existing.copy(
+                    status = "DRIVER_COMING",
+                    assignedDriverId = driverOffer.driverId
+                )
+                saveLocalRideRequests()
+                localRequestsNotifier.value = System.currentTimeMillis()
+            }
+
             val db = try {
                 FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
             } catch (_: Exception) {
@@ -746,11 +808,16 @@ class FirebaseRepository private constructor(private val context: Context) {
                 val updates = mapOf(
                     "status" to "DRIVER_COMING",
                     "assignedDriverId" to driverOffer.driverId,
+                    "driverId" to driverOffer.driverId,
                     "assignedDriverName" to driverOffer.driverName,
+                    "driverName" to driverOffer.driverName,
                     "driverPhone" to driverOffer.driverPhone,
                     "driverVehicleMake" to driverOffer.driverVehicleMake,
                     "driverVehicleModel" to driverOffer.driverVehicleModel,
+                    "driverVehicleColor" to driverOffer.driverVehicleColor,
                     "driverPlateNumber" to driverOffer.driverPlateNumber,
+                    "driverRating" to driverOffer.driverRating,
+                    "driverTotalRides" to driverOffer.driverTotalRides,
                     "assignedFare" to driverOffer.offeredFare,
                     "agreedFare" to driverOffer.offeredFare,
                     "acceptedAt" to System.currentTimeMillis()
@@ -765,11 +832,16 @@ class FirebaseRepository private constructor(private val context: Context) {
                         mapOf(
                             "status" to "DRIVER_COMING",
                             "assignedDriverId" to driverOffer.driverId,
+                            "driverId" to driverOffer.driverId,
                             "assignedDriverName" to driverOffer.driverName,
+                            "driverName" to driverOffer.driverName,
                             "driverPhone" to driverOffer.driverPhone,
                             "driverVehicleMake" to driverOffer.driverVehicleMake,
                             "driverVehicleModel" to driverOffer.driverVehicleModel,
+                            "driverVehicleColor" to driverOffer.driverVehicleColor,
                             "driverPlateNumber" to driverOffer.driverPlateNumber,
+                            "driverRating" to driverOffer.driverRating,
+                            "driverTotalRides" to driverOffer.driverTotalRides,
                             "assignedFare" to driverOffer.offeredFare,
                             "agreedFare" to driverOffer.offeredFare,
                             "acceptedAt" to System.currentTimeMillis()
@@ -784,6 +856,46 @@ class FirebaseRepository private constructor(private val context: Context) {
             // Save the synchronized passenger order
             savePassengerOrder(order)
 
+            if (db != null && driverOffer.driverId.isNotBlank()) {
+                val driverOrderMap = mapOf(
+                    "id" to order.id,
+                    "requestId" to order.requestId,
+                    "passengerId" to order.passengerId,
+                    "passengerName" to order.passengerName,
+                    "passengerEmail" to order.passengerEmail,
+                    "passengerPhone" to order.passengerPhone,
+                    "pickupTitle" to order.pickupTitle,
+                    "pickupSubtitle" to order.pickupSubtitle,
+                    "pickupLat" to order.pickupLat,
+                    "pickupLon" to order.pickupLon,
+                    "destinationTitle" to order.destinationTitle,
+                    "destinationSubtitle" to order.destinationSubtitle,
+                    "destinationLat" to order.destinationLat,
+                    "destinationLon" to order.destinationLon,
+                    "distanceKm" to order.distanceKm,
+                    "durationMinutes" to order.durationMinutes,
+                    "rideCategory" to order.rideCategory,
+                    "agreedFare" to order.agreedFare,
+                    "paymentMethod" to order.paymentMethod,
+                    "driverName" to order.driverName,
+                    "driverVehicleMake" to order.driverVehicleMake,
+                    "driverVehicleModel" to order.driverVehicleModel,
+                    "driverVehicleColor" to order.driverVehicleColor,
+                    "driverPlateNumber" to order.driverPlateNumber,
+                    "driverPhone" to order.driverPhone,
+                    "driverRating" to order.driverRating,
+                    "driverTotalRides" to order.driverTotalRides,
+                    "assignedDriverId" to driverOffer.driverId,
+                    "status" to PassengerOrderStatus.DRIVER_COMING.name,
+                    "etaMinutes" to order.etaMinutes,
+                    "createdAt" to order.createdAt,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+                try {
+                    db.getReference("users").child(driverOffer.driverId).child("active_driver_trip").setValue(driverOrderMap).await()
+                } catch (_: Exception) {}
+            }
+
             Result.success(true)
         } catch (e: Exception) {
             Log.e(TAG, "Error accepting ride request: ${e.message}", e)
@@ -793,6 +905,16 @@ class FirebaseRepository private constructor(private val context: Context) {
 
     suspend fun updateRideRequestStatus(requestId: String, status: String) {
         try {
+            if (status == "CANCELLED" || status == "COMPLETED" || status == "REJECTED") {
+                localActiveRequestsMap.remove(requestId)
+            } else {
+                localActiveRequestsMap[requestId]?.let { existing ->
+                    localActiveRequestsMap[requestId] = existing.copy(status = status)
+                }
+            }
+            saveLocalRideRequests()
+            localRequestsNotifier.value = System.currentTimeMillis()
+
             val db = try {
                 FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
             } catch (_: Exception) {
@@ -855,6 +977,178 @@ class FirebaseRepository private constructor(private val context: Context) {
         awaitClose {
             statusRef?.removeEventListener(listener)
             firestoreReg?.remove()
+        }
+    }
+
+    /**
+     * Real-time stream of ride request updates including the assigned driver's real details
+     */
+    fun listenToRideRequestUpdates(requestId: String): Flow<RideRequestUpdate?> = callbackFlow {
+        if (requestId.isBlank()) {
+            trySend(null)
+            close()
+            return@callbackFlow
+        }
+        val db = try {
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+        } catch (_: Exception) {
+            try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+        }
+
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                if (!snapshot.exists()) {
+                    trySend(null)
+                    return
+                }
+                val status = snapshot.child("status").getValue(String::class.java) ?: ""
+                val assignedDriverId = snapshot.child("assignedDriverId").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("driverId").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: ""
+                val driverName = snapshot.child("driverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("assignedDriverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: ""
+                val driverPhone = snapshot.child("driverPhone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("phone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: ""
+                val driverPlateNumber = snapshot.child("driverPlateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("vehicleNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("plateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: ""
+                val driverVehicleMake = snapshot.child("driverVehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("vehicleCompany").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("vehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: ""
+                val driverVehicleModel = snapshot.child("driverVehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("vehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: ""
+                val driverVehicleColor = snapshot.child("driverVehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: snapshot.child("vehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                    ?: ""
+                val driverRating = snapshot.child("driverRating").getValue(Double::class.java) ?: 5.0
+                val driverTotalRides = (snapshot.child("driverTotalRides").getValue(Long::class.java) ?: 0L).toInt()
+                val assignedFare = (snapshot.child("assignedFare").getValue(Long::class.java)
+                    ?: snapshot.child("agreedFare").getValue(Long::class.java)
+                    ?: snapshot.child("estimatedFare").getValue(Long::class.java) ?: 0L).toInt()
+                val etaMinutes = (snapshot.child("etaMinutes").getValue(Long::class.java) ?: 4L).toInt()
+
+                trySend(
+                    RideRequestUpdate(
+                        status = status,
+                        assignedDriverId = assignedDriverId,
+                        driverName = driverName,
+                        driverPhone = driverPhone,
+                        driverPlateNumber = driverPlateNumber,
+                        driverVehicleMake = driverVehicleMake,
+                        driverVehicleModel = driverVehicleModel,
+                        driverVehicleColor = driverVehicleColor,
+                        driverRating = driverRating,
+                        driverTotalRides = driverTotalRides,
+                        assignedFare = assignedFare,
+                        etaMinutes = etaMinutes
+                    )
+                )
+            }
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        }
+
+        val reqRef = db?.getReference("ride_requests")?.child(requestId)
+        reqRef?.addValueEventListener(listener)
+
+        var firestoreReg: ListenerRegistration? = null
+        if (isAvailable() && firestore != null) {
+            try {
+                firestoreReg = firestore!!.collection(RIDE_REQUESTS_COLLECTION).document(requestId)
+                    .addSnapshotListener { snap, err ->
+                        if (err == null && snap != null && snap.exists()) {
+                            val status = snap.getString("status") ?: ""
+                            val assignedDriverId = snap.getString("assignedDriverId")?.trim()?.ifBlank { null }
+                                ?: snap.getString("driverId")?.trim()?.ifBlank { null } ?: ""
+                            val driverName = snap.getString("driverName")?.trim()?.ifBlank { null }
+                                ?: snap.getString("assignedDriverName")?.trim()?.ifBlank { null } ?: ""
+                            val driverPhone = snap.getString("driverPhone")?.trim()?.ifBlank { null }
+                                ?: snap.getString("phone")?.trim()?.ifBlank { null } ?: ""
+                            val driverPlateNumber = snap.getString("driverPlateNumber")?.trim()?.ifBlank { null }
+                                ?: snap.getString("vehicleNumber")?.trim()?.ifBlank { null } ?: ""
+                            val driverVehicleMake = snap.getString("driverVehicleMake")?.trim()?.ifBlank { null }
+                                ?: snap.getString("vehicleCompany")?.trim()?.ifBlank { null } ?: ""
+                            val driverVehicleModel = snap.getString("driverVehicleModel")?.trim()?.ifBlank { null }
+                                ?: snap.getString("vehicleModel")?.trim()?.ifBlank { null } ?: ""
+                            val driverVehicleColor = snap.getString("driverVehicleColor") ?: ""
+                            val driverRating = snap.getDouble("driverRating") ?: 5.0
+                            val driverTotalRides = (snap.getLong("driverTotalRides") ?: 0L).toInt()
+                            val assignedFare = (snap.getLong("assignedFare") ?: snap.getLong("agreedFare") ?: snap.getLong("estimatedFare") ?: 0L).toInt()
+                            val etaMinutes = (snap.getLong("etaMinutes") ?: 4L).toInt()
+
+                            trySend(
+                                RideRequestUpdate(
+                                    status = status,
+                                    assignedDriverId = assignedDriverId,
+                                    driverName = driverName,
+                                    driverPhone = driverPhone,
+                                    driverPlateNumber = driverPlateNumber,
+                                    driverVehicleMake = driverVehicleMake,
+                                    driverVehicleModel = driverVehicleModel,
+                                    driverVehicleColor = driverVehicleColor,
+                                    driverRating = driverRating,
+                                    driverTotalRides = driverTotalRides,
+                                    assignedFare = assignedFare,
+                                    etaMinutes = etaMinutes
+                                )
+                            )
+                        }
+                    }
+            } catch (_: Exception) {}
+        }
+
+        awaitClose {
+            reqRef?.removeEventListener(listener)
+            firestoreReg?.remove()
+        }
+    }
+
+    /**
+     * Fetch driver verification profile by driverId from Realtime Database or users node
+     */
+    suspend fun getDriverProfile(driverId: String): DriverVerification? {
+        if (driverId.isBlank()) return null
+        return try {
+            val rtdb = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+            }
+            val verSnap = rtdb?.getReference("driver_verifications")?.child(driverId)?.get()?.await()
+            if (verSnap != null && verSnap.exists()) {
+                DriverVerification(
+                    uid = driverId,
+                    name = verSnap.child("name").getValue(String::class.java) ?: "",
+                    phone = verSnap.child("phone").getValue(String::class.java) ?: "",
+                    vehicleCompany = verSnap.child("vehicleCompany").getValue(String::class.java) ?: "",
+                    vehicleModel = verSnap.child("vehicleModel").getValue(String::class.java) ?: "",
+                    vehicleNumber = verSnap.child("vehicleNumber").getValue(String::class.java) ?: "",
+                    vehicleColor = verSnap.child("vehicleColor").getValue(String::class.java) ?: "",
+                    city = verSnap.child("city").getValue(String::class.java) ?: "",
+                    vehicleCategory = verSnap.child("vehicleCategory").getValue(String::class.java) ?: "",
+                    isVerified = verSnap.child("verified").getValue(Boolean::class.java) ?: true
+                )
+            } else {
+                val userSnap = rtdb?.getReference("users")?.child(driverId)?.get()?.await()
+                if (userSnap != null && userSnap.exists()) {
+                    DriverVerification(
+                        uid = driverId,
+                        name = userSnap.child("name").getValue(String::class.java) ?: "",
+                        phone = userSnap.child("phone").getValue(String::class.java) ?: "",
+                        vehicleCompany = userSnap.child("vehicleCompany").getValue(String::class.java) ?: "",
+                        vehicleModel = userSnap.child("vehicleModel").getValue(String::class.java) ?: "",
+                        vehicleNumber = userSnap.child("vehicleNumber").getValue(String::class.java) ?: "",
+                        vehicleColor = userSnap.child("vehicleColor").getValue(String::class.java) ?: "",
+                        isVerified = true
+                    )
+                } else null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -1033,14 +1327,31 @@ class FirebaseRepository private constructor(private val context: Context) {
                             distanceKm = snapshot.child("distanceKm").getValue(Double::class.java) ?: 5.0,
                             durationMinutes = (snapshot.child("durationMinutes").getValue(Long::class.java) ?: 15).toInt(),
                             status = status,
-                            driverName = snapshot.child("driverName").getValue(String::class.java) ?: "Captain Farhan",
-                            driverRating = snapshot.child("driverRating").getValue(Double::class.java) ?: 4.9,
-                            driverTotalRides = (snapshot.child("driverTotalRides").getValue(Long::class.java) ?: 1420).toInt(),
-                            driverVehicleMake = snapshot.child("driverVehicleMake").getValue(String::class.java) ?: "Toyota",
-                            driverVehicleModel = snapshot.child("driverVehicleModel").getValue(String::class.java) ?: "Corolla",
-                            driverVehicleColor = snapshot.child("driverVehicleColor").getValue(String::class.java) ?: "White",
-                            driverPlateNumber = snapshot.child("driverPlateNumber").getValue(String::class.java) ?: "LEA-4521",
-                            driverPhone = snapshot.child("driverPhone").getValue(String::class.java) ?: "+92 300 1234567",
+                            driverName = snapshot.child("driverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("assignedDriverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: "",
+                            driverRating = snapshot.child("driverRating").getValue(Double::class.java) ?: 5.0,
+                            driverTotalRides = (snapshot.child("driverTotalRides").getValue(Long::class.java) ?: 0L).toInt(),
+                            driverVehicleMake = snapshot.child("driverVehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("vehicleCompany").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("vehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: "",
+                            driverVehicleModel = snapshot.child("driverVehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("vehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: "",
+                            driverVehicleColor = snapshot.child("driverVehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("vehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: "",
+                            driverPlateNumber = snapshot.child("driverPlateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("vehicleNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("plateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: "",
+                            driverPhone = snapshot.child("driverPhone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("phone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: "",
+                            assignedDriverId = snapshot.child("assignedDriverId").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: snapshot.child("driverId").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                ?: "",
                             createdAt = snapshot.child("timestamp").getValue(Long::class.java) ?: System.currentTimeMillis()
                         )
                         if (status == PassengerOrderStatus.CANCELLED || status == PassengerOrderStatus.COMPLETED) {
@@ -1092,14 +1403,31 @@ class FirebaseRepository private constructor(private val context: Context) {
                                 distanceKm = child.child("distanceKm").getValue(Double::class.java) ?: 5.0,
                                 durationMinutes = (child.child("durationMinutes").getValue(Long::class.java) ?: 15).toInt(),
                                 status = status,
-                                driverName = child.child("driverName").getValue(String::class.java) ?: "Captain Farhan",
-                                driverRating = child.child("driverRating").getValue(Double::class.java) ?: 4.9,
-                                driverTotalRides = (child.child("driverTotalRides").getValue(Long::class.java) ?: 1420).toInt(),
-                                driverVehicleMake = child.child("driverVehicleMake").getValue(String::class.java) ?: "Toyota",
-                                driverVehicleModel = child.child("driverVehicleModel").getValue(String::class.java) ?: "Corolla",
-                                driverVehicleColor = child.child("driverVehicleColor").getValue(String::class.java) ?: "White",
-                                driverPlateNumber = child.child("driverPlateNumber").getValue(String::class.java) ?: "LEA-4521",
-                                driverPhone = child.child("driverPhone").getValue(String::class.java) ?: "+92 300 1234567",
+                                driverName = child.child("driverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("assignedDriverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverRating = child.child("driverRating").getValue(Double::class.java) ?: 5.0,
+                                driverTotalRides = (child.child("driverTotalRides").getValue(Long::class.java) ?: 0L).toInt(),
+                                driverVehicleMake = child.child("driverVehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleCompany").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverVehicleModel = child.child("driverVehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverVehicleColor = child.child("driverVehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverPlateNumber = child.child("driverPlateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("plateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverPhone = child.child("driverPhone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("phone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                assignedDriverId = child.child("assignedDriverId").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("driverId").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
                                 createdAt = child.child("timestamp").getValue(Long::class.java) ?: child.child("createdAt").getValue(Long::class.java) ?: System.currentTimeMillis()
                             )
                             if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
@@ -1166,14 +1494,31 @@ class FirebaseRepository private constructor(private val context: Context) {
                                         distanceKm = doc.getDouble("distanceKm") ?: 5.0,
                                         durationMinutes = (doc.getLong("durationMinutes") ?: 15).toInt(),
                                         status = status,
-                                        driverName = doc.getString("driverName") ?: "Captain Farhan",
-                                        driverRating = doc.getDouble("driverRating") ?: 4.9,
-                                        driverTotalRides = (doc.getLong("driverTotalRides") ?: 1420).toInt(),
-                                        driverVehicleMake = doc.getString("driverVehicleMake") ?: "Toyota",
-                                        driverVehicleModel = doc.getString("driverVehicleModel") ?: "Corolla",
-                                        driverVehicleColor = doc.getString("driverVehicleColor") ?: "White",
-                                        driverPlateNumber = doc.getString("driverPlateNumber") ?: "LEA-4521",
-                                        driverPhone = doc.getString("driverPhone") ?: "+92 300 1234567",
+                                        driverName = doc.getString("driverName")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("assignedDriverName")?.trim()?.ifBlank { null }
+                                            ?: "",
+                                        driverRating = doc.getDouble("driverRating") ?: 5.0,
+                                        driverTotalRides = (doc.getLong("driverTotalRides") ?: 0L).toInt(),
+                                        driverVehicleMake = doc.getString("driverVehicleMake")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("vehicleCompany")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("vehicleMake")?.trim()?.ifBlank { null }
+                                            ?: "",
+                                        driverVehicleModel = doc.getString("driverVehicleModel")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("vehicleModel")?.trim()?.ifBlank { null }
+                                            ?: "",
+                                        driverVehicleColor = doc.getString("driverVehicleColor")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("vehicleColor")?.trim()?.ifBlank { null }
+                                            ?: "",
+                                        driverPlateNumber = doc.getString("driverPlateNumber")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("vehicleNumber")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("plateNumber")?.trim()?.ifBlank { null }
+                                            ?: "",
+                                        driverPhone = doc.getString("driverPhone")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("phone")?.trim()?.ifBlank { null }
+                                            ?: "",
+                                        assignedDriverId = doc.getString("assignedDriverId")?.trim()?.ifBlank { null }
+                                            ?: doc.getString("driverId")?.trim()?.ifBlank { null }
+                                            ?: "",
                                         createdAt = doc.getLong("timestamp") ?: System.currentTimeMillis()
                                     )
                                     if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
@@ -2894,14 +3239,28 @@ class FirebaseRepository private constructor(private val context: Context) {
                                 id = child.child("id").getValue(String::class.java) ?: child.key ?: "",
                                 requestId = child.child("requestId").getValue(String::class.java) ?: requestId,
                                 driverId = child.child("driverId").getValue(String::class.java) ?: "",
-                                driverName = child.child("driverName").getValue(String::class.java) ?: "Captain Farhan",
-                                driverRating = child.child("driverRating").getValue(Double::class.java) ?: 4.9,
-                                driverTotalRides = (child.child("driverTotalRides").getValue(Long::class.java) ?: 1420).toInt(),
-                                driverVehicleMake = child.child("driverVehicleMake").getValue(String::class.java) ?: "Toyota",
-                                driverVehicleModel = child.child("driverVehicleModel").getValue(String::class.java) ?: "Corolla",
-                                driverVehicleColor = child.child("driverVehicleColor").getValue(String::class.java) ?: "White",
-                                driverPlateNumber = child.child("driverPlateNumber").getValue(String::class.java) ?: "LEA-4521",
-                                driverPhone = child.child("driverPhone").getValue(String::class.java) ?: "+92 300 1234567",
+                                driverName = child.child("driverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("assignedDriverName").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "Captain",
+                                driverRating = child.child("driverRating").getValue(Double::class.java) ?: 5.0,
+                                driverTotalRides = (child.child("driverTotalRides").getValue(Long::class.java) ?: 0L).toInt(),
+                                driverVehicleMake = child.child("driverVehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleCompany").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleMake").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverVehicleModel = child.child("driverVehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleModel").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverVehicleColor = child.child("driverVehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleColor").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverPlateNumber = child.child("driverPlateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("vehicleNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("plateNumber").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
+                                driverPhone = child.child("driverPhone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: child.child("phone").getValue(String::class.java)?.trim()?.ifBlank { null }
+                                    ?: "",
                                 offeredFare = (child.child("offeredFare").getValue(Long::class.java) ?: 0).toInt(),
                                 etaMinutes = (child.child("etaMinutes").getValue(Long::class.java) ?: 4).toInt(),
                                 distanceKmAway = child.child("distanceKmAway").getValue(Double::class.java) ?: 1.2,
@@ -2964,6 +3323,142 @@ class FirebaseRepository private constructor(private val context: Context) {
     }
 
     /**
+     * Broadcasts real-time online driver location to /driver_locations/{driverId} and /active_drivers/{driverId}
+     * when driver is online and ready to accept rides.
+     */
+    suspend fun updateDriverOnlineLocation(
+        driverId: String,
+        latitude: Double,
+        longitude: Double,
+        bearing: Float = 0f,
+        speed: Float = 0f,
+        driverName: String = "",
+        vehicleType: String = "",
+        vehicleNumber: String = "",
+        phone: String = ""
+    ) {
+        if (driverId.isBlank()) return
+        val now = System.currentTimeMillis()
+        val payload = mutableMapOf<String, Any>(
+            "driverId" to driverId,
+            "latitude" to latitude,
+            "longitude" to longitude,
+            "bearing" to bearing.toDouble(),
+            "speed" to speed.toDouble(),
+            "speedKmh" to speed.toDouble(),
+            "status" to "ONLINE",
+            "updatedAt" to now,
+            "driverName" to driverName,
+            "vehicleType" to vehicleType,
+            "vehicleNumber" to vehicleNumber,
+            "phone" to phone
+        )
+
+        try {
+            val db = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                FirebaseDatabase.getInstance()
+            }
+
+            val locRef = db.getReference("driver_locations").child(driverId)
+            locRef.setValue(payload).await()
+            // Setup onDisconnect to mark OFFLINE automatically if connection drops
+            try {
+                locRef.child("status").onDisconnect().setValue("OFFLINE")
+                locRef.child("updatedAt").onDisconnect().setValue(com.google.firebase.database.ServerValue.TIMESTAMP)
+            } catch (_: Exception) {}
+
+            val activeRef = db.getReference("active_drivers").child(driverId)
+            activeRef.setValue(payload).await()
+            try {
+                activeRef.onDisconnect().removeValue()
+            } catch (_: Exception) {}
+        } catch (_: Exception) {}
+
+        if (isAvailable() && firestore != null) {
+            try {
+                firestore!!.collection("driver_locations").document(driverId).set(payload).await()
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Updates driver status to OFFLINE and cleans active_drivers entry
+     */
+    suspend fun setDriverOffline(driverId: String) {
+        if (driverId.isBlank()) return
+        val now = System.currentTimeMillis()
+        val offlinePayload = mapOf<String, Any>(
+            "status" to "OFFLINE",
+            "updatedAt" to now
+        )
+
+        try {
+            val db = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                FirebaseDatabase.getInstance()
+            }
+            db.getReference("driver_locations").child(driverId).updateChildren(offlinePayload).await()
+            db.getReference("active_drivers").child(driverId).removeValue().await()
+        } catch (_: Exception) {}
+
+        if (isAvailable() && firestore != null) {
+            try {
+                firestore!!.collection("driver_locations").document(driverId).update(offlinePayload).await()
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Real-time stream of all currently active online drivers from /active_drivers
+     */
+    fun listenToActiveOnlineDrivers(): Flow<List<ActiveDriverLocation>> = callbackFlow {
+        val db = try {
+            FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+        } catch (_: Exception) {
+            try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+        }
+
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                val list = mutableListOf<ActiveDriverLocation>()
+                for (child in snapshot.children) {
+                    val status = child.child("status").getValue(String::class.java) ?: "ONLINE"
+                    if (status == "ONLINE") {
+                        val dId = child.child("driverId").getValue(String::class.java) ?: child.key ?: ""
+                        val lat = child.child("latitude").getValue(Double::class.java) ?: 0.0
+                        val lon = child.child("longitude").getValue(Double::class.java) ?: 0.0
+                        val bearing = (child.child("bearing").getValue(Double::class.java) ?: 0.0).toFloat()
+                        val speed = (child.child("speed").getValue(Double::class.java) ?: child.child("speedKmh").getValue(Double::class.java) ?: 0.0).toFloat()
+                        val name = child.child("driverName").getValue(String::class.java) ?: "Captain"
+                        val vehicle = child.child("vehicleType").getValue(String::class.java) ?: "Car"
+                        val plate = child.child("vehicleNumber").getValue(String::class.java) ?: ""
+                        val phone = child.child("phone").getValue(String::class.java) ?: ""
+                        val updated = child.child("updatedAt").getValue(Long::class.java) ?: System.currentTimeMillis()
+                        if (lat != 0.0 && lon != 0.0) {
+                            list.add(ActiveDriverLocation(dId, lat, lon, bearing, speed, name, vehicle, plate, phone, status, updated))
+                        }
+                    }
+                }
+                trySend(list)
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Log.w(TAG, "Active drivers listener cancelled: ${error.message}")
+            }
+        }
+
+        val ref = db?.getReference("active_drivers")
+        ref?.addValueEventListener(listener)
+
+        awaitClose {
+            ref?.removeEventListener(listener)
+        }
+    }
+
+    /**
      * Listen to real-time Driver GPS position & vehicle bearing on passenger or driver map
      */
     fun listenToLiveDriverLocation(rideId: String): Flow<LiveDriverLocation?> = callbackFlow {
@@ -3018,7 +3513,8 @@ class FirebaseRepository private constructor(private val context: Context) {
         orderId: String,
         status: PassengerOrderStatus,
         requestId: String = "",
-        passengerId: String = ""
+        passengerId: String = "",
+        driverId: String = ""
     ) {
         val now = System.currentTimeMillis()
         val updates = mutableMapOf<String, Any>(
@@ -3066,6 +3562,18 @@ class FirebaseRepository private constructor(private val context: Context) {
                 }
             }
 
+            if (driverId.isNotBlank()) {
+                if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
+                    try {
+                        db.getReference("users").child(driverId).child("active_driver_trip").removeValue().await()
+                    } catch (_: Exception) {}
+                } else {
+                    try {
+                        db.getReference("users").child(driverId).child("active_driver_trip").updateChildren(updates).await()
+                    } catch (_: Exception) {}
+                }
+            }
+
             if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
                 try {
                     db.getReference("live_driver_locations").child(orderId).removeValue().await()
@@ -3096,8 +3604,8 @@ class FirebaseRepository private constructor(private val context: Context) {
 
     /**
      * Real-time listener for the Driver's Active Trip (single source of truth).
-     * Listens to RTDB passenger_orders, ride_requests, and Firestore to guarantee the driver's
-     * active ride view is restored and stays synchronized across all state changes.
+     * Listens to RTDB user active_driver_trip, passenger_orders, ride_requests, and Firestore.
+     * Prioritizes active trips (DRIVER_COMING, DRIVER_ARRIVED, IN_TRIP) over historical cancelled/completed trips.
      */
     fun listenToDriverActiveTrip(driverId: String, driverPhone: String): Flow<PassengerOrder?> = callbackFlow {
         val cleanDriverId = driverId.trim()
@@ -3109,11 +3617,13 @@ class FirebaseRepository private constructor(private val context: Context) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
 
+        var directUserTrip: PassengerOrder? = null
         var rtdbActiveTrip: PassengerOrder? = null
         var firestoreActiveTrip: PassengerOrder? = null
 
         fun checkAndEmit() {
-            val chosen = rtdbActiveTrip ?: firestoreActiveTrip
+            // Priority: Direct active_driver_trip node -> RTDB scanned active trip -> Firestore active trip
+            val chosen = directUserTrip ?: rtdbActiveTrip ?: firestoreActiveTrip
             trySend(chosen)
         }
 
@@ -3136,13 +3646,13 @@ class FirebaseRepository private constructor(private val context: Context) {
                 val cleanAssigned = assigned.trim().replace(" ", "").replace("-", "")
                 val cleanItemPhone = phone.trim().replace(" ", "").replace("-", "")
 
-                val matches = (cleanDriverId.isNotBlank() && (cleanAssigned == cleanDriverId || assigned == driverId)) ||
+                val matches = (cleanDriverId.isNotBlank() && (cleanAssigned == cleanDriverId || assigned == driverId || (cleanAssigned.isNotBlank() && (cleanAssigned.contains(cleanDriverId) || cleanDriverId.contains(cleanAssigned))))) ||
                         (cleanPhone.isNotBlank() && (cleanAssigned == cleanPhone || cleanItemPhone == cleanPhone || phone == driverPhone))
 
                 val statusStr = child.child("status").getValue(String::class.java) ?: ""
-                val isActive = statusStr == "DRIVER_COMING" || statusStr == "ACCEPTED" || statusStr == "DRIVER_ARRIVED" || statusStr == "IN_TRIP"
+                val isRelevant = statusStr == "DRIVER_COMING" || statusStr == "ACCEPTED" || statusStr == "DRIVER_ARRIVED" || statusStr == "IN_TRIP" || statusStr == "CANCELLED" || statusStr == "COMPLETED"
 
-                if (matches && isActive) {
+                if (matches && isRelevant) {
                     val statusEnum = when (statusStr) {
                         "DRIVER_ARRIVED" -> PassengerOrderStatus.DRIVER_ARRIVED
                         "IN_TRIP" -> PassengerOrderStatus.IN_TRIP
@@ -3192,21 +3702,55 @@ class FirebaseRepository private constructor(private val context: Context) {
             }
         }
 
-        // 1. RTDB listener on passenger_orders
+        // 1. Direct O(1) listener on users/{driverId}/active_driver_trip
+        val directTripRef = if (cleanDriverId.isNotBlank()) db?.getReference("users")?.child(cleanDriverId)?.child("active_driver_trip") else null
+        val directTripListener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                if (snapshot.exists()) {
+                    val parsed = parseOrder(snapshot)
+                    if (parsed != null && (parsed.status == PassengerOrderStatus.DRIVER_COMING || parsed.status == PassengerOrderStatus.ACCEPTED || parsed.status == PassengerOrderStatus.DRIVER_ARRIVED || parsed.status == PassengerOrderStatus.IN_TRIP)) {
+                        directUserTrip = parsed
+                    } else {
+                        directUserTrip = null
+                    }
+                } else {
+                    directUserTrip = null
+                }
+                checkAndEmit()
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+        }
+        directTripRef?.addValueEventListener(directTripListener)
+
+        // 2. RTDB listener on passenger_orders with active-status prioritization
         val rtdbOrdersRef = db?.getReference("passenger_orders")
         val rtdbOrdersListener = object : com.google.firebase.database.ValueEventListener {
             override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                var found: PassengerOrder? = null
+                val matchedOrders = mutableListOf<PassengerOrder>()
                 if (snapshot.exists()) {
                     for (child in snapshot.children) {
                         val parsed = parseOrder(child)
                         if (parsed != null) {
-                            found = parsed
-                            break
+                            matchedOrders.add(parsed)
                         }
                     }
                 }
-                rtdbActiveTrip = found
+
+                val activeTrips = matchedOrders.filter {
+                    it.status == PassengerOrderStatus.DRIVER_COMING ||
+                    it.status == PassengerOrderStatus.ACCEPTED ||
+                    it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
+                    it.status == PassengerOrderStatus.IN_TRIP
+                }
+
+                rtdbActiveTrip = if (activeTrips.isNotEmpty()) {
+                    // Pick latest active trip
+                    activeTrips.maxByOrNull { it.createdAt }
+                } else {
+                    // If no active trips, check if there is a very recently cancelled/completed trip (< 60s)
+                    matchedOrders.maxByOrNull { it.createdAt }?.takeIf { System.currentTimeMillis() - it.createdAt < 60_000 }
+                }
                 checkAndEmit()
             }
 
@@ -3216,23 +3760,28 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
         rtdbOrdersRef?.addValueEventListener(rtdbOrdersListener)
 
-        // 2. Secondary RTDB listener on ride_requests
+        // 3. Secondary RTDB listener on ride_requests with active prioritization
         val rtdbReqsRef = db?.getReference("ride_requests")
         val rtdbReqsListener = object : com.google.firebase.database.ValueEventListener {
             override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                if (rtdbActiveTrip != null) return
-                var found: PassengerOrder? = null
+                if (directUserTrip != null || (rtdbActiveTrip != null && (rtdbActiveTrip?.status == PassengerOrderStatus.DRIVER_ARRIVED || rtdbActiveTrip?.status == PassengerOrderStatus.IN_TRIP || rtdbActiveTrip?.status == PassengerOrderStatus.DRIVER_COMING))) return
+                val matchedOrders = mutableListOf<PassengerOrder>()
                 if (snapshot.exists()) {
                     for (child in snapshot.children) {
                         val parsed = parseOrder(child)
                         if (parsed != null) {
-                            found = parsed
-                            break
+                            matchedOrders.add(parsed)
                         }
                     }
                 }
-                if (rtdbActiveTrip == null && found != null) {
-                    rtdbActiveTrip = found
+                val activeTrips = matchedOrders.filter {
+                    it.status == PassengerOrderStatus.DRIVER_COMING ||
+                    it.status == PassengerOrderStatus.ACCEPTED ||
+                    it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
+                    it.status == PassengerOrderStatus.IN_TRIP
+                }
+                if (activeTrips.isNotEmpty()) {
+                    rtdbActiveTrip = activeTrips.maxByOrNull { it.createdAt }
                     checkAndEmit()
                 }
             }
@@ -3241,7 +3790,7 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
         rtdbReqsRef?.addValueEventListener(rtdbReqsListener)
 
-        // 3. Firestore fallback
+        // 4. Firestore fallback
         var firestoreReg: ListenerRegistration? = null
         if (isAvailable() && firestore != null) {
             try {
@@ -3249,14 +3798,14 @@ class FirebaseRepository private constructor(private val context: Context) {
                     .whereIn("status", listOf("DRIVER_COMING", "ACCEPTED", "DRIVER_ARRIVED", "IN_TRIP"))
                     .addSnapshotListener { snapshot, error ->
                         if (error != null || snapshot == null) return@addSnapshotListener
-                        var found: PassengerOrder? = null
+                        val matchedOrders = mutableListOf<PassengerOrder>()
                         for (doc in snapshot.documents) {
                             val assigned = doc.getString("assignedDriverId") ?: ""
                             val phone = doc.getString("driverPhone") ?: ""
                             val cleanAssigned = assigned.trim().replace(" ", "").replace("-", "")
                             val cleanItemPhone = phone.trim().replace(" ", "").replace("-", "")
 
-                            val matches = (cleanDriverId.isNotBlank() && (cleanAssigned == cleanDriverId || assigned == driverId)) ||
+                            val matches = (cleanDriverId.isNotBlank() && (cleanAssigned == cleanDriverId || assigned == driverId || (cleanAssigned.isNotBlank() && (cleanAssigned.contains(cleanDriverId) || cleanDriverId.contains(cleanAssigned))))) ||
                                     (cleanPhone.isNotBlank() && (cleanAssigned == cleanPhone || cleanItemPhone == cleanPhone || phone == driverPhone))
 
                             if (matches) {
@@ -3268,7 +3817,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                                     "CANCELLED" -> PassengerOrderStatus.CANCELLED
                                     else -> PassengerOrderStatus.DRIVER_COMING
                                 }
-                                found = PassengerOrder(
+                                val parsed = PassengerOrder(
                                     id = doc.id,
                                     requestId = doc.getString("requestId") ?: doc.id,
                                     passengerId = doc.getString("passengerId") ?: "",
@@ -3294,16 +3843,23 @@ class FirebaseRepository private constructor(private val context: Context) {
                                     status = statusEnum,
                                     etaMinutes = (doc.getLong("etaMinutes") ?: 5).toInt()
                                 )
-                                break
+                                matchedOrders.add(parsed)
                             }
                         }
-                        firestoreActiveTrip = found
+                        val activeTrips = matchedOrders.filter {
+                            it.status == PassengerOrderStatus.DRIVER_COMING ||
+                            it.status == PassengerOrderStatus.ACCEPTED ||
+                            it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
+                            it.status == PassengerOrderStatus.IN_TRIP
+                        }
+                        firestoreActiveTrip = activeTrips.maxByOrNull { it.createdAt }
                         checkAndEmit()
                     }
             } catch (_: Exception) {}
         }
 
         awaitClose {
+            directTripRef?.removeEventListener(directTripListener)
             rtdbOrdersRef?.removeEventListener(rtdbOrdersListener)
             rtdbReqsRef?.removeEventListener(rtdbReqsListener)
             firestoreReg?.remove()
@@ -3661,5 +4217,20 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
     }
 }
+
+data class RideRequestUpdate(
+    val status: String = "",
+    val assignedDriverId: String = "",
+    val driverName: String = "",
+    val driverPhone: String = "",
+    val driverPlateNumber: String = "",
+    val driverVehicleMake: String = "",
+    val driverVehicleModel: String = "",
+    val driverVehicleColor: String = "",
+    val driverRating: Double = 5.0,
+    val driverTotalRides: Int = 0,
+    val assignedFare: Int = 0,
+    val etaMinutes: Int = 4
+)
 
 

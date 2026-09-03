@@ -1,9 +1,14 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -37,6 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.data.AppLocation
 import com.example.data.LocationHelper
 import com.example.data.UserLocationData
@@ -44,6 +50,7 @@ import com.example.data.RouteResult
 import com.example.data.RouteService
 import com.example.data.model.*
 import com.example.data.remote.FirebaseRepository
+import com.example.service.DriverLocationService
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.border
@@ -86,6 +93,7 @@ fun DriverModeView(
     onSwitchToPassenger: () -> Unit,
     onOpenChat: (tripId: String, partnerName: String, role: String, phone: String, pickup: String, dest: String) -> Unit,
     initialUserLocation: UserLocationData? = null,
+    liveRideRequests: List<RideRequest>? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -94,7 +102,7 @@ fun DriverModeView(
     val repo = remember { FirebaseRepository.getInstance(context) }
     val routeService = remember { RouteService(context) }
     val locationHelper = remember { LocationHelper(context) }
-    val audioHelper = remember { DriverAudioHelper(context) }
+    val audioHelper = remember { DriverAudioHelper.getInstance(context) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -102,35 +110,152 @@ fun DriverModeView(
         }
     }
 
-    // Driver identification
-    val driverId = user?.uid ?: "driver_${System.currentTimeMillis().toString().takeLast(6)}"
-    val driverName = driverVerification?.name?.ifBlank { user?.displayName?.ifBlank { "Captain Farhan" } ?: "Captain Farhan" } ?: "Captain Farhan"
-    val driverVehicleMake = driverVerification?.vehicleCompany?.ifBlank { "Toyota" } ?: "Toyota"
-    val driverVehicleModel = driverVerification?.vehicleModel?.ifBlank { "Corolla" } ?: "Corolla"
-    val driverVehicleNumber = driverVerification?.vehicleNumber?.ifBlank { "LEA-4521" } ?: "LEA-4521"
-    val driverPhone = driverVerification?.phone?.ifBlank { "+92 300 1234567" } ?: "+92 300 1234567"
+    // Driver identification and live verification data
+    val driverId = remember(user?.uid) { user?.uid ?: "driver_${System.currentTimeMillis().toString().takeLast(6)}" }
+    val realTimeDriverVerification by repo.listenToDriverVerification(driverId).collectAsState(initial = driverVerification)
+    val activeVerification = realTimeDriverVerification ?: driverVerification
 
-    // Real-time Ride Requests Stream from Firebase Realtime Database & Firestore
-    val firebaseRequests by repo.listenToRideRequests().collectAsState(initial = emptyList())
+    val driverName = remember(activeVerification?.name, user?.displayName, user?.email) {
+        activeVerification?.name?.trim()?.ifBlank { null }
+            ?: user?.displayName?.trim()?.ifBlank { null }
+            ?: user?.email?.substringBefore("@")?.replaceFirstChar { it.uppercase() }?.ifBlank { null }
+            ?: "Captain"
+    }
+    val driverVehicleMake = remember(activeVerification?.vehicleCompany) {
+        activeVerification?.vehicleCompany?.trim()?.ifBlank { null } ?: ""
+    }
+    val driverVehicleModel = remember(activeVerification?.vehicleModel) {
+        activeVerification?.vehicleModel?.trim()?.ifBlank { null } ?: ""
+    }
+    val driverVehicleColor = remember(activeVerification?.vehicleColor) {
+        activeVerification?.vehicleColor?.trim()?.ifBlank { null } ?: ""
+    }
+    val driverVehicleNumber = remember(activeVerification?.vehicleNumber) {
+        activeVerification?.vehicleNumber?.trim()?.ifBlank { null } ?: ""
+    }
+    val driverPhone = remember(activeVerification?.phone, user?.phoneNumber) {
+        activeVerification?.phone?.trim()?.ifBlank { null }
+            ?: user?.phoneNumber?.trim()?.ifBlank { null }
+            ?: ""
+    }
+
+    DisposableEffect(isDriverOnline, driverId) {
+        onDispose {
+            if (!isDriverOnline) {
+                DriverLocationService.stop(context, driverId)
+            }
+        }
+    }
+
+    // Real-time Ride Requests Stream from Firebase Realtime Database
+    // Collects only while isDriverOnline is true; stops immediately when offline
+    val localStreamRequests by remember(isDriverOnline) {
+        if (isDriverOnline) {
+            com.example.data.remote.RideRequestRepository.getInstance().getLiveRideRequests()
+        } else {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        }
+    }.collectAsState(initial = emptyList())
+
+    val firebaseRequests = if (isDriverOnline) {
+        liveRideRequests ?: localStreamRequests
+    } else {
+        emptyList()
+    }
 
     // Audio announcement tracker
     var lastAnnouncedRequestId by remember { mutableStateOf<String?>(null) }
     var isVoiceAlertsEnabled by remember { mutableStateOf(true) }
 
-    // Real passenger requests only - no mock or dummy requests
+    // Real passenger requests - robust filtering to show all active requests in area
     val allRequests = remember(firebaseRequests, driverId) {
         val now = System.currentTimeMillis()
         firebaseRequests.filter { req ->
-            val isActive = (req.status == "SEARCHING_DRIVERS" || req.status == "SEARCHING") &&
-                    req.status != "CANCELLED" && req.status != "COMPLETED" && req.status != "REJECTED" && req.status != "ACCEPTED"
-            val notExpired = (req.expiresAt == 0L || req.expiresAt > now) && (now - req.timestamp < 30 * 60 * 1000L)
-            val notAssigned = req.assignedDriverId.isBlank() || req.assignedDriverId == driverId
+            val isTerminal = req.status.equals("CANCELLED", true) ||
+                    req.status.equals("COMPLETED", true) ||
+                    req.status.equals("REJECTED", true) ||
+                    req.status.equals("ACCEPTED", true) ||
+                    req.status.equals("IN_TRIP", true) ||
+                    req.status.equals("DRIVER_ARRIVED", true) ||
+                    req.status.equals("DRIVER_COMING", true)
+            val isActive = !isTerminal
+            val notExpired = (req.expiresAt == 0L || req.expiresAt > (now - 2 * 60 * 60 * 1000L) ||
+                    req.status.equals("SEARCHING_DRIVERS", true) || req.status.equals("SEARCHING", true) || req.status.equals("PENDING", true)) &&
+                    (req.timestamp == 0L || (now - req.timestamp < 48 * 60 * 60 * 1000L))
+            val notAssigned = req.assignedDriverId.isBlank() ||
+                    req.assignedDriverId.equals("null", true) ||
+                    req.assignedDriverId.equals("none", true) ||
+                    req.assignedDriverId == "0" ||
+                    req.assignedDriverId == driverId
             isActive && notExpired && notAssigned
         }
     }
 
     // Centralized Ride Notification Manager
     val notifManager = remember(context) { RideNotificationManager.getInstance(context) }
+
+    // Runtime Permission Pre-flight for Going Online (Android 14+ FGS location + Notifications)
+    val permissionsToRequest = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        val fineGranted = perms[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            onToggleOnline()
+        } else {
+            Toast.makeText(
+                context,
+                "Location permission is required to go online and receive ride requests.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    val handleToggleOnlineClick: () -> Unit = remember(isDriverOnline, onToggleOnline) {
+        {
+            if (isDriverOnline) {
+                onToggleOnline()
+            } else {
+                val fineGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                val coarseGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+                } else {
+                    true
+                }
+
+                if ((fineGranted || coarseGranted) && notifGranted) {
+                    onToggleOnline()
+                } else {
+                    permissionLauncher.launch(permissionsToRequest)
+                }
+            }
+        }
+    }
 
     // Filtering State (Item 3)
     var selectedCategoryFilter by remember { mutableStateOf("All") }
@@ -159,7 +284,12 @@ fun DriverModeView(
             if (newest != null && newest.id != lastAnnouncedRequestId) {
                 lastAnnouncedRequestId = newest.id
                 if (isVoiceAlertsEnabled) {
-                    audioHelper.playNewRequestAlert(newest.pickupTitle, newest.destinationTitle, newest.estimatedFare)
+                    audioHelper.playNewRequestAlert(
+                        pickupTitle = newest.pickupTitle,
+                        destinationTitle = newest.destinationTitle,
+                        farePkr = newest.estimatedFare,
+                        requestId = newest.id
+                    )
                 }
                 if (newest.rideCategory.contains("Share", ignoreCase = true) || newest.rideCategory.contains("Shared", ignoreCase = true)) {
                     notifManager.notifySharedRideMatch(
@@ -237,8 +367,8 @@ fun DriverModeView(
         } catch (_: Exception) {}
     }
 
-    // 2. Real-time location continuous updates flow for Driver Mode
-    LaunchedEffect(Unit) {
+    // 2. Real-time location continuous updates flow for Driver Mode & Firebase synchronization
+    LaunchedEffect(isDriverOnline, driverId) {
         try {
             locationHelper.getLocationUpdatesFlow().collectLatest { liveLoc ->
                 // Only update position from real GPS if driver is not in simulated active trip route animation
@@ -251,22 +381,69 @@ fun DriverModeView(
                         currentSpeedKmh = liveLoc.speedKmh
                     }
                 }
+
+                // If online, continuously sync coordinates to Firebase /driver_locations and /active_drivers
+                if (isDriverOnline && driverId.isNotBlank()) {
+                    try {
+                        repo.updateDriverOnlineLocation(
+                            driverId = driverId,
+                            latitude = liveLoc.latitude,
+                            longitude = liveLoc.longitude,
+                            bearing = liveLoc.bearing,
+                            speed = liveLoc.speedKmh,
+                            driverName = driverName,
+                            vehicleType = "$driverVehicleMake $driverVehicleModel".trim(),
+                            vehicleNumber = driverVehicleNumber,
+                            phone = driverPhone
+                        )
+                    } catch (_: Exception) {}
+                }
             }
         } catch (_: Exception) {}
     }
 
-    // 3. When driver goes online, refresh location and smoothly recenter map on driver car
-    LaunchedEffect(isDriverOnline) {
-        if (isDriverOnline) {
+    // 3. When driver goes online/offline, start/stop Foreground Location Service and update status
+    LaunchedEffect(isDriverOnline, driverId) {
+        if (isDriverOnline && driverId.isNotBlank()) {
+            try {
+                DriverLocationService.start(
+                    context = context,
+                    driverId = driverId,
+                    driverName = driverName,
+                    vehicleType = "$driverVehicleMake $driverVehicleModel".trim(),
+                    vehicleNumber = driverVehicleNumber,
+                    phone = driverPhone
+                )
+            } catch (_: Throwable) {}
             try {
                 val loc = locationHelper.getCurrentLocation()
                 if (loc != null) {
                     driverGeoPoint = GeoPoint(loc.latitude, loc.longitude)
                     if (loc.bearing != 0f) driverBearing = loc.bearing
                     if (loc.speedKmh > 0f) currentSpeedKmh = loc.speedKmh
+                    repo.updateDriverOnlineLocation(
+                        driverId = driverId,
+                        latitude = loc.latitude,
+                        longitude = loc.longitude,
+                        bearing = loc.bearing,
+                        speed = loc.speedKmh,
+                        driverName = driverName,
+                        vehicleType = "$driverVehicleMake $driverVehicleModel".trim(),
+                        vehicleNumber = driverVehicleNumber,
+                        phone = driverPhone
+                    )
                 }
             } catch (_: Exception) {}
             driverRecenterTrigger++
+        } else {
+            try {
+                DriverLocationService.stop(context, driverId)
+            } catch (_: Throwable) {}
+            if (driverId.isNotBlank()) {
+                try {
+                    repo.setDriverOffline(driverId)
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -309,14 +486,14 @@ fun DriverModeView(
         driverVehicleMake,
         driverVehicleModel
     ) {
-        val isDriverBike = driverVehicleMake.contains("Honda", true) ||
-                driverVehicleMake.contains("Yamaha", true) ||
-                driverVehicleMake.contains("Suzuki GS", true) ||
-                driverVehicleModel.contains("70", true) ||
-                driverVehicleModel.contains("125", true) ||
-                driverVehicleModel.contains("150", true) ||
+        val isDriverBike = driverVehicleMake.contains("Motorcycle", true) ||
                 driverVehicleMake.contains("Bike", true) ||
-                driverVehicleModel.contains("Bike", true)
+                driverVehicleModel.contains("CD 70", true) ||
+                driverVehicleModel.contains("CG 125", true) ||
+                driverVehicleModel.contains("GS 150", true) ||
+                driverVehicleModel.contains("YBR", true) ||
+                driverVehicleModel.contains("Bike", true) ||
+                driverVehicleModel.contains("Motorcycle", true)
 
         allRequests.filter { req ->
             // 1. Vehicle category & AC requirements matching
@@ -324,11 +501,16 @@ fun DriverModeView(
                     req.rideCategory.contains("Bike", true) ||
                     req.rideCategory.contains("Moto", true)
 
-            val matchVehicle = if (isDriverBike) {
+            val matchVehicle = if (selectedCategoryFilter == "All") {
+                true
+            } else if (isDriverBike) {
                 isRequestBike || req.rideCategory.contains("Courier", true) || req.rideCategory.contains("Parcel", true)
             } else {
-                // Car driver takes standard, AC, Mini, and City rides
-                !isRequestBike
+                if (driverVehicleMake.isBlank() && driverVehicleModel.isBlank()) {
+                    true
+                } else {
+                    !isRequestBike || selectedCategoryFilter == "Bike"
+                }
             }
 
             // 2. Category filter selection from UI chips
@@ -348,7 +530,13 @@ fun DriverModeView(
             } else {
                 req.distanceKm
             }
-            val matchDistance = selectedMaxDistanceFilterKm == null || distToPickupKm <= selectedMaxDistanceFilterKm!!
+            val matchDistance = if (selectedMaxDistanceFilterKm == null) {
+                true
+            } else if (driverGeoPoint.latitude != 0.0 && req.pickupLat != 0.0) {
+                distToPickupKm <= selectedMaxDistanceFilterKm!!
+            } else {
+                true
+            }
 
             // 4. Payment method filter
             val matchPayment = when (selectedPaymentFilter.uppercase()) {
@@ -401,24 +589,49 @@ fun DriverModeView(
     var lastKnownDriverTripStatus by remember { mutableStateOf<PassengerOrderStatus?>(null) }
     var lastKnownDriverTripId by remember { mutableStateOf<String?>(null) }
 
+    // Manage Driver Active Ride Persistent Notification
+    LaunchedEffect(activeDriverTrip?.id, activeDriverTrip?.status) {
+        val trip = activeDriverTrip
+        if (trip != null && (trip.status == PassengerOrderStatus.DRIVER_COMING || trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_ARRIVED || trip.status == PassengerOrderStatus.IN_TRIP)) {
+            notifManager.updateDriverActiveRideNotification(trip)
+        } else {
+            notifManager.dismissDriverActiveRideNotification()
+        }
+    }
+
     // Real-time synchronization & restoration of Active Driver Trip from Firebase (single source of truth)
     LaunchedEffect(driverId, driverPhone) {
         repo.listenToDriverActiveTrip(driverId, driverPhone).collectLatest { remoteTrip ->
             if (remoteTrip != null) {
-                if (activeDriverTrip == null || activeDriverTrip?.id != remoteTrip.id || activeDriverTrip?.status != remoteTrip.status) {
-                    activeDriverTrip = remoteTrip
-                    offerSentRequestId = remoteTrip.requestId.ifBlank { remoteTrip.id }
-                    driverRecenterTrigger++
+                if (remoteTrip.status == PassengerOrderStatus.CANCELLED) {
+                    if (activeDriverTrip != null && (activeDriverTrip?.id == remoteTrip.id || activeDriverTrip?.requestId == remoteTrip.requestId)) {
+                        Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
+                        notifManager.notifyDriverRideCancelled(
+                            passengerName = remoteTrip.passengerName.ifBlank { "Passenger" },
+                            rideId = remoteTrip.id
+                        )
+                        notifManager.dismissDriverActiveRideNotification()
+                        activeDriverTrip = null
+                        driverRouteResult = null
+                        offerSentRequestId = null
+                        driverRecenterTrigger++
+                    }
+                } else if (remoteTrip.status == PassengerOrderStatus.COMPLETED) {
+                    if (activeDriverTrip != null && (activeDriverTrip?.id == remoteTrip.id || activeDriverTrip?.requestId == remoteTrip.requestId)) {
+                        notifManager.dismissDriverActiveRideNotification()
+                        activeDriverTrip = null
+                        driverRouteResult = null
+                        offerSentRequestId = null
+                        driverRecenterTrigger++
+                    }
+                } else {
+                    // Active status: DRIVER_COMING, DRIVER_ARRIVED, IN_TRIP
+                    if (activeDriverTrip == null || activeDriverTrip?.id != remoteTrip.id || activeDriverTrip?.status != remoteTrip.status) {
+                        activeDriverTrip = remoteTrip
+                        offerSentRequestId = remoteTrip.requestId.ifBlank { remoteTrip.id }
+                        driverRecenterTrigger++
+                    }
                 }
-            } else if (activeDriverTrip != null) {
-                // Trip was completed or cancelled remotely
-                if (activeDriverTrip?.status != PassengerOrderStatus.COMPLETED) {
-                    Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
-                }
-                activeDriverTrip = null
-                driverRouteResult = null
-                offerSentRequestId = null
-                driverRecenterTrigger++
             }
         }
     }
@@ -439,6 +652,7 @@ fun DriverModeView(
                     override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                         val status = snapshot.getValue(String::class.java)
                         if (status == "CANCELLED") {
+                            notifManager.dismissDriverActiveRideNotification()
                             activeDriverTrip = null
                             driverRouteResult = null
                             offerSentRequestId = null
@@ -448,11 +662,18 @@ fun DriverModeView(
                                 passengerName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
                                 rideId = trip.id
                             )
-                        } else if (status == "COMPLETED" && activeDriverTrip?.status != PassengerOrderStatus.COMPLETED) {
-                            activeDriverTrip = null
-                            driverRouteResult = null
-                            offerSentRequestId = null
-                            driverRecenterTrigger++
+                        } else if (status == "COMPLETED") {
+                            notifManager.dismissDriverActiveRideNotification()
+                            if (activeDriverTrip?.status != PassengerOrderStatus.COMPLETED) {
+                                activeDriverTrip = null
+                                driverRouteResult = null
+                                offerSentRequestId = null
+                                driverRecenterTrigger++
+                            }
+                        } else if (status == "DRIVER_ARRIVED" && activeDriverTrip?.status != PassengerOrderStatus.DRIVER_ARRIVED) {
+                            activeDriverTrip = activeDriverTrip?.copy(status = PassengerOrderStatus.DRIVER_ARRIVED)
+                        } else if (status == "IN_TRIP" && activeDriverTrip?.status != PassengerOrderStatus.IN_TRIP) {
+                            activeDriverTrip = activeDriverTrip?.copy(status = PassengerOrderStatus.IN_TRIP)
                         }
                     }
                     override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
@@ -487,6 +708,7 @@ fun DriverModeView(
                         passengerName = passName,
                         rideId = trip.id
                     )
+                    notifManager.clearVoiceQueueAndTracking()
                 }
                 lastKnownDriverTripStatus = trip.status
             }
@@ -494,15 +716,17 @@ fun DriverModeView(
             // Trip was cleared / cancelled
             lastKnownDriverTripId = null
             lastKnownDriverTripStatus = null
+            notifManager.clearVoiceQueueAndTracking()
         }
     }
 
     // Wait Time Counter effect
-    LaunchedEffect(activeDriverTrip?.status) {
-        if (activeDriverTrip?.status == PassengerOrderStatus.DRIVER_ARRIVED) {
+    LaunchedEffect(activeDriverTrip?.id, activeDriverTrip?.status) {
+        val currentTrip = activeDriverTrip
+        if (currentTrip?.status == PassengerOrderStatus.DRIVER_ARRIVED) {
             isWaitingTimerRunning = true
             waitTimeSeconds = 0
-            audioHelper.playArrivalChime()
+            audioHelper.playArrivalChime(currentTrip.id)
             while (isWaitingTimerRunning && activeDriverTrip?.status == PassengerOrderStatus.DRIVER_ARRIVED) {
                 delay(1000)
                 waitTimeSeconds += 1
@@ -828,7 +1052,7 @@ fun DriverModeView(
 
                     // Driver Online / Offline Pill Switch
                     Surface(
-                        onClick = onToggleOnline,
+                        onClick = handleToggleOnlineClick,
                         shape = RoundedCornerShape(100.dp),
                         color = if (isDriverOnline) Color(0xFF0D381E) else Color(0xFF222630),
                         border = BorderStroke(
@@ -1305,6 +1529,29 @@ fun DriverModeView(
                         // Call Passenger Button
                         val passPhone = trip.passengerPhone.ifBlank { "+92 300 9876543" }
                         val passName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } }
+                        val targetNavLat = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLat else trip.pickupLat
+                        val targetNavLon = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLon else trip.pickupLon
+                        val targetNavTitle = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationTitle else trip.pickupTitle
+
+                        IconButton(
+                            onClick = {
+                                launchExternalGpsNavigation(targetNavLat, targetNavLon, targetNavTitle)
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF0288D1))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Navigation,
+                                contentDescription = "Navigate GPS",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
                         IconButton(
                             onClick = {
                                 try {
@@ -1484,7 +1731,8 @@ fun DriverModeView(
                                             trip.id,
                                             PassengerOrderStatus.DRIVER_ARRIVED,
                                             requestId = trip.requestId,
-                                            passengerId = trip.passengerId
+                                            passengerId = trip.passengerId,
+                                            driverId = driverId
                                         )
                                         Toast.makeText(context, "Passenger notified: You have arrived!", Toast.LENGTH_SHORT).show()
                                     }
@@ -1533,7 +1781,8 @@ fun DriverModeView(
                                                 trip.id,
                                                 PassengerOrderStatus.IN_TRIP,
                                                 requestId = trip.requestId,
-                                                passengerId = trip.passengerId
+                                                passengerId = trip.passengerId,
+                                                driverId = driverId
                                             )
                                             Toast.makeText(context, "Ride Started! Head to destination.", Toast.LENGTH_SHORT).show()
                                         }
@@ -1588,13 +1837,14 @@ fun DriverModeView(
                                         completedTripsCount += 1
                                         completedTripForRating = updated
                                         showPassengerRatingDialog = true
-                                        audioHelper.playTripCompleteChime(totalCashToCollect)
+                                        audioHelper.playTripCompleteChime(totalCashToCollect, trip.id)
                                         scope.launch {
                                             repo.updateDriverTripStatus(
                                                 trip.id,
                                                 PassengerOrderStatus.COMPLETED,
                                                 requestId = trip.requestId,
-                                                passengerId = trip.passengerId
+                                                passengerId = trip.passengerId,
+                                                driverId = driverId
                                             )
                                             repo.creditDriverEarnings(
                                                 userId = walletUserId,
@@ -2046,7 +2296,7 @@ fun DriverModeView(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Button(
-                        onClick = onToggleOnline,
+                        onClick = handleToggleOnlineClick,
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
                         modifier = Modifier
@@ -2701,7 +2951,8 @@ fun DriverModeView(
                                     trip.id,
                                     PassengerOrderStatus.IN_TRIP,
                                     requestId = trip.requestId,
-                                    passengerId = trip.passengerId
+                                    passengerId = trip.passengerId,
+                                    driverId = driverId
                                 )
                                 Toast.makeText(context, "PIN Verified! Trip Started.", Toast.LENGTH_SHORT).show()
                             }
@@ -2724,7 +2975,8 @@ fun DriverModeView(
                                     trip.id,
                                     PassengerOrderStatus.IN_TRIP,
                                     requestId = trip.requestId,
-                                    passengerId = trip.passengerId
+                                    passengerId = trip.passengerId,
+                                    driverId = driverId
                                 )
                                 Toast.makeText(context, "Trip Started without PIN.", Toast.LENGTH_SHORT).show()
                             }
@@ -2839,12 +3091,14 @@ fun DriverModeView(
                         onClick = {
                             val tripToCancel = activeDriverTrip
                             if (tripToCancel != null) {
+                                notifManager.dismissDriverActiveRideNotification()
                                 scope.launch {
                                     repo.updateDriverTripStatus(
                                         tripToCancel.id,
                                         PassengerOrderStatus.CANCELLED,
                                         requestId = tripToCancel.requestId,
-                                        passengerId = tripToCancel.passengerId
+                                        passengerId = tripToCancel.passengerId,
+                                        driverId = driverId
                                     )
                                 }
                             }

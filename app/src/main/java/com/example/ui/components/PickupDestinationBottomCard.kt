@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -44,6 +45,7 @@ import kotlinx.coroutines.launch
  * - "● Where From?" / "● Where To?"
  * - Preserves pickup state and allows direct editing
  * - Provides search with autocomplete suggestions
+ * - Locks input and shows notifications when a ride is in progress
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,6 +54,7 @@ fun PickupDestinationBottomCard(
     destinationLocation: AppLocation? = null,
     initialEditingPickup: Boolean = false,
     initialWhereToText: String = "",
+    isLocked: Boolean = false,
     onDismiss: () -> Unit,
     onDestinationSelected: (destination: AppLocation) -> Unit,
     onPickupSelected: (pickup: AppLocation) -> Unit,
@@ -64,7 +67,11 @@ fun PickupDestinationBottomCard(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
 
-    var isEditingPickup by remember { mutableStateOf(initialEditingPickup) }
+    fun showLockedToast() {
+        Toast.makeText(context, "Location cannot be modified once a ride is in progress.", Toast.LENGTH_SHORT).show()
+    }
+
+    var isEditingPickup by remember { mutableStateOf(if (isLocked) false else initialEditingPickup) }
     var editablePickupText by remember { mutableStateOf(pickupLocation.title) }
 
     var searchFieldText by remember {
@@ -76,6 +83,10 @@ fun PickupDestinationBottomCard(
     var isGeocodingPickup by remember { mutableStateOf(false) }
 
     fun performSearch(query: String) {
+        if (isLocked) {
+            showLockedToast()
+            return
+        }
         searchFieldText = query
         searchJob?.cancel()
         searchJob = scope.launch {
@@ -93,7 +104,7 @@ fun PickupDestinationBottomCard(
     }
 
     LaunchedEffect(Unit) {
-        if (initialWhereToText.isNotBlank()) {
+        if (initialWhereToText.isNotBlank() && !isLocked) {
             performSearch(initialWhereToText)
         }
     }
@@ -132,15 +143,15 @@ fun PickupDestinationBottomCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         shape = CircleShape,
-                        color = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
+                        color = if (isLocked) Color(0xFFFFB74D) else if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
                         modifier = Modifier.size(12.dp)
                     ) {}
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = if (isEditingPickup) "Edit Pickup Location" else "Where To?",
+                        text = if (isLocked) "Ride in Progress (Locked)" else if (isEditingPickup) "Edit Pickup Location" else "Where To?",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = if (isEditingPickup) Color(0xFF81C784) else DrigoBrandPurple,
+                        color = if (isLocked) Color(0xFFFFB74D) else if (isEditingPickup) Color(0xFF81C784) else DrigoBrandPurple,
                         fontSize = 22.sp
                     )
                 }
@@ -158,6 +169,36 @@ fun PickupDestinationBottomCard(
                 }
             }
 
+            if (isLocked) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFFE65100).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFFFFB74D).copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Locked",
+                            tint = Color(0xFFFFB74D),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Pickup & Destination are locked while trip is active",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFFFCC80),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
 
             // Subtitle: "Current pickup location:"
@@ -172,7 +213,7 @@ fun PickupDestinationBottomCard(
                     color = Color(0xFFB0B3BC),
                     fontSize = 13.sp
                 )
-                if (!isEditingPickup) {
+                if (!isEditingPickup && !isLocked) {
                     TextButton(
                         onClick = {
                             editablePickupText = pickupLocation.title
@@ -196,8 +237,11 @@ fun PickupDestinationBottomCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("pickup_location_card")
+                    .clickable(enabled = isLocked) {
+                        showLockedToast()
+                    }
             ) {
-                if (isEditingPickup) {
+                if (isEditingPickup && !isLocked) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         OutlinedTextField(
                             value = editablePickupText,
@@ -286,18 +330,27 @@ fun PickupDestinationBottomCard(
                                 fontWeight = FontWeight.Normal
                             )
                         }
-                        IconButton(
-                            onClick = {
-                                editablePickupText = pickupLocation.title
-                                isEditingPickup = true
-                            },
-                            modifier = Modifier.size(28.dp)
-                        ) {
+                        if (!isLocked) {
+                            IconButton(
+                                onClick = {
+                                    editablePickupText = pickupLocation.title
+                                    isEditingPickup = true
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit Pickup Address",
+                                    tint = Color(0xFF9E9E9E),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else {
                             Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Edit Pickup Address",
-                                tint = Color(0xFF9E9E9E),
-                                modifier = Modifier.size(16.dp)
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Locked",
+                                tint = Color(0xFF757885),
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -310,18 +363,20 @@ fun PickupDestinationBottomCard(
             OutlinedTextField(
                 value = searchFieldText,
                 onValueChange = { performSearch(it) },
+                readOnly = isLocked,
+                enabled = !isLocked,
                 placeholder = {
                     Text(
-                        text = if (isEditingPickup) "Search & pick new pickup location..." else "Search destination (e.g. Saddar, Hayatabad...)",
+                        text = if (isLocked) "Destination locked during active ride" else if (isEditingPickup) "Search & pick new pickup location..." else "Search destination (e.g. Saddar, Hayatabad...)",
                         color = Color(0xFF8E92A0),
                         fontSize = 14.sp
                     )
                 },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Default.Search,
+                        imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
+                        tint = if (isLocked) Color(0xFFFFB74D) else if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
                         modifier = Modifier.size(22.dp)
                     )
                 },
@@ -332,7 +387,7 @@ fun PickupDestinationBottomCard(
                             strokeWidth = 2.dp,
                             color = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple
                         )
-                    } else if (searchFieldText.isNotEmpty()) {
+                    } else if (searchFieldText.isNotEmpty() && !isLocked) {
                         IconButton(onClick = { performSearch("") }) {
                             Icon(
                                 imageVector = Icons.Default.Clear,
@@ -348,15 +403,22 @@ fun PickupDestinationBottomCard(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White,
+                    disabledTextColor = Color.White,
                     focusedContainerColor = Color(0xFF2C2F38),
                     unfocusedContainerColor = Color(0xFF2C2F38),
+                    disabledContainerColor = Color(0xFF23252E),
                     focusedBorderColor = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
                     unfocusedBorderColor = Color(0xFF4A4E5C),
+                    disabledBorderColor = Color(0xFF3B3E4A),
                     cursorColor = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(
                     onSearch = {
+                        if (isLocked) {
+                            showLockedToast()
+                            return@KeyboardActions
+                        }
                         keyboardController?.hide()
                         if (searchFieldText.isNotBlank()) {
                             val first = suggestions.firstOrNull()
@@ -388,64 +450,69 @@ fun PickupDestinationBottomCard(
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
                     .testTag("where_to_bottom_card_input")
+                    .clickable(enabled = isLocked) {
+                        showLockedToast()
+                    }
             )
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Direct "Choose on Map" action card
-            Surface(
-                onClick = {
-                    keyboardController?.hide()
-                    onPickOnMap(isEditingPickup)
-                },
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF2C2F38),
-                border = BorderStroke(1.2.dp, if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("choose_on_map_action_card")
-            ) {
-                Row(
+            // Direct "Choose on Map" action card (hidden or disabled if locked)
+            if (!isLocked) {
+                Surface(
+                    onClick = {
+                        keyboardController?.hide()
+                        onPickOnMap(isEditingPickup)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF2C2F38),
+                    border = BorderStroke(1.2.dp, if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .testTag("choose_on_map_action_card")
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isEditingPickup) Color(0xFF4CAF50).copy(alpha = 0.2f) else DrigoBrandPurple.copy(alpha = 0.2f),
-                        modifier = Modifier.size(32.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (isEditingPickup) Icons.Default.Place else Icons.Default.Flag,
-                                contentDescription = null,
-                                tint = if (isEditingPickup) Color(0xFF81C784) else Color(0xFFFF80AB),
-                                modifier = Modifier.size(18.dp)
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isEditingPickup) Color(0xFF4CAF50).copy(alpha = 0.2f) else DrigoBrandPurple.copy(alpha = 0.2f),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isEditingPickup) Icons.Default.Place else Icons.Default.Flag,
+                                    contentDescription = null,
+                                    tint = if (isEditingPickup) Color(0xFF81C784) else Color(0xFFFF80AB),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (isEditingPickup) "Set Pickup (From) on Map" else "Set Destination (To) on Map",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Tap any location point directly on the map",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFF9E9E9E),
+                                fontSize = 11.sp
                             )
                         }
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isEditingPickup) "Set Pickup (From) on Map" else "Set Destination (To) on Map",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "Tap any location point directly on the map",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF9E9E9E),
-                            fontSize = 11.sp
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = if (isEditingPickup) Color(0xFF81C784) else Color(0xFFFF80AB),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    Icon(
-                        imageVector = Icons.Default.TouchApp,
-                        contentDescription = null,
-                        tint = if (isEditingPickup) Color(0xFF81C784) else Color(0xFFFF80AB),
-                        modifier = Modifier.size(18.dp)
-                    )
                 }
             }
 
@@ -458,21 +525,23 @@ fun PickupDestinationBottomCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (searchFieldText.isBlank()) "Popular Places in Peshawar" else "Search Results",
+                    text = if (isLocked) "Locations (Read-Only)" else if (searchFieldText.isBlank()) "Popular Places in Peshawar" else "Search Results",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(0xFFB0B3BC)
                 )
-                Text(
-                    text = "${suggestions.size} places",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF757885)
-                )
+                if (!isLocked) {
+                    Text(
+                        text = "${suggestions.size} places",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFF757885)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Real-Time Suggestion List
+            // Real-Time Suggestion List (disabled / read-only with toast if locked)
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -483,6 +552,10 @@ fun PickupDestinationBottomCard(
                 items(suggestions, key = { "${it.title}_${it.latitude}_${it.longitude}" }) { item ->
                     Surface(
                         onClick = {
+                            if (isLocked) {
+                                showLockedToast()
+                                return@Surface
+                            }
                             keyboardController?.hide()
                             if (isEditingPickup) {
                                 onPickupSelected(item.toAppLocation())
@@ -492,7 +565,7 @@ fun PickupDestinationBottomCard(
                             }
                         },
                         shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF2C2F38),
+                        color = if (isLocked) Color(0xFF23252E) else Color(0xFF2C2F38),
                         border = BorderStroke(1.dp, Color(0xFF3B3E4A)),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -506,14 +579,14 @@ fun PickupDestinationBottomCard(
                         ) {
                             Surface(
                                 shape = CircleShape,
-                                color = if (isEditingPickup) Color(0xFF4CAF50).copy(alpha = 0.2f) else DrigoBrandPurple.copy(alpha = 0.2f),
+                                color = if (isLocked) Color(0xFF757885).copy(alpha = 0.2f) else if (isEditingPickup) Color(0xFF4CAF50).copy(alpha = 0.2f) else DrigoBrandPurple.copy(alpha = 0.2f),
                                 modifier = Modifier.size(34.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.LocationOn,
                                         contentDescription = null,
-                                        tint = if (isEditingPickup) Color(0xFF81C784) else DrigoBrandPurple,
+                                        tint = if (isLocked) Color(0xFF9E9E9E) else if (isEditingPickup) Color(0xFF81C784) else DrigoBrandPurple,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -524,7 +597,7 @@ fun PickupDestinationBottomCard(
                                     text = item.title,
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White,
+                                    color = if (isLocked) Color(0xFFCCCCCC) else Color.White,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -537,8 +610,8 @@ fun PickupDestinationBottomCard(
                                 )
                             }
                             Icon(
-                                imageVector = Icons.Default.NorthEast,
-                                contentDescription = "Select",
+                                imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.NorthEast,
+                                contentDescription = if (isLocked) "Locked" else "Select",
                                 tint = Color(0xFF757885),
                                 modifier = Modifier.size(16.dp)
                             )

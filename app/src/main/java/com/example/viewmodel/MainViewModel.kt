@@ -85,6 +85,12 @@ class MainViewModel(
     private val _googleDriveStatusMessage = MutableStateFlow<String?>(null)
     val googleDriveStatusMessage = _googleDriveStatusMessage.asStateFlow()
 
+    // Real-time Driver Ride Requests feed from Firebase (Requirement 4)
+    private val rideRequestRepo = com.example.data.remote.RideRequestRepository.getInstance()
+    private val _liveRideRequests = MutableStateFlow<List<com.example.data.model.RideRequest>>(emptyList())
+    val liveRideRequests = _liveRideRequests.asStateFlow()
+    private var rideRequestsJob: kotlinx.coroutines.Job? = null
+
     init {
         viewModelScope.launch {
             authRepo.authStateFlow().collect { user ->
@@ -97,6 +103,24 @@ class MainViewModel(
                     _userMode.value = UserMode.PASSENGER
                     _driverVerification.value = null
                     _userRecord.value = null
+                }
+            }
+        }
+
+        // Collect Firebase Flow only while driver is ONLINE. Cancel immediately when OFFLINE.
+        viewModelScope.launch {
+            _isDriverOnline.collect { online ->
+                if (online) {
+                    rideRequestsJob?.cancel()
+                    rideRequestsJob = viewModelScope.launch {
+                        rideRequestRepo.getLiveRideRequests().collect { requests ->
+                            _liveRideRequests.value = requests
+                        }
+                    }
+                } else {
+                    rideRequestsJob?.cancel()
+                    rideRequestsJob = null
+                    _liveRideRequests.value = emptyList()
                 }
             }
         }
@@ -277,7 +301,9 @@ class MainViewModel(
         val uid = _currentUser.value?.uid ?: return
         viewModelScope.launch {
             val newAccStatus = if (nextOnlineState) "ONLINE" else "ACTIVE"
-            FirebaseRepository.getInstance().updateDriverOperationalStatus(uid, newAccStatus, nextOnlineState)
+            try {
+                FirebaseRepository.getInstance().updateDriverOperationalStatus(uid, newAccStatus, nextOnlineState)
+            } catch (_: Throwable) {}
         }
     }
 
@@ -352,6 +378,16 @@ class MainViewModel(
     }
 
     fun signOut() {
+        val uid = _currentUser.value?.uid
+        if (uid != null && _isDriverOnline.value) {
+            viewModelScope.launch {
+                try {
+                    FirebaseRepository.getInstance().setDriverOffline(uid)
+                    FirebaseRepository.getInstance().updateDriverOperationalStatus(uid, "ACTIVE", false)
+                } catch (_: Exception) {}
+            }
+        }
+        _isDriverOnline.value = false
         authRepo.signOut()
         _currentUser.value = null
         _userMode.value = UserMode.PASSENGER
@@ -537,5 +573,15 @@ class MainViewModel(
         firebaseRepo.deleteGoogleDriveFileRecord(safeUserId, fileId)
 
         return driveRes
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        rideRequestsJob?.cancel()
+        rideRequestsJob = null
+        driverVerificationJob?.cancel()
+        driverVerificationJob = null
+        userRecordJob?.cancel()
+        userRecordJob = null
     }
 }

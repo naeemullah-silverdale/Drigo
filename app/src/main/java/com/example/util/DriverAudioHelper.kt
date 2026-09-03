@@ -14,8 +14,9 @@ import java.util.Locale
 /**
  * Audio and Text-to-Speech Assistant for Driver Mode.
  * Announces incoming ride requests, turn-by-turn navigation alerts, and safety chimes hands-free.
+ * Engineered for maximum stability on low-end budget Android devices (e.g. Samsung Galaxy A12).
  */
-class DriverAudioHelper(private val context: Context) : TextToSpeech.OnInitListener {
+class DriverAudioHelper private constructor(private val context: Context) : TextToSpeech.OnInitListener {
 
     private var tts: TextToSpeech? = null
     private var isTtsReady = false
@@ -23,12 +24,32 @@ class DriverAudioHelper(private val context: Context) : TextToSpeech.OnInitListe
     private var voiceLanguage = "EN" // "EN" or "UR"
     private var toneGenerator: ToneGenerator? = null
 
+    companion object {
+        private const val TAG = "DriverAudioHelper"
+
+        @Volatile
+        private var INSTANCE: DriverAudioHelper? = null
+
+        fun getInstance(context: Context): DriverAudioHelper {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: DriverAudioHelper(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+    }
+
     init {
         try {
             tts = TextToSpeech(context.applicationContext, this)
-            toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 90)
-        } catch (e: Exception) {
-            Log.e("DriverAudioHelper", "Error initializing TTS/Audio: ${e.message}")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error initializing TTS: ${t.message}", t)
+            tts = null
+        }
+
+        try {
+            toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error initializing ToneGenerator: ${t.message}", t)
+            toneGenerator = null
         }
     }
 
@@ -55,25 +76,150 @@ class DriverAudioHelper(private val context: Context) : TextToSpeech.OnInitListe
 
     fun getVoiceLanguage(): String = voiceLanguage
 
-    fun playNewRequestAlert(pickupTitle: String, destinationTitle: String, farePkr: Int) {
-        if (!isVoiceEnabled) return
+    // State Tracking for Active Ride Updates (Strict single active ride deduping)
+    private var lastAnnouncedRideId: String? = null
+    private var lastAnnouncedStatus: String? = null
 
-        // 1. Play Tone Chime
+    /**
+     * Announces a critical status update exclusively for the single active ride.
+     * Prevents repetitive announcements on UI recomposition or DB re-fetches.
+     * Automatically clears queue and resets state if ride completes or cancels.
+     */
+    fun announceActiveRideStatus(
+        rideId: String,
+        status: String,
+        customMessage: String? = null,
+        farePkr: Int? = null,
+        pickupTitle: String? = null,
+        destTitle: String? = null
+    ) {
+        if (rideId.isBlank()) return
+
+        val normalizedStatus = status.uppercase().trim()
+        val isTerminal = normalizedStatus in setOf("COMPLETED", "CANCELLED", "REJECTED")
+
+        // If status transition has already been announced for this specific ride, skip (dedupe)
+        if (lastAnnouncedRideId == rideId && lastAnnouncedStatus == normalizedStatus && !isTerminal) {
+            return
+        }
+
+        // Update tracking state
+        lastAnnouncedRideId = rideId
+        lastAnnouncedStatus = normalizedStatus
+
+        if (!isVoiceEnabled) {
+            if (isTerminal) clearQueueAndResetTracking()
+            return
+        }
+
+        // Prepare context-aware speech text based on status & language
+        val speechText = customMessage ?: when (normalizedStatus) {
+            "REQUESTED", "NEW_REQUEST" -> {
+                val cleanPickup = pickupTitle?.substringBefore(",")?.take(22) ?: "pickup"
+                val cleanDest = destTitle?.substringBefore(",")?.take(22) ?: "destination"
+                val fare = farePkr ?: 0
+                if (voiceLanguage == "UR") {
+                    "Nayi ride request. $cleanPickup say $cleanDest. Kiraya $fare rupay."
+                } else {
+                    "New ride request received. From $cleanPickup to $cleanDest. Fare $fare rupees."
+                }
+            }
+            "ACCEPTED", "HEADING_TO_PICKUP", "CONFIRMED" -> {
+                if (voiceLanguage == "UR") "Ride tayar hai. Pickup point ki taraf rawana hon."
+                else "Ride confirmed. Heading to pickup point."
+            }
+            "ARRIVED", "DRIVER_ARRIVED" -> {
+                if (voiceLanguage == "UR") "Aap pickup point per pohanch gaye hain. Waiting time shuru."
+                else "You have arrived at pickup. Free waiting time started."
+            }
+            "IN_TRANSIT", "IN_TRIP" -> {
+                if (voiceLanguage == "UR") "Safar shuru ho gaya hai. Manzil ki taraf rawana hon."
+                else "Trip started. Proceed safely to destination."
+            }
+            "COMPLETED" -> {
+                val fare = farePkr ?: 0
+                if (fare > 0) {
+                    if (voiceLanguage == "UR") "Safar mukammal. Sawari say $fare rupay wasool karein."
+                    else "Ride completed. Please collect $fare rupees from passenger."
+                } else {
+                    if (voiceLanguage == "UR") "Safar mukammal ho gaya."
+                    else "Ride completed."
+                }
+            }
+            "CANCELLED" -> {
+                if (voiceLanguage == "UR") "Ride mansookh ho gayi."
+                else "Ride cancelled."
+            }
+            else -> customMessage ?: normalizedStatus
+        }
+
+        // Sound chime / vibration feedback
+        when (normalizedStatus) {
+            "REQUESTED", "NEW_REQUEST" -> {
+                try { toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 250) } catch (_: Exception) {}
+                vibrateShort()
+            }
+            "ARRIVED", "DRIVER_ARRIVED" -> {
+                try { toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 350) } catch (_: Exception) {}
+                vibrateShort()
+            }
+            "COMPLETED" -> {
+                try { toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 400) } catch (_: Exception) {}
+                vibrateShort()
+            }
+            "CANCELLED" -> {
+                vibrateShort()
+            }
+        }
+
+        // Speak via TTS
+        if (isTtsReady && tts != null && speechText.isNotBlank()) {
+            val queueMode = if (isTerminal) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_FLUSH
+            tts?.speak(speechText, queueMode, null, "RIDE_${rideId}_${normalizedStatus}_${System.currentTimeMillis()}")
+        }
+
+        // If trip is completed or cancelled, reset tracking and clear any pending announcements
+        if (isTerminal) {
+            clearQueueAndResetTracking()
+        }
+    }
+
+    /**
+     * Clears any spoken announcement queue and resets active ride tracking state.
+     */
+    fun clearQueueAndResetTracking() {
+        try {
+            tts?.stop()
+        } catch (_: Exception) {}
+        lastAnnouncedRideId = null
+        lastAnnouncedStatus = null
+    }
+
+    fun playNewRequestAlert(pickupTitle: String, destinationTitle: String, farePkr: Int, requestId: String = "") {
+        if (requestId.isNotBlank()) {
+            announceActiveRideStatus(
+                rideId = requestId,
+                status = "REQUESTED",
+                farePkr = farePkr,
+                pickupTitle = pickupTitle,
+                destTitle = destinationTitle
+            )
+            return
+        }
+
+        if (!isVoiceEnabled) return
         try {
             toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 250)
         } catch (_: Exception) {}
-
-        // 2. Vibrate phone
         vibrateShort()
 
-        // 3. Spoken Voice Announcement (English or Roman Urdu)
         if (isTtsReady && tts != null) {
             val cleanPickup = pickupTitle.substringBefore(",").take(22)
             val cleanDest = destinationTitle.substringBefore(",").take(22)
             val speechText = if (voiceLanguage == "UR") {
                 "Nayi ride request. $cleanPickup say $cleanDest. Kiraya $farePkr rupay."
             } else {
-                "New ride request. From $cleanPickup to $cleanDest. Fare $farePkr rupees."
+                "New ride request received. From $cleanPickup to $cleanDest. Fare $farePkr rupees."
             }
             tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "NEW_REQUEST_${System.currentTimeMillis()}")
         }
@@ -112,26 +258,48 @@ class DriverAudioHelper(private val context: Context) : TextToSpeech.OnInitListe
         speak(message)
     }
 
-    fun playArrivalChime() {
+    fun playArrivalChime(rideId: String = "") {
+        if (rideId.isNotBlank()) {
+            announceActiveRideStatus(
+                rideId = rideId,
+                status = "ARRIVED"
+            )
+            return
+        }
         if (!isVoiceEnabled) return
         try {
             toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 350)
             vibrateShort()
             if (isTtsReady) {
-                tts?.speak("You have arrived at the pickup point. Free waiting time started.", TextToSpeech.QUEUE_FLUSH, null, "ARRIVED")
+                val msg = if (voiceLanguage == "UR") "Aap pickup point per pohanch gaye hain. Waiting time shuru." else "You have arrived at pickup. Free waiting time started."
+                tts?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "ARRIVED")
             }
         } catch (_: Exception) {}
     }
 
-    fun playTripCompleteChime(fare: Int) {
+    fun playTripCompleteChime(fare: Int, rideId: String = "") {
+        if (rideId.isNotBlank()) {
+            announceActiveRideStatus(
+                rideId = rideId,
+                status = "COMPLETED",
+                farePkr = fare
+            )
+            return
+        }
         if (!isVoiceEnabled) return
         try {
             toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 400)
             vibrateShort()
             if (isTtsReady) {
-                tts?.speak("Trip completed. Please collect $fare rupees cash from the passenger.", TextToSpeech.QUEUE_FLUSH, null, "COMPLETED")
+                val msg = if (fare > 0) {
+                    if (voiceLanguage == "UR") "Safar mukammal. Sawari say $fare rupay wasool karein." else "Ride completed. Please collect $fare rupees from passenger."
+                } else {
+                    if (voiceLanguage == "UR") "Safar mukammal ho gaya." else "Ride completed."
+                }
+                tts?.speak(msg, TextToSpeech.QUEUE_FLUSH, null, "COMPLETED")
             }
         } catch (_: Exception) {}
+        clearQueueAndResetTracking()
     }
 
     private fun vibrateLong() {

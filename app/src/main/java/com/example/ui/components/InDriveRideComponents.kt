@@ -564,6 +564,8 @@ fun InDriveRouteTopCard(
     onPickupClick: () -> Unit,
     onDestinationClick: () -> Unit,
     onAddStopClick: () -> Unit,
+    onPickPickupOnMap: (() -> Unit)? = null,
+    onPickDestinationOnMap: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -584,16 +586,17 @@ fun InDriveRouteTopCard(
             // Row 1: Pickup Location
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onPickupClick() },
+                    .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // White figure walking / pickup icon
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = "Pickup Location",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    tint = Color(0xFF81C784),
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable { onPickupClick() }
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
@@ -604,23 +607,40 @@ fun InDriveRouteTopCard(
                     fontSize = 15.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onPickupClick() }
                 )
+
+                if (onPickPickupOnMap != null) {
+                    IconButton(
+                        onClick = onPickPickupOnMap,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Place,
+                            contentDescription = "Select Pickup on Map",
+                            tint = Color(0xFF81C784),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
 
             // Row 2: Destination Location + Duration + Add Stop (+) Button
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onDestinationClick() },
+                    .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // White Flag icon
                 Icon(
                     imageVector = Icons.Default.Flag,
                     contentDescription = "Destination Location",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    tint = Color(0xFFFF80AB),
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable { onDestinationClick() }
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
@@ -631,8 +651,24 @@ fun InDriveRouteTopCard(
                     fontSize = 15.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onDestinationClick() }
                 )
+
+                if (onPickDestinationOnMap != null) {
+                    IconButton(
+                        onClick = onPickDestinationOnMap,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Flag,
+                            contentDescription = "Select Destination on Map",
+                            tint = Color(0xFFFF80AB),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
 
                 // Plus Icon button on right
                 IconButton(
