@@ -3744,13 +3744,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                     it.status == PassengerOrderStatus.IN_TRIP
                 }
 
-                rtdbActiveTrip = if (activeTrips.isNotEmpty()) {
-                    // Pick latest active trip
-                    activeTrips.maxByOrNull { it.createdAt }
-                } else {
-                    // If no active trips, check if there is a very recently cancelled/completed trip (< 60s)
-                    matchedOrders.maxByOrNull { it.createdAt }?.takeIf { System.currentTimeMillis() - it.createdAt < 60_000 }
-                }
+                rtdbActiveTrip = activeTrips.maxByOrNull { it.createdAt }
                 checkAndEmit()
             }
 
