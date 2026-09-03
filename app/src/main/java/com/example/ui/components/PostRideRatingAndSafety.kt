@@ -54,6 +54,7 @@ fun PostRideRatingDialog(
     targetPhone: String = "",
     targetVehicleSummary: String = "",
     targetPlateNumber: String = "",
+    targetRating: Double = 0.0,
     pickupTitle: String = "",
     destinationTitle: String = "",
     farePkr: Int = 0,
@@ -178,15 +179,40 @@ fun PostRideRatingDialog(
                         Spacer(modifier = Modifier.width(10.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = targetName.ifBlank { if (isDriver) "Passenger" else "Driver Captain" },
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 14.sp
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = targetName.ifBlank { if (isDriver) "Passenger" else "Driver Captain" },
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (targetRating > 0.0) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Star,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFFB300),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Text(
+                                            text = String.format(java.util.Locale.US, "%.1f", targetRating),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFFFFB300)
+                                        )
+                                    }
+                                }
+                            }
                             if (targetVehicleSummary.isNotBlank()) {
                                 Text(
-                                    text = "$targetVehicleSummary • $targetPlateNumber",
+                                    text = "$targetVehicleSummary${if (targetPlateNumber.isNotBlank()) " • $targetPlateNumber" else ""}",
                                     color = Color(0xFFA0A6B5),
                                     fontSize = 11.sp
                                 )

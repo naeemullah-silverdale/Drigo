@@ -314,7 +314,9 @@ data class PassengerOrder(
     val createdAt: Long = System.currentTimeMillis(),
     val completedAt: Long = 0L,
     val cancelledAt: Long = 0L
-)
+) {
+    val driverId: String get() = assignedDriverId
+}
 
 data class DriverOffer(
     val id: String = UUID.randomUUID().toString(),

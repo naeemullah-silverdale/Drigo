@@ -58,6 +58,7 @@ import com.example.data.model.RideRequest
 import com.example.data.model.PassengerOrder
 import com.example.data.model.PassengerOrderStatus
 import com.example.data.model.LiveDriverLocation
+import com.example.ui.components.PostRideRatingDialog
 import com.example.data.model.DriverOffer
 import com.example.data.remote.FirebaseRepository
 import com.example.ui.components.CityRideType
@@ -164,6 +165,11 @@ fun HomeScreen(
     // Safety & SOS Modal State
     var showSafetySheet by remember { mutableStateOf(false) }
     var showSafetyReportModal by remember { mutableStateOf(false) }
+
+    // Post-Ride Feedback state for Passenger
+    var completedOrderForRating by remember { mutableStateOf<PassengerOrder?>(null) }
+    var showPassengerRatingDialog by remember { mutableStateOf(false) }
+    var ratedOrSkippedOrderIds by remember { mutableStateOf(setOf<String>()) }
 
     // Passenger Bottom Tab Navigation & Orders State (Screenshots & My orders tab)
     var passengerNavTab by remember { mutableIntStateOf(0) } // 0 = Ride, 1 = My orders
@@ -522,6 +528,40 @@ fun HomeScreen(
                 it.status != PassengerOrderStatus.CANCELLED
             }
             passengerOrders = (localOnly + cloudOrders).distinctBy { it.id.ifBlank { it.requestId } }
+        }
+    }
+
+    // Automatically trigger Passenger Post-Ride Feedback when an order becomes COMPLETED
+    LaunchedEffect(passengerOrders) {
+        val completedOrder = passengerOrders.firstOrNull { order ->
+            order.status == PassengerOrderStatus.COMPLETED &&
+            order.id.isNotBlank() &&
+            order.id !in ratedOrSkippedOrderIds &&
+            (order.requestId.isBlank() || order.requestId !in ratedOrSkippedOrderIds)
+        }
+        if (completedOrder != null && !showPassengerRatingDialog) {
+            val safeId = completedOrder.id.ifBlank { completedOrder.requestId }
+            val repo = FirebaseRepository.getInstance(context)
+            val alreadyRated = repo.hasUserRatedRide(safeId, "PASSENGER")
+            if (!alreadyRated) {
+                var fullOrder = completedOrder
+                if (fullOrder.driverId.isNotBlank() && (fullOrder.driverName.isBlank() || fullOrder.driverPlateNumber.isBlank())) {
+                    val profile = repo.getDriverProfile(fullOrder.driverId)
+                    if (profile != null) {
+                        fullOrder = fullOrder.copy(
+                            driverName = fullOrder.driverName.ifBlank { profile.name },
+                            driverPhone = fullOrder.driverPhone.ifBlank { profile.phone },
+                            driverPlateNumber = fullOrder.driverPlateNumber.ifBlank { profile.vehicleNumber },
+                            driverVehicleMake = fullOrder.driverVehicleMake.ifBlank { profile.vehicleCompany },
+                            driverVehicleModel = fullOrder.driverVehicleModel.ifBlank { profile.vehicleModel }
+                        )
+                    }
+                }
+                completedOrderForRating = fullOrder
+                showPassengerRatingDialog = true
+            } else {
+                ratedOrSkippedOrderIds = ratedOrSkippedOrderIds + safeId + completedOrder.requestId
+            }
         }
     }
 
@@ -2626,6 +2666,44 @@ fun HomeScreen(
                 scope.launch {
                     snackbarHostState.showSnackbar("Safety report submitted securely. Our safety team is on it.")
                 }
+            }
+        )
+    }
+
+    // Passenger Post-Ride Rating & Feedback Dialog
+    if (showPassengerRatingDialog && completedOrderForRating != null) {
+        val order = completedOrderForRating!!
+        val safeId = order.id.ifBlank { order.requestId }
+        PostRideRatingDialog(
+            rideId = safeId,
+            currentUserId = user?.uid ?: "passenger_user",
+            currentUserName = user?.displayName ?: "Passenger",
+            isDriver = false,
+            targetId = order.driverId.ifBlank { "driver_captain" },
+            targetName = order.driverName.ifBlank { "Driver Captain" },
+            targetPhone = order.driverPhone,
+            targetVehicleSummary = "${order.driverVehicleMake} ${order.driverVehicleModel}".trim(),
+            targetPlateNumber = order.driverPlateNumber,
+            targetRating = if (order.driverRating > 0) order.driverRating else 5.0,
+            pickupTitle = order.pickupTitle,
+            destinationTitle = order.destinationTitle,
+            farePkr = order.agreedFare,
+            onDismiss = {
+                showPassengerRatingDialog = false
+                ratedOrSkippedOrderIds = ratedOrSkippedOrderIds + safeId + order.requestId
+                completedOrderForRating = null
+            },
+            onRatingSubmitted = { ratingEntity ->
+                showPassengerRatingDialog = false
+                ratedOrSkippedOrderIds = ratedOrSkippedOrderIds + safeId + order.requestId
+                completedOrderForRating = null
+                scope.launch {
+                    snackbarHostState.showSnackbar("Thank you! Feedback submitted for ${order.driverName.ifBlank { "Driver Captain" }}.")
+                }
+            },
+            onOpenSafetyReport = {
+                showPassengerRatingDialog = false
+                showSafetyReportModal = true
             }
         )
     }

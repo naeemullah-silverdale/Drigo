@@ -3873,13 +3873,19 @@ class FirebaseRepository private constructor(private val context: Context) {
             val map = mapOf(
                 "id" to rating.id,
                 "rideId" to rating.rideId,
+                "requestId" to rating.rideId,
                 "raterId" to rating.raterId,
+                "reviewerId" to rating.raterId,
                 "raterRole" to rating.raterRole,
+                "reviewerRole" to rating.raterRole,
                 "raterName" to rating.raterName,
                 "targetId" to rating.targetId,
+                "reviewedUserId" to rating.targetId,
                 "targetName" to rating.targetName,
                 "stars" to rating.stars,
+                "rating" to rating.stars,
                 "reviewText" to rating.reviewText,
+                "comment" to rating.reviewText,
                 "tags" to rating.tags,
                 "tipAmount" to rating.tipAmount,
                 "isBlocked" to rating.isBlocked,
@@ -3932,6 +3938,37 @@ class FirebaseRepository private constructor(private val context: Context) {
                 kotlinx.coroutines.withTimeoutOrNull(4000L) {
                     rtdb.getReference("ride_ratings").child(ratingId).setValue(map).await()
                 }
+
+                // 2b. Update reviewed user's profile rating & review count
+                if (rating.targetId.isNotBlank()) {
+                    try {
+                        val isTargetDriver = (rating.raterRole == "PASSENGER")
+                        val nodePath = if (isTargetDriver) "driver_verifications" else "users"
+                        val ref = rtdb.getReference(nodePath).child(rating.targetId)
+                        val snap = ref.get().await()
+                        if (snap.exists()) {
+                            val oldRating = snap.child("rating").getValue(Double::class.java)
+                                ?: snap.child("driverRating").getValue(Double::class.java) ?: 5.0
+                            val oldRides = snap.child("totalRides").getValue(Long::class.java)
+                                ?: snap.child("totalRatings").getValue(Long::class.java) ?: 1L
+                            val newTotalRides = oldRides + 1
+                            val newAvgRating = ((oldRating * oldRides) + rating.stars) / newTotalRides.toDouble()
+
+                            ref.child("rating").setValue(newAvgRating)
+                            ref.child("driverRating").setValue(newAvgRating)
+                            ref.child("totalRatings").setValue(newTotalRides)
+                            ref.child("totalRides").setValue(newTotalRides)
+
+                            if (isTargetDriver) {
+                                val userRef = rtdb.getReference("users").child(rating.targetId)
+                                userRef.child("rating").setValue(newAvgRating)
+                                userRef.child("driverRating").setValue(newAvgRating)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Profile rating update failed: ${e.message}")
+                    }
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "RTDB rating save: ${e.message}")
             }
@@ -3958,14 +3995,31 @@ class FirebaseRepository private constructor(private val context: Context) {
      * Check if ride has already been rated by this role
      */
     suspend fun hasUserRatedRide(rideId: String, raterRole: String): Boolean {
+        if (rideId.isBlank()) return false
         try {
             val dbLocal = AppDatabase.getDatabase(context, kotlinx.coroutines.CoroutineScope(Dispatchers.IO))
             val hasLocal = dbLocal.safetyDao().hasRatedRide(rideId, raterRole)
             if (hasLocal) return true
 
+            val ratingId = "${rideId}_$raterRole"
+
+            // Check Realtime Database
+            val rtdb = try {
+                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+            } catch (_: Exception) {
+                try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
+            }
+            if (rtdb != null) {
+                val rtdbSnap = kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    rtdb.getReference("ride_ratings").child(ratingId).get().await()
+                }
+                if (rtdbSnap != null && rtdbSnap.exists()) return true
+            }
+
+            // Check Firestore
             if (isAvailable() && firestore != null) {
                 val doc = kotlinx.coroutines.withTimeoutOrNull(3000L) {
-                    firestore!!.collection("ride_ratings").document("${rideId}_$raterRole").get().await()
+                    firestore!!.collection("ride_ratings").document(ratingId).get().await()
                 }
                 if (doc != null && doc.exists()) return true
             }
