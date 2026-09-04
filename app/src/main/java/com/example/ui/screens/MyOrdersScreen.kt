@@ -357,15 +357,16 @@ fun MyOrdersScreen(
         if (ratingOrderTarget != null) {
             val order = ratingOrderTarget!!
             PostRideRatingDialog(
-                rideId = order.id,
+                rideId = order.id.ifBlank { order.requestId },
                 currentUserId = currentUserId,
                 currentUserName = currentUserName,
                 isDriver = false,
-                targetId = order.driverPhone.ifBlank { "driver_${order.id}" },
+                targetId = order.driverId.ifBlank { order.driverPhone.ifBlank { "driver_${order.id}" } },
                 targetName = order.driverName.ifBlank { "Driver Captain" },
                 targetPhone = order.driverPhone,
-                targetVehicleSummary = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}".trim(),
+                targetVehicleSummary = "${order.driverVehicleMake} ${order.driverVehicleModel}".trim(),
                 targetPlateNumber = order.driverPlateNumber,
+                targetRating = if (order.driverRating > 0) order.driverRating else 5.0,
                 pickupTitle = order.pickupTitle,
                 destinationTitle = order.destinationTitle,
                 farePkr = order.agreedFare,
