@@ -297,7 +297,7 @@ export const RatingsManagement: React.FC<RatingsManagementProps> = ({
       if (selectedTag && !r.parsedTags.includes(selectedTag)) return false;
 
       // City Filter
-      if (cityFilter !== 'all' && r.linkedCity.toLowerCase() !== cityFilter.toLowerCase()) return false;
+      if (cityFilter !== 'all' && String(r.linkedCity || '').toLowerCase() !== String(cityFilter || '').toLowerCase()) return false;
 
       return true;
     });

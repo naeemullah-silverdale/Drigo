@@ -198,12 +198,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       const pendingDocs = (d.documents || []).filter((doc) => doc.status === 'pending').length;
       list.push({
         id: d.id,
-        fullName: d.fullName,
+        fullName: d.fullName || 'Unnamed Driver',
         role: 'driver',
-        phone: d.phone,
-        email: d.email || `${d.id.toLowerCase()}@drigo.app`,
+        phone: d.phone || '',
+        email: d.email || `${(d.id || '').toLowerCase()}@drigo.app`,
         avatar: d.avatar,
-        status: d.status,
+        status: d.status || 'offline',
         joinedDate: d.joinedDate || '2026-01-10',
         rating: d.rating,
         totalTripsOrRides: d.totalTrips || 0,
@@ -218,12 +218,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     riders.forEach((r) => {
       list.push({
         id: r.id,
-        fullName: r.fullName,
+        fullName: r.fullName || 'Unnamed Passenger',
         role: 'rider',
-        phone: r.phone,
-        email: r.email || `${r.id.toLowerCase()}@drigo.app`,
+        phone: r.phone || '',
+        email: r.email || `${(r.id || '').toLowerCase()}@drigo.app`,
         avatar: r.avatar,
-        status: r.status,
+        status: r.status || 'active',
         joinedDate: r.joinedDate || '2026-01-12',
         rating: r.rating,
         totalTripsOrRides: r.totalRides || 0,
@@ -244,23 +244,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       if (roleFilter !== 'all' && u.role !== roleFilter) return false;
 
       // Status filter
+      const s = String(u.status || '').toLowerCase();
       if (statusFilter === 'active') {
-        const s = u.status.toLowerCase();
         if (s !== 'online' && s !== 'active' && s !== 'on_trip') return false;
       } else if (statusFilter === 'pending') {
         if (u.role !== 'driver' || (u.pendingDocsCount || 0) === 0) return false;
       } else if (statusFilter === 'suspended_flagged') {
-        const s = u.status.toLowerCase();
         if (s !== 'suspended' && s !== 'flagged') return false;
       }
 
       // Search term
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase().trim();
-        const matchName = u.fullName.toLowerCase().includes(q);
-        const matchPhone = u.phone.toLowerCase().includes(q);
-        const matchEmail = u.email.toLowerCase().includes(q);
-        const matchId = u.id.toLowerCase().includes(q);
+        const matchName = (u.fullName || '').toLowerCase().includes(q);
+        const matchPhone = (u.phone || '').includes(q);
+        const matchEmail = (u.email || '').toLowerCase().includes(q);
+        const matchId = (u.id || '').toLowerCase().includes(q);
         const matchVehicle = u.vehicleSummary ? u.vehicleSummary.toLowerCase().includes(q) : false;
 
         if (!matchName && !matchPhone && !matchEmail && !matchId && !matchVehicle) {
@@ -517,7 +516,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                         const driverObj = isDriver ? (item.rawObject as Driver) : null;
                         const riderObj = !isDriver ? (item.rawObject as Rider) : null;
 
-                        const sLower = item.status.toLowerCase();
+                        const sLower = String(item.status || '').toLowerCase();
                         const isSuspended = sLower === 'suspended';
                         const isFlagged = sLower === 'flagged';
                         const isPending = sLower === 'pending_verification' || (item.pendingDocsCount || 0) > 0;
@@ -751,7 +750,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                   const isDriver = item.role === 'driver';
                   const driverObj = isDriver ? (item.rawObject as Driver) : null;
                   const riderObj = !isDriver ? (item.rawObject as Rider) : null;
-                  const sLower = item.status.toLowerCase();
+                  const sLower = String(item.status || '').toLowerCase();
                   const isSuspended = sLower === 'suspended';
                   const isFlagged = sLower === 'flagged';
                   const isPending = sLower === 'pending_verification' || (item.pendingDocsCount || 0) > 0;

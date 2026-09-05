@@ -89,7 +89,7 @@ export const PayoutActionModal: React.FC<PayoutActionModalProps> = ({
     }
   };
 
-  const titleMatch = payout.accountTitle.toLowerCase().trim() === payout.driverName.toLowerCase().trim();
+  const titleMatch = (payout.accountTitle || '').toLowerCase().trim() === (payout.driverName || '').toLowerCase().trim();
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fadeIn">

@@ -44,12 +44,13 @@ export const DriverWalletsView: React.FC<DriverWalletsViewProps> = ({
   // Filter drivers
   const filteredDrivers = useMemo(() => {
     return drivers.filter((d) => {
+      const q = (searchTerm || '').toLowerCase().trim();
       const matchSearch =
-        !searchTerm ||
-        d.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        d.phone.includes(searchTerm) ||
-        d.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (d.vehicle?.licensePlate && d.vehicle.licensePlate.toLowerCase().includes(searchTerm.toLowerCase()));
+        !q ||
+        (d.fullName || '').toLowerCase().includes(q) ||
+        (d.phone || '').includes(q) ||
+        (d.id || '').toLowerCase().includes(q) ||
+        (d.vehicle?.licensePlate ? d.vehicle.licensePlate.toLowerCase().includes(q) : false);
 
       let matchBalance = true;
       const balance = d.walletBalance || 0;

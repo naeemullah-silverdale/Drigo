@@ -47,14 +47,15 @@ export const PayoutRequestsTable: React.FC<PayoutRequestsTableProps> = ({
   // Filtered list
   const filteredPayouts = useMemo(() => {
     return payoutRequests.filter((p) => {
+      const q = (searchTerm || '').toLowerCase().trim();
       const matchSearch =
-        !searchTerm ||
-        p.driverName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.driverPhone.includes(searchTerm) ||
-        p.accountTitle.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.accountNumber.includes(searchTerm) ||
-        p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (p.transactionRef && p.transactionRef.toLowerCase().includes(searchTerm.toLowerCase()));
+        !q ||
+        (p.driverName || '').toLowerCase().includes(q) ||
+        (p.driverPhone || '').includes(q) ||
+        (p.accountTitle || '').toLowerCase().includes(q) ||
+        (p.accountNumber || '').includes(q) ||
+        (p.id || '').toLowerCase().includes(q) ||
+        (p.transactionRef ? p.transactionRef.toLowerCase().includes(q) : false);
 
       const matchStatus = statusFilter === 'all' || p.status === statusFilter;
       const matchMethod = methodFilter === 'all' || p.paymentMethod === methodFilter;
@@ -234,7 +235,7 @@ export const PayoutRequestsTable: React.FC<PayoutRequestsTableProps> = ({
               ) : (
                 filteredPayouts.map((p) => {
                   const isTitleMatch =
-                    p.accountTitle.toLowerCase().trim() === p.driverName.toLowerCase().trim();
+                    (p.accountTitle || '').toLowerCase().trim() === (p.driverName || '').toLowerCase().trim();
                   const isPending = p.status === 'pending';
                   const isSelected = selectedPayoutIds.includes(p.id);
 
@@ -399,7 +400,7 @@ export const PayoutRequestsTable: React.FC<PayoutRequestsTableProps> = ({
         ) : (
           filteredPayouts.map((p) => {
             const isTitleMatch =
-              p.accountTitle.toLowerCase().trim() === p.driverName.toLowerCase().trim();
+              (p.accountTitle || '').toLowerCase().trim() === (p.driverName || '').toLowerCase().trim();
             const isPending = p.status === 'pending';
 
             return (

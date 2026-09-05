@@ -51,18 +51,18 @@ export const AndroidTelemetryView: React.FC<AndroidTelemetryViewProps> = ({
   // Filtering
   const filtered = driversWithTelemetry.filter(({ driver, telemetry }) => {
     if (filterBrand !== 'all') {
-      const mfg = (telemetry.manufacturer || '').toLowerCase();
-      if (!mfg.includes(filterBrand.toLowerCase())) return false;
+      const mfg = String(telemetry?.manufacturer || '').toLowerCase();
+      if (!mfg.includes((filterBrand || '').toLowerCase())) return false;
     }
 
-    if (filterHealth === 'low_ram' && telemetry.ramTotalGb > 3) return false;
-    if (filterHealth === 'low_battery' && telemetry.batteryLevel > 25) return false;
-    if (filterHealth === 'high_latency' && telemetry.networkLatencyMs < 120) return false;
+    if (filterHealth === 'low_ram' && (telemetry?.ramTotalGb ?? 0) > 3) return false;
+    if (filterHealth === 'low_battery' && (telemetry?.batteryLevel ?? 100) > 25) return false;
+    if (filterHealth === 'high_latency' && (telemetry?.networkLatencyMs ?? 0) < 120) return false;
 
-    if (searchDevice) {
-      const q = searchDevice.toLowerCase();
-      const matchName = driver.fullName.toLowerCase().includes(q);
-      const matchDevice = telemetry.deviceModel.toLowerCase().includes(q);
+    if (searchDevice && searchDevice.trim()) {
+      const q = searchDevice.toLowerCase().trim();
+      const matchName = (driver.fullName || '').toLowerCase().includes(q);
+      const matchDevice = String(telemetry?.deviceModel || '').toLowerCase().includes(q);
       const matchPlate = (driver.vehicle?.licensePlate || '').toLowerCase().includes(q);
       if (!matchName && !matchDevice && !matchPlate) return false;
     }

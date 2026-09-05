@@ -58,12 +58,13 @@ export const CommissionAuditLedger: React.FC<CommissionAuditLedgerProps> = ({
   // Filtered trips
   const filteredTrips = useMemo(() => {
     return completedTrips.filter((t) => {
+      const q = (searchTerm || '').toLowerCase().trim();
       const matchSearch =
-        !searchTerm ||
-        t.tripCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.driverName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.passengerName?.toLowerCase().includes(searchTerm.toLowerCase());
+        !q ||
+        (t.tripCode ? t.tripCode.toLowerCase().includes(q) : false) ||
+        (t.id ? t.id.toLowerCase().includes(q) : false) ||
+        (t.driverName ? t.driverName.toLowerCase().includes(q) : false) ||
+        (t.passengerName ? t.passengerName.toLowerCase().includes(q) : false);
 
       const matchPayment = paymentFilter === 'all' || t.paymentMethod === paymentFilter;
       const matchVehicle = vehicleFilter === 'all' || t.vehicleType === vehicleFilter;
