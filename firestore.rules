@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net default-deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Auth and Authorization Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin")
+      );
+    }
+
+    // Admins Collection: Read/Write rules
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow write: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+    }
+
+    // Users (Drivers and Riders) Collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // Legacy/Explicit Drivers Collection
+    match /drivers/{driverId} {
+      allow read: if isSignedIn() && (request.auth.uid == driverId || isAdmin());
+      allow write: if isSignedIn() && (request.auth.uid == driverId || isAdmin());
+    }
+
+    // Legacy/Explicit Riders Collection
+    match /riders/{riderId} {
+      allow read: if isSignedIn() && (request.auth.uid == riderId || isAdmin());
+      allow write: if isSignedIn() && (request.auth.uid == riderId || isAdmin());
+    }
+
+    // Trips/Rides Collection
+    match /trips/{tripId} {
+      allow read: if isSignedIn() && (
+        resource.data.passengerId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if isSignedIn() && isAdmin();
+    }
+
+    // Live Driver Locations
+    match /live_driver_locations/{driverId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == driverId || isAdmin());
+    }
+
+    // Driver Verifications
+    match /driver_verifications/{verId} {
+      allow read: if isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if isSignedIn() && isAdmin();
+    }
+  }
+}

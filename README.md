@@ -1,133 +1,136 @@
-# 🚗 Drigo — Smart Ridesharing & Mobility Platform
+# 🚖 Drigo Admin Panel & Dispatch Control Center (Pakistan Operational Market)
 
-[![Android](https://img.shields.io/badge/Platform-Android-3DDC84.svg?style=flat&logo=android)](https://developer.android.com/)
-[![Kotlin](https://img.shields.io/badge/Language-Kotlin-7F52FF.svg?style=flat&logo=kotlin)](https://kotlinlang.org/)
-[![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4.svg?style=flat&logo=jetpackcompose)](https://developer.android.com/jetpack/compose)
-[![Material 3](https://img.shields.io/badge/Design-Material%203-7B1FA2.svg?style=flat)](https://m3.material.io/)
-[![Firebase](https://img.shields.io/badge/Backend-Firebase-FFCA28.svg?style=flat&logo=firebase)](https://firebase.google.com/)
-[![Room Database](https://img.shields.io/badge/Local%20Storage-Room-3DDC84.svg?style=flat)](https://developer.android.com/training/data-storage/room)
-
-**Drigo** is a modern, real-time Android ridesharing and urban mobility application built natively using **Jetpack Compose**, **Kotlin Coroutines & Flow**, **Firebase**, **OpenStreetMap (OsmDroid)**, and **Room Database**. It delivers seamless passenger-driver matchmaking, live routing, transparent fare estimation, real-time telemetry streaming, and in-ride chat communication.
+A modern, high-performance real-time web administration dashboard and dispatch management system engineered for the **Drigo** ride-sharing ecosystem in Pakistan (Lahore, Islamabad/Rawalpindi, Karachi, Faisalabad, Multan).
 
 ---
 
-## 📱 Key Features
-
-### 1. 🗺️ Interactive OpenStreetMap & Smart Routing
-- **Independent Location Selection**: Precise, independent selection for **FROM (Pickup)** and **TO (Destination)** locations with custom interactive map markers.
-- **Real-Time Turn-by-Turn Route Engine**: Powered by **OSRM (Open Source Routing Machine)** for realistic road geometries, live distance calculations, and estimated arrival times (ETA).
-- **Auto Camera Fitting**: Dynamic bounding box calculations that smoothly adjust the map viewport to encompass pickup, destination, and the complete route geometry.
-- **Search & Popular Locations**: Fast location search with quick-access preset hotspots (Universities, Airports, Metro Stations, Commercial Hubs).
-
-### 2. 👥 Dual Mode: Passenger & Driver Switcher
-- **Passenger Mode**:
-  - Ride category selection: **Share Ride**, **Book Car**, and **Send Parcel**.
-  - Dynamic transparent fare breakdown based on route distance and traffic duration.
-  - Live driver tracking once a ride is confirmed.
-  - Instant direct call and in-ride live messaging.
-- **Driver Mode**:
-  - One-tap online/offline toggle for receiving rides.
-  - Live broadcast of driver GPS coordinates and heading telemetry.
-  - Incoming passenger ride requests with real-time pickup & dropoff details.
-  - Direct communication interface with passengers.
-
-### 3. 💬 Real-Time In-Ride Chat (Driver ↔ Passenger)
-- **Live WebSocket/Firebase Streaming**: Instant message delivery powered by Firebase Realtime Database and Cloud Firestore.
-- **Role-Aware Quick Replies**: Pre-configured rapid responses for drivers (e.g., *"I have arrived at pickup 📍"*, *"Stuck in 2 min traffic ⏳"*) and passengers (e.g., *"Coming down in 1 minute 🚶"*, *"Which car color?"*).
-- **Trip Summary & Direct Dialing**: Floating chat access from the live map, status indicators, and integrated phone call dialer.
-- **Offline Fallback**: Automatic caching and syncing via Room Database (`ChatDao`).
-
-### 4. 🔒 Authentication & Account Management
-- **Firebase Authentication**: Email/Password login, Sign Up, and Google Sign-In with Jetpack Credential Manager.
-- **Guest / Fast Exploration**: Seamless entry with instant profile personalization.
-- **Profile & Preference Customization**: Manage saved locations, favorite payment methods, and notification preferences.
-
-### 5. 💾 Offline-First Local Data Persistence
-- **Room Database**: Complete local persistence for ride history, active bookings, recent chats, and user preferences.
-- **Reactive UI Flow**: Uses Kotlin StateFlow and Jetpack Compose state primitives for glitch-free UI updates.
+## 🇵🇰 Market Localization & Currency
+* **Primary Currency**: Pakistani Rupee (`PKR` / `Rs.`)
+* **Local Payment Channels**: JazzCash, EasyPaisa, Cash on Delivery, Bank Transfers & Cards
+* **Pakistani Vehicle Fleet**:
+  * 🏍️ **Bike**: Motorcycle Quick Ride & Delivery
+  * 🛺 **Rickshaw**: Traditional 3-Wheeler Auto Rickshaw
+  * 🚗 **Mini / AC Car**: Affordable Hatchback & Compact Rides
+  * 🚘 **Ride Go**: Standard Sedan (Corolla / City / Yaris)
+  * 🚘 **Executive / Comfort**: Premium Sedan & SUV
 
 ---
 
-## 🏗️ Architecture & Technology Stack
+## 🌟 Key Features
 
-```
-com.example/
-├── data/
-│   ├── local/            # Room Database (AppDatabase, DAOs, Converters, SampleDataProvider)
-│   ├── model/            # Domain data entities (LocationPoint, RideRequest, ChatMessageEntity, etc.)
-│   ├── remote/           # Firebase Repository & Network Services (Realtime DB, Firestore, Auth)
-│   ├── LocationHelper.kt # GPS & Telemetry manager
-│   └── RouteService.kt   # OSRM Polyline routing and distance engine
-├── ui/
-│   ├── components/       # Reusable Compose widgets (RealOsmMapView, RideChatSheet, BottomCards)
-│   ├── screens/          # Main UI screens (HomeScreen, SignInScreen, SignUpScreen, WelcomeScreen)
-│   └── theme/            # Material Design 3 theme, typography, shapes, and Drigo color system
-├── viewmodel/            # MainViewModel (State management, intent handlers, business logic)
-└── MainActivity.kt       # Application entry point & edge-to-edge Compose container
-```
+### 1. 📍 Live Driver Tracking (`live_driver_locations`)
+* **Real-time Map Stream**: Directly subscribes to `live_driver_locations` in Firebase Realtime Database and Firestore.
+* **Car Markers on Map**: Displays drivers as custom car markers on Google Maps with real-time speed (`km/h`), heading rotation angle (`deg`), vehicle class badge, and active operational status (`online`, `on_trip`).
+* **Pakistan Regional Presets**: Fast testing presets centered on major Pakistani hubs (Liberty Market Gulberg, Allama Iqbal Airport Lahore, Centaurus Mall Islamabad, Emporium Mall Johar Town, Dolmen Mall Clifton Karachi, F-7 Markaz Islamabad).
 
-| Layer | Technology |
-|---|---|
-| **Language** | Kotlin 2.2+ with Coroutines & StateFlow |
-| **UI Framework** | Jetpack Compose with Material 3 (M3) Design System |
-| **Architecture** | MVVM (Model-View-ViewModel) + Unidirectional Data Flow (UDF) |
-| **Map & Navigation** | OsmDroid (OpenStreetMap) + OSRM Routing API |
-| **Cloud Backend** | Firebase Realtime Database, Cloud Firestore, Firebase Authentication |
-| **Local Database** | Room Database (SQLite with KSP codegen) |
-| **Image Loading** | Coil Compose |
-| **Networking** | OkHttp3 & Retrofit |
-| **Testing** | JUnit 4, Robolectric, Roborazzi UI screenshot verification |
+### 2. 🚖 User Management & Driver KYC Verification
+* **Strict Role Separation**: Dedicated management interfaces for **Drivers** and **Passengers**.
+* **Unified Account & Verification State Engine**:
+  * **Driver Verification Status**: `PENDING` | `APPROVED` | `REJECTED` (tied to CNIC, Driving License, and Vehicle Registration document submission).
+  * **Driver Account Operational Status**: `PENDING_REVIEW` | `ACTIVE` | `ONLINE` | `ON_TRIP` | `SUSPENDED` | `FLAGGED`.
+  * **Passenger Account Status**: `ACTIVE` | `ON_TRIP` | `SUSPENDED` | `FLAGGED` | `INACTIVE` | `DEACTIVATED`.
+* **CNIC & Document Verification Inspector**: Review CNIC front/back, driving licenses, excise registration certificates, and selfie verification with approval or rejection reasons.
+* **Non-Destructive Suspension**: Suspending or flagging a user updates operational permissions without wiping verified documents.
+
+### 3. 🗺️ Real-Time Fleet & Route Dispatch Radar
+* Live interactive dispatch map showing driver availability and active ride requests.
+* Independent **FROM** (Pickup) and **TO** (Drop-off) marker selection with guaranteed state preservation.
+* Google Maps route polyline rendering with camera fitting.
+
+### 4. 📊 Real-Time Analytics & Financial Reporting
+* Revenue breakdown in PKR across JazzCash, EasyPaisa, Cash, and Card transactions.
+* Driver earnings, platform commission metrics, and peak hour ride analytics.
+
+### 5. 🚨 Safety & SOS Emergency Center
+* Real-time monitoring of live SOS emergency alerts triggered by passengers or drivers.
+* One-touch emergency response team dispatch and trip audit trails.
+
+### 6. 💰 Fare & Surge Pricing Configuration
+* Configurable base fares, per-kilometer rates, per-minute rates, and surge multipliers in PKR.
+
+### 7. 🔥 Firebase Realtime Data Synchronization
+* Bi-directional synchronization with **Firebase Realtime Database (RTDB)** and **Firestore** (`live_driver_locations`, `users`, `drivers`, `riders`, `trips`, `driver_verifications`).
+* Automatic local fallback for offline/demo operation.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Framework**: React 18 with TypeScript
+* **Build Tool**: Vite
+* **Styling**: Tailwind CSS
+* **Icons**: Lucide React
+* **Maps**: `@vis.gl/react-google-maps`
+* **Database & Auth**: Firebase Realtime Database & Firestore (`firebase/app`, `firebase/database`, `firebase/firestore`)
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- **Android Studio Ladybug (2024.2+)** or latest version
-- **JDK 17** or **JDK 21**
-- **Android SDK API 35** (Minimum SDK: API 24)
+* Node.js (v18 or higher recommended)
+* npm or yarn
 
-### Clone & Build
+### Installation
 
-```bash
-# Clone the repository
-git clone https://github.com/naeemullah-silverdale/Drigo.git
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/naeemullah-silverdale/adminpaneldrigo.git
+   cd adminpaneldrigo
+   ```
 
-# Navigate into the project directory
-cd Drigo
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
 
-# Build debug APK
-gradle assembleDebug
-```
+3. Configure Environment Variables (Optional):
+   Set your Firebase and Google Maps credentials in `.env` or use the in-app **Firebase Config** modal:
+   ```env
+   VITE_FIREBASE_API_KEY=your_api_key
+   VITE_FIREBASE_AUTH_DOMAIN=your_auth_domain
+   VITE_FIREBASE_DATABASE_URL=your_database_url
+   VITE_FIREBASE_PROJECT_ID=your_project_id
+   VITE_FIREBASE_STORAGE_BUCKET=your_storage_bucket
+   VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+   VITE_FIREBASE_APP_ID=your_app_id
+   VITE_GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+   ```
+
+4. Run Development Server:
+   ```bash
+   npm run dev
+   ```
+
+5. Build for Production:
+   ```bash
+   npm run build
+   ```
 
 ---
 
-## ⚙️ Configuration & Firebase Setup
+## 📂 Project Structure
 
-1. **Firebase Configuration**:
-   - Place your `google-services.json` file inside the `/app` module directory.
-   - Ensure Firebase Realtime Database and Cloud Firestore rules are configured according to your authentication requirements.
-
-2. **OpenStreetMap User-Agent**:
-   - Drigo automatically initializes the OsmDroid user-agent configuration in `MainActivity.kt` using standard Android application context.
-
----
-
-## 🧪 Testing
-
-Run standard unit tests and local JVM verification:
-
-```bash
-# Run unit and Robolectric tests
-gradle :app:testDebugUnitTest
-
-# Verify UI Screenshot tests (Roborazzi)
-gradle :app:verifyRoborazziDebug
+```text
+src/
+├── components/
+│   ├── DashboardOverview.tsx    # Executive summary & quick PKR metrics
+│   ├── FleetDispatchMap.tsx     # Live map & live_driver_locations car markers
+│   ├── UserManagement.tsx       # Driver/Passenger table, CNIC verification & wallet controls
+│   ├── RealtimeAnalytics.tsx    # JazzCash/EasyPaisa revenue charts & operational insights
+│   ├── SafetySOSCenter.tsx      # Emergency alert monitoring
+│   ├── PricingControls.tsx      # PKR Fare configuration & surge rules
+│   ├── Header.tsx               # Top navigation & system status
+│   └── Sidebar.tsx              # Application navigation
+├── firebase.ts                  # Firebase RTDB & Firestore integration layer
+├── mockData.ts                  # Local fallback data for Pakistan market
+├── types.ts                     # TypeScript interfaces (LiveDriverLocation, Driver, etc.)
+└── App.tsx                      # Root component & real-time subscription router
 ```
 
 ---
 
 ## 📄 License
 
-This project is licensed under the Apache 2.0 License.
+This project is proprietary software for the Drigo Ride-Sharing Platform (Pakistan). All rights reserved.
 
