@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -61,6 +63,10 @@ fun WalletScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    BackHandler {
+        onBackClick()
+    }
     val repo = remember { FirebaseRepository.getInstance(context) }
     val userId = user?.uid ?: "guest_user"
 

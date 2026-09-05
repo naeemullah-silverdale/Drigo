@@ -42,6 +42,8 @@ class MainViewModel(
     private val _currentScreen = MutableStateFlow(AppScreen.WELCOME)
     val currentScreen = _currentScreen.asStateFlow()
 
+    private val _screenBackStack = mutableListOf<AppScreen>(AppScreen.WELCOME)
+
     private val _currentUser = MutableStateFlow<FirebaseUser?>(authRepo.currentUser)
     val currentUser = _currentUser.asStateFlow()
 
@@ -308,7 +310,29 @@ class MainViewModel(
     }
 
     fun navigateTo(screen: AppScreen) {
+        if (_currentScreen.value == screen) return
+        if (screen == AppScreen.HOME_PLACEHOLDER) {
+            _screenBackStack.clear()
+            _screenBackStack.add(AppScreen.HOME_PLACEHOLDER)
+        } else {
+            if (_screenBackStack.lastOrNull() != screen) {
+                _screenBackStack.add(screen)
+            }
+        }
         _currentScreen.value = screen
+    }
+
+    fun popBackStack(): Boolean {
+        if (_screenBackStack.size > 1) {
+            _screenBackStack.removeAt(_screenBackStack.lastIndex)
+            _currentScreen.value = _screenBackStack.last()
+            return true
+        }
+        return false
+    }
+
+    fun canNavigateBack(): Boolean {
+        return _screenBackStack.size > 1 && _screenBackStack.last() != AppScreen.HOME_PLACEHOLDER
     }
 
     suspend fun signIn(email: String, password: String): Result<Unit> {

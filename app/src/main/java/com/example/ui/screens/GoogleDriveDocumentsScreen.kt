@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -61,6 +63,10 @@ fun GoogleDriveDocumentsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    BackHandler {
+        onBackClick()
+    }
 
     val isDriveConnected by viewModel.isGoogleDriveConnected.collectAsState()
     val driveEmail by viewModel.googleDriveUserEmail.collectAsState()

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -14,6 +15,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -23,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -158,7 +162,11 @@ fun DriverModeView(
     }.collectAsState(initial = emptyList())
 
     val firebaseRequests = if (isDriverOnline) {
-        liveRideRequests ?: localStreamRequests
+        if (!liveRideRequests.isNullOrEmpty()) {
+            liveRideRequests
+        } else {
+            localStreamRequests
+        }
     } else {
         emptyList()
     }
@@ -268,14 +276,54 @@ fun DriverModeView(
     var destinationModeText by remember { mutableStateOf("") }
     var showFilterSheet by remember { mutableStateOf(false) }
 
+    // Bottom Navigation & Performance Gamification System (Image 2)
+    var selectedDriverTab by remember { mutableStateOf("REQUESTS") } // "REQUESTS", "PERFORMANCE", or "HISTORY"
+    var driverRidesThisWeek by remember { mutableIntStateOf(10) }
+    var driverPerformanceRating by remember { mutableDoubleStateOf(5.00) }
+    var todayIncomePkr by remember { mutableIntStateOf(0) }
+    var dailyGoalPkr by remember { mutableIntStateOf(5000) }
+    var walletBalancePkr by remember { mutableIntStateOf(137) }
+    var activeBonusesCount by remember { mutableIntStateOf(0) }
+
+    // Realtime Driver Trip History from Firebase
+    val firebaseDriverTripHistory by repo.observeDriverTripHistory(driverId.ifBlank { driverPhone }, driverPhone)
+        .collectAsState(initial = emptyList())
+
+    val activeDriverTripHistoryList = firebaseDriverTripHistory
+
+    // Smart Vehicle Tariff & Eligibility Controls (Image 13)
+    var selectedVehicleModelName by remember { mutableStateOf("Suzuki Mehran (2018)") }
+    var selectedVehiclePlateNumber by remember { mutableStateOf("LEA-18-4921") }
+    var selectedVehicleCategoryType by remember { mutableStateOf("Hatchback (Non-AC)") }
+    var isTariffMiniEnabled by remember { mutableStateOf(true) }
+    var isTariffAcEnabled by remember { mutableStateOf(true) }
+    var isTariffComfortEnabled by remember { mutableStateOf(true) }
+    var isTariffCourierEnabled by remember { mutableStateOf(true) }
+    var isCourierParcelEnabled by remember { mutableStateOf(true) }
+    var hasCourierThermalBag by remember { mutableStateOf(false) }
+    var isCourierHeavyCargoEnabled by remember { mutableStateOf(false) }
+    var selectedTariffMultiplier by remember { mutableFloatStateOf(1.0f) }
+
+    // Tariff Sheets & Dialogs
+    var showTariffsSheet by remember { mutableStateOf(false) }
+    var showChangeVehicleDialog by remember { mutableStateOf(false) }
+
+    // Performance Sheets & Dialogs
+    var showTierBenefitsSheet by remember { mutableStateOf(false) }
+    var showAddDailyGoalSheet by remember { mutableStateOf(false) }
+    var showBonusesSheet by remember { mutableStateOf(false) }
+    var showIncomeDetailsSheet by remember { mutableStateOf(false) }
+
     // Audio & Voice Preferences (Item 5)
     var voiceLanguageChoice by remember { mutableStateOf("EN") } // "EN" or "UR"
 
     // Driver States
     var selectedRequestForOffer by remember { mutableStateOf<RideRequest?>(null) }
     var activeDriverTrip by remember { mutableStateOf<PassengerOrder?>(null) }
+    var isActiveTripSheetExpanded by remember { mutableStateOf(false) }
     var isSendingOffer by remember { mutableStateOf(false) }
     var offerSentRequestId by remember { mutableStateOf<String?>(null) }
+    var isCompactListView by remember { mutableStateOf(false) }
 
     // Announce new requests with notification and audio chime/TTS when online
     LaunchedEffect(allRequests, isDriverOnline, isVoiceAlertsEnabled) {
@@ -336,6 +384,42 @@ fun DriverModeView(
 
     // Cancellation (Item 4)
     var showCancelTripDialog by remember { mutableStateOf(false) }
+
+    val hasDriverSubOverlay = showDriverReportIncident ||
+            showCancelTripDialog ||
+            showPinVerificationDialog ||
+            showSafetySosSheet ||
+            showPassengerRatingDialog ||
+            showTollAddDialog ||
+            showIncomeDetailsSheet ||
+            showBonusesSheet ||
+            showAddDailyGoalSheet ||
+            showTierBenefitsSheet ||
+            showChangeVehicleDialog ||
+            showTariffsSheet ||
+            showFilterSheet ||
+            selectedRequestForOffer != null ||
+            selectedDriverTab != "REQUESTS"
+
+    BackHandler(enabled = hasDriverSubOverlay) {
+        when {
+            showDriverReportIncident -> showDriverReportIncident = false
+            showCancelTripDialog -> showCancelTripDialog = false
+            showPinVerificationDialog -> showPinVerificationDialog = false
+            showSafetySosSheet -> showSafetySosSheet = false
+            showPassengerRatingDialog -> showPassengerRatingDialog = false
+            showTollAddDialog -> showTollAddDialog = false
+            showIncomeDetailsSheet -> showIncomeDetailsSheet = false
+            showBonusesSheet -> showBonusesSheet = false
+            showAddDailyGoalSheet -> showAddDailyGoalSheet = false
+            showTierBenefitsSheet -> showTierBenefitsSheet = false
+            showChangeVehicleDialog -> showChangeVehicleDialog = false
+            showTariffsSheet -> showTariffsSheet = false
+            showFilterSheet -> showFilterSheet = false
+            selectedRequestForOffer != null -> selectedRequestForOffer = null
+            selectedDriverTab != "REQUESTS" -> selectedDriverTab = "REQUESTS"
+        }
+    }
 
     // Navigation & Map State
     var driverGeoPoint by remember(initialUserLocation) {
@@ -484,9 +568,16 @@ fun DriverModeView(
         destinationModeText,
         driverGeoPoint,
         driverVehicleMake,
-        driverVehicleModel
+        driverVehicleModel,
+        isTariffMiniEnabled,
+        isTariffAcEnabled,
+        isTariffComfortEnabled,
+        isTariffCourierEnabled,
+        isCourierParcelEnabled,
+        hasCourierThermalBag
     ) {
-        val isDriverBike = driverVehicleMake.contains("Motorcycle", true) ||
+        val isDriverBike = selectedVehicleCategoryType.contains("Motorcycle", true) ||
+                driverVehicleMake.contains("Motorcycle", true) ||
                 driverVehicleMake.contains("Bike", true) ||
                 driverVehicleModel.contains("CD 70", true) ||
                 driverVehicleModel.contains("CG 125", true) ||
@@ -496,6 +587,17 @@ fun DriverModeView(
                 driverVehicleModel.contains("Motorcycle", true)
 
         allRequests.filter { req ->
+            val isRequestAc = req.hasAc || req.rideCategory.contains("AC", true) || req.rideCategory.contains("A/C", true)
+            val isRequestMini = req.vehicleType.contains("Mini", true) || req.rideCategory.contains("Mini", true)
+            val isRequestComfort = req.rideCategory.contains("Comfort", true)
+            val isRequestCourier = req.rideCategory.contains("Courier", true) || req.rideCategory.contains("Parcel", true)
+
+            // Check if driver tariff switch for this category is disabled
+            if (isRequestAc && !isTariffAcEnabled && !isRequestMini) return@filter false
+            if (isRequestMini && !isTariffMiniEnabled) return@filter false
+            if (isRequestComfort && !isTariffComfortEnabled) return@filter false
+            if (isRequestCourier && !isTariffCourierEnabled) return@filter false
+
             // 1. Vehicle category & AC requirements matching
             val isRequestBike = req.vehicleType.contains("Bike", true) ||
                     req.rideCategory.contains("Bike", true) ||
@@ -516,6 +618,8 @@ fun DriverModeView(
             // 2. Category filter selection from UI chips
             val matchCategory = when (selectedCategoryFilter) {
                 "All" -> true
+                "Share Ride" -> req.rideCategory.contains("Share", ignoreCase = true)
+                "Private Ride" -> req.rideCategory.contains("Private", ignoreCase = true) || req.rideCategory.contains("Book", ignoreCase = true) || req.rideCategory.equals("Car", ignoreCase = true)
                 "Ride A/C" -> req.hasAc || req.rideCategory.contains("AC", true) || req.rideCategory.contains("A/C", true)
                 "Mini" -> req.vehicleType.contains("Mini", true) || req.rideCategory.contains("Mini", true)
                 "Bike" -> isRequestBike
@@ -990,6 +1094,7 @@ fun DriverModeView(
             driverCarLocation = driverGeoPoint,
             driverCarBearing = driverBearing,
             driverCarTitle = "$driverName ($driverVehicleModel)",
+            driverCarFareText = activeDriverTrip?.let { "${it.agreedFare} Rs" } ?: selectedRequestForOffer?.let { "${it.estimatedFare} Rs" },
             passengerRequestsOnMap = if (isDriverOnline && activeDriverTrip == null) filteredRequests else emptyList(),
             onPassengerRequestMarkerClick = { req ->
                 selectedRequestForOffer = req
@@ -1278,6 +1383,58 @@ fun DriverModeView(
                             )
                         }
                     }
+
+                    // Share Trip / Route Button
+                    Surface(
+                        onClick = {
+                            val isHeadingToPickup = trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING
+                            val destTitle = if (isHeadingToPickup) trip.pickupTitle else trip.destinationTitle
+                            val targetLat = if (isHeadingToPickup) trip.pickupLat else trip.destinationLat
+                            val targetLon = if (isHeadingToPickup) trip.pickupLon else trip.destinationLon
+                            val shareText = "I am on an active Drigo trip!\n\n" +
+                                    "📍 Pickup: ${trip.pickupTitle}\n" +
+                                    "🏁 Destination: ${trip.destinationTitle}\n" +
+                                    "⏱️ Distance/ETA: $distanceRemainingText\n" +
+                                    "💳 Fare: PKR ${trip.agreedFare}\n" +
+                                    (if (targetLat != 0.0 && targetLon != 0.0) "🗺️ Route: https://maps.google.com/?q=$targetLat,$targetLon\n\n" else "\n") +
+                                    "Drigo Captain Live Route"
+
+                            try {
+                                val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Drigo Trip Status & Route")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                                }
+                                val shareIntent = android.content.Intent.createChooser(sendIntent, "Share Route & ETA via")
+                                context.startActivity(shareIntent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Unable to share ride info", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF2C303E),
+                        border = BorderStroke(1.dp, DrigoBrandPurple),
+                        modifier = Modifier.padding(start = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share Route",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Share",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1453,27 +1610,101 @@ fun DriverModeView(
                 border = BorderStroke(1.dp, Color(0xFF2C303E)),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(
+                        if (isActiveTripSheetExpanded) Modifier.fillMaxHeight(0.82f)
+                        else Modifier.wrapContentHeight()
+                    )
                     .align(Alignment.BottomCenter)
+                    .animateContentSize()
                     .testTag("driver_active_trip_sheet")
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 14.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
-                    // Top Drag handle
-                    Box(
+                    // Interactive Header Drag Pill & Expand/Collapse Toggle Header
+                    Row(
                         modifier = Modifier
-                            .width(40.dp)
-                            .height(4.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.25f))
-                            .align(Alignment.CenterHorizontally)
-                    )
+                            .fillMaxWidth()
+                            .clickable { isActiveTripSheetExpanded = !isActiveTripSheetExpanded }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left Status Badge
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = when (trip.status) {
+                                PassengerOrderStatus.DRIVER_ARRIVED -> Color(0xFFE65100).copy(alpha = 0.2f)
+                                PassengerOrderStatus.IN_TRIP -> DrigoBrandPurple.copy(alpha = 0.2f)
+                                else -> Color(0xFF00C853).copy(alpha = 0.2f)
+                            },
+                            border = BorderStroke(1.dp, when (trip.status) {
+                                PassengerOrderStatus.DRIVER_ARRIVED -> Color(0xFFFF9800)
+                                PassengerOrderStatus.IN_TRIP -> DrigoBrandPurple
+                                else -> Color(0xFF00C853)
+                            })
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = when (trip.status) {
+                                        PassengerOrderStatus.DRIVER_ARRIVED -> Color(0xFFFF9800)
+                                        PassengerOrderStatus.IN_TRIP -> DrigoBrandPurple
+                                        else -> Color(0xFF00C853)
+                                    },
+                                    modifier = Modifier.size(8.dp)
+                                ) {}
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = when (trip.status) {
+                                        PassengerOrderStatus.DRIVER_ARRIVED -> "ARRIVED AT PICKUP"
+                                        PassengerOrderStatus.IN_TRIP -> "RIDE IN PROGRESS"
+                                        else -> "EN ROUTE TO PICKUP"
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                        // Center Drag Pill
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.35f))
+                        )
 
-                    // Passenger Info Header
+                        // Right Expand / Collapse Button
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isActiveTripSheetExpanded) "Collapse" else "Details",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF90A4AE)
+                            )
+                            Icon(
+                                imageVector = if (isActiveTripSheetExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                contentDescription = if (isActiveTripSheetExpanded) "Collapse" else "Expand",
+                                tint = Color(0xFF90A4AE),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Main Passenger & Fare Header Row (Always Visible)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -1526,133 +1757,373 @@ fun DriverModeView(
                             )
                         }
 
-                        // Call Passenger Button
+                        // Quick Action Buttons Cluster
                         val passPhone = trip.passengerPhone.ifBlank { "+92 300 9876543" }
                         val passName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } }
                         val targetNavLat = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLat else trip.pickupLat
                         val targetNavLon = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLon else trip.pickupLon
                         val targetNavTitle = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationTitle else trip.pickupTitle
 
-                        IconButton(
-                            onClick = {
-                                launchExternalGpsNavigation(targetNavLat, targetNavLon, targetNavTitle)
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF0288D1))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Navigation,
-                                contentDescription = "Navigate GPS",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        IconButton(
-                            onClick = {
-                                try {
-                                    val cleanPhone = passPhone.replace(" ", "")
-                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {
-                                    Toast.makeText(context, "Calling $passName ($passPhone)", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2C303E))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Call,
-                                contentDescription = "Call Passenger",
-                                tint = Color(0xFF00E676),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        // In-app Chat Button
-                        IconButton(
-                            onClick = {
-                                onOpenChat(
-                                    trip.id,
-                                    passName,
-                                    "Passenger",
-                                    passPhone,
-                                    trip.pickupTitle,
-                                    trip.destinationTitle
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            // GPS Navigation
+                            IconButton(
+                                onClick = {
+                                    launchExternalGpsNavigation(targetNavLat, targetNavLon, targetNavTitle)
+                                },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF0288D1))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Navigation,
+                                    contentDescription = "Navigate GPS",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(DrigoBrandPurple.copy(alpha = 0.3f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Chat,
-                                contentDescription = "Chat",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            }
+
+                            // Call
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val cleanPhone = passPhone.replace(" ", "")
+                                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Calling $passName ($passPhone)", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2C303E))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Call,
+                                    contentDescription = "Call Passenger",
+                                    tint = Color(0xFF00E676),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Chat
+                            IconButton(
+                                onClick = {
+                                    onOpenChat(
+                                        trip.id,
+                                        passName,
+                                        "Passenger",
+                                        passPhone,
+                                        trip.pickupTitle,
+                                        trip.destinationTitle
+                                    )
+                                },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(DrigoBrandPurple.copy(alpha = 0.3f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Chat,
+                                    contentDescription = "Chat",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Share Ride Status
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val shareMsg = "Drigo Ride Status Update:\n" +
+                                                "Passenger: $passName\n" +
+                                                "Pickup: ${trip.pickupTitle}\n" +
+                                                "Destination: ${trip.destinationTitle}\n" +
+                                                "Fare: PKR $totalCashToCollect\n" +
+                                                "Status: ${if (trip.status == PassengerOrderStatus.IN_TRIP) "Driving to Destination" else "Heading to Pickup"}"
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "Drigo Active Ride Status")
+                                            putExtra(Intent.EXTRA_TEXT, shareMsg)
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share Ride Details"))
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Unable to share ride details", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF37474F))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Share Ride",
+                                    tint = Color(0xFF4FC3F7),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
 
-                    // Live Wait Time Banner when Captain has arrived (Item 2)
-                    if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Scrollable Area when sheet is expanded or collapsed
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (isActiveTripSheetExpanded) Modifier
+                                    .weight(1f)
+                                    .verticalScroll(rememberScrollState())
+                                else Modifier
+                            )
+                    ) {
+                        // Trip Progress Stepper Bar
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = if (waitTimeSeconds <= 300) Color(0xFF1B5E20).copy(alpha = 0.4f) else Color(0xFFE65100).copy(alpha = 0.4f),
-                            border = BorderStroke(1.dp, if (waitTimeSeconds <= 300) Color(0xFF4CAF50) else Color(0xFFFF9800)),
+                            color = Color(0xFF14161C),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // Step 1: Accepted
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Timer,
-                                        contentDescription = null,
-                                        tint = if (waitTimeSeconds <= 300) Color(0xFF81C784) else Color(0xFFFFB74D),
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(0xFF00C853),
                                         modifier = Modifier.size(18.dp)
-                                    )
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(12.dp))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Accepted", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+
+                                Box(modifier = Modifier.weight(1f).height(2.dp).padding(horizontal = 6.dp).background(if (trip.status != PassengerOrderStatus.ACCEPTED && trip.status != PassengerOrderStatus.DRIVER_COMING) Color(0xFF00C853) else Color(0xFF37474F)))
+
+                                // Step 2: Arrived
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED || trip.status == PassengerOrderStatus.IN_TRIP) Color(0xFF00C853) else Color(0xFF37474F),
+                                        modifier = Modifier.size(18.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED || trip.status == PassengerOrderStatus.IN_TRIP) {
+                                                Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(12.dp))
+                                            } else {
+                                                Text("2", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Arrived", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED) Color(0xFFFF9800) else Color.White)
+                                }
+
+                                Box(modifier = Modifier.weight(1f).height(2.dp).padding(horizontal = 6.dp).background(if (trip.status == PassengerOrderStatus.IN_TRIP) Color(0xFF00C853) else Color(0xFF37474F)))
+
+                                // Step 3: Destination
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = if (trip.status == PassengerOrderStatus.IN_TRIP) DrigoBrandPurple else Color(0xFF37474F),
+                                        modifier = Modifier.size(18.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("3", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("In Trip", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (trip.status == PassengerOrderStatus.IN_TRIP) DrigoBrandPurple else Color(0xFFB0BEC5))
+                                }
+                            }
+                        }
+
+                        // Live Wait Time Banner when Captain has arrived
+                        if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (waitTimeSeconds <= 300) Color(0xFF1B5E20).copy(alpha = 0.4f) else Color(0xFFE65100).copy(alpha = 0.4f),
+                                border = BorderStroke(1.dp, if (waitTimeSeconds <= 300) Color(0xFF4CAF50) else Color(0xFFFF9800)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Timer,
+                                            contentDescription = null,
+                                            tint = if (waitTimeSeconds <= 300) Color(0xFF81C784) else Color(0xFFFFB74D),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            val min = waitTimeSeconds / 60
+                                            val sec = waitTimeSeconds % 60
+                                            Text(
+                                                text = "Waiting Time: ${String.format(java.util.Locale.US, "%02d:%02d", min, sec)}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = if (waitTimeSeconds <= 300) "Free waiting: ${(300 - waitTimeSeconds) / 60}m remaining" else "Paid wait fee (+PKR 5/min)",
+                                                fontSize = 11.sp,
+                                                color = if (waitTimeSeconds <= 300) Color(0xFFB0BEC5) else Color(0xFFFFB74D)
+                                            )
+                                        }
+                                    }
+
+                                    if (extraWaitFee > 0) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFFFF9800)
+                                        ) {
+                                            Text(
+                                                text = "+PKR $extraWaitFee",
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 11.sp,
+                                                color = Color.Black,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Route Summary & Details Card
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF14161C),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                val pickupLat = if (trip.pickupLat != 0.0) trip.pickupLat else 34.0151
+                                val pickupLon = if (trip.pickupLon != 0.0) trip.pickupLon else 71.5249
+                                val destLat = if (trip.destinationLat != 0.0) trip.destinationLat else 34.0351
+                                val destLon = if (trip.destinationLon != 0.0) trip.destinationLon else 71.5449
+
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Surface(shape = CircleShape, color = Color(0xFF00C853), modifier = Modifier.padding(top = 3.dp).size(8.dp)) {}
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Column {
-                                        val min = waitTimeSeconds / 60
-                                        val sec = waitTimeSeconds % 60
                                         Text(
-                                            text = "Waiting Time: ${String.format(java.util.Locale.US, "%02d:%02d", min, sec)}",
+                                            text = trip.pickupTitle.ifBlank { "Pickup Location" },
+                                            style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = Color.White
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+                                        if (trip.pickupSubtitle.isNotBlank()) {
+                                            Text(
+                                                text = trip.pickupSubtitle,
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF90A4AE),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                         Text(
-                                            text = if (waitTimeSeconds <= 300) "Free waiting: ${(300 - waitTimeSeconds) / 60}m remaining" else "Paid wait fee (+PKR 5/min)",
-                                            fontSize = 11.sp,
-                                            color = if (waitTimeSeconds <= 300) Color(0xFFB0BEC5) else Color(0xFFFFB74D)
+                                            text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", pickupLat, pickupLon),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF81D4FA)
                                         )
                                     }
                                 }
 
-                                if (extraWaitFee > 0) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFFFF9800)
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Surface(shape = CircleShape, color = Color(0xFFE53935), modifier = Modifier.padding(top = 3.dp).size(8.dp)) {}
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = trip.destinationTitle.ifBlank { "Destination Location" },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (trip.destinationSubtitle.isNotBlank()) {
+                                            Text(
+                                                text = trip.destinationSubtitle,
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF90A4AE),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", destLat, destLon),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFFFF8A80)
+                                        )
+                                    }
+                                }
+
+                                // Extra Route Details (Visible when expanded)
+                                if (isActiveTripSheetExpanded) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    HorizontalDivider(color = Color(0xFF2C303E))
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text("Category", fontSize = 11.sp, color = Color(0xFF78909C))
+                                            Text(trip.rideCategory.ifBlank { "Ride Mini" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                        Column {
+                                            Text("Est. Distance", fontSize = 11.sp, color = Color(0xFF78909C))
+                                            Text("${if (trip.distanceKm > 0) String.format("%.1f", trip.distanceKm) else "8.5"} km", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                        Column {
+                                            Text("Payment", fontSize = 11.sp, color = Color(0xFF78909C))
+                                            Text(trip.paymentMethod.ifBlank { "💵 Cash" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
+                                        }
+                                    }
+                                }
+
+                                // Tolls / Surcharges Row
+                                if (tollSurchargesPkr > 0) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "+PKR $extraWaitFee",
-                                            fontWeight = FontWeight.ExtraBold,
+                                            text = "Tolls & Surcharges added:",
                                             fontSize = 11.sp,
-                                            color = Color.Black,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            color = Color(0xFF4FC3F7)
+                                        )
+                                        Text(
+                                            text = "+PKR $tollSurchargesPkr",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF4FC3F7)
                                         )
                                     }
                                 }
@@ -1662,64 +2133,7 @@ fun DriverModeView(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Route Summary & Toll Surcharges Bar
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF14161C),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(shape = CircleShape, color = Color(0xFF00C853), modifier = Modifier.size(8.dp)) {}
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = trip.pickupTitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(shape = CircleShape, color = Color(0xFFE53935), modifier = Modifier.size(8.dp)) {}
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = trip.destinationTitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            // Tolls / Surcharges Row (Item 2)
-                            if (tollSurchargesPkr > 0) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Tolls & Surcharges added:",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF4FC3F7)
-                                    )
-                                    Text(
-                                        text = "+PKR $tollSurchargesPkr",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF4FC3F7)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Dynamic InDrive Action Step Button
+                    // Dynamic Action Step Buttons (Fixed at bottom)
                     when (trip.status) {
                         PassengerOrderStatus.ACCEPTED, PassengerOrderStatus.DRIVER_COMING -> {
                             Button(
@@ -1810,7 +2224,7 @@ fun DriverModeView(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                // Add Toll / Surcharge Button (Item 2)
+                                // Add Toll / Surcharge Button
                                 OutlinedButton(
                                     onClick = { showTollAddDialog = true },
                                     shape = RoundedCornerShape(12.dp),
@@ -1836,9 +2250,47 @@ fun DriverModeView(
                                         todayEarnings += totalCashToCollect
                                         completedTripsCount += 1
                                         completedTripForRating = updated
+                                        val calcDist = calculateDistanceKm(updated.pickupLat, updated.pickupLon, updated.destinationLat, updated.destinationLon).let { if (it > 0) String.format("%.1f", it).toDouble() else 8.5 }
+                                        val newHistoryEntry = DriverHistoryItem(
+                                            id = updated.id,
+                                            tripId = updated.id,
+                                            requestId = updated.requestId.ifBlank { updated.id },
+                                            driverId = driverId,
+                                            passengerId = updated.passengerId,
+                                            passengerName = updated.passengerName.ifBlank { "Passenger" },
+                                            passengerRating = 4.9,
+                                            pickupAddress = updated.pickupTitle,
+                                            pickupTitle = updated.pickupTitle,
+                                            pickupLatitude = if (updated.pickupLat != 0.0) updated.pickupLat else null,
+                                            pickupLongitude = if (updated.pickupLon != 0.0) updated.pickupLon else null,
+                                            destinationAddress = updated.destinationTitle,
+                                            destinationTitle = updated.destinationTitle,
+                                            destinationLatitude = if (updated.destinationLat != 0.0) updated.destinationLat else null,
+                                            destinationLongitude = if (updated.destinationLon != 0.0) updated.destinationLon else null,
+                                            farePkr = totalCashToCollect,
+                                            agreedFare = totalCashToCollect,
+                                            paymentMethod = updated.paymentMethod.ifBlank { "💵 Cash" },
+                                            dateFormatted = "Just now",
+                                            distanceKm = calcDist,
+                                            distance = calcDist,
+                                            durationMins = if (updated.durationMinutes > 0) updated.durationMinutes else 18,
+                                            duration = if (updated.durationMinutes > 0) updated.durationMinutes else 18,
+                                            status = "COMPLETED",
+                                            tripStatus = "COMPLETED",
+                                            category = updated.rideCategory.ifBlank { "Ride Mini" },
+                                            rideType = updated.rideCategory.ifBlank { "Ride Mini" },
+                                            vehicleType = if (updated.driverVehicleMake.isNotBlank()) "${updated.driverVehicleMake} ${updated.driverVehicleModel}".trim() else updated.rideCategory,
+                                            timestamp = System.currentTimeMillis(),
+                                            requestedAt = if (updated.createdAt > 0) updated.createdAt else null,
+                                            completedAt = System.currentTimeMillis()
+                                        )
                                         showPassengerRatingDialog = true
                                         audioHelper.playTripCompleteChime(totalCashToCollect, trip.id)
                                         scope.launch {
+                                            repo.saveDriverTripHistoryItem(driverId, newHistoryEntry)
+                                            if (driverPhone.isNotBlank() && driverPhone != driverId) {
+                                                repo.saveDriverTripHistoryItem(driverPhone, newHistoryEntry)
+                                            }
                                             repo.updateDriverTripStatus(
                                                 trip.id,
                                                 PassengerOrderStatus.COMPLETED,
@@ -1887,8 +2339,8 @@ fun DriverModeView(
                         else -> {}
                     }
 
-                    // Cancel Trip Button (Item 4)
-                    Spacer(modifier = Modifier.height(6.dp))
+                    // Cancel Trip Button
+                    Spacer(modifier = Modifier.height(4.dp))
                     TextButton(
                         onClick = { showCancelTripDialog = true },
                         modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -1993,6 +2445,36 @@ fun DriverModeView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            // Smart Tariffs & Vehicle Eligibility Trigger (Image 13)
+                            Surface(
+                                onClick = { showTariffsSheet = true },
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFF1B2838),
+                                border = BorderStroke(1.dp, Color(0xFF2B3A50)),
+                                modifier = Modifier.testTag("driver_tariffs_trigger")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsCar,
+                                        contentDescription = "Vehicle Tariffs",
+                                        tint = Color(0xFF29B6F6),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Tariffs",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
                             // Filter Button Trigger
                             Surface(
                                 onClick = { showFilterSheet = true },
@@ -2013,6 +2495,36 @@ fun DriverModeView(
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
                                         text = "Filters",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
+                            // View Mode Toggle (Card View vs Compact List View)
+                            Surface(
+                                onClick = { isCompactListView = !isCompactListView },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isCompactListView) DrigoBrandPurple.copy(alpha = 0.35f) else Color(0xFF282B35),
+                                border = BorderStroke(1.dp, if (isCompactListView) DrigoBrandPurple else Color(0xFF3B4052)),
+                                modifier = Modifier.testTag("driver_view_mode_toggle")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (isCompactListView) Icons.Default.FormatListBulleted else Icons.Default.ViewAgenda,
+                                        contentDescription = if (isCompactListView) "Switch to Card View" else "Switch to List View",
+                                        tint = if (isCompactListView) Color(0xFFC6FF00) else Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (isCompactListView) "List" else "Cards",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
@@ -2048,6 +2560,57 @@ fun DriverModeView(
                             .fillMaxWidth()
                             .padding(vertical = 6.dp)
                     ) {
+                        // Quick Toggle Chip: Auto-Accept Mode
+                        item {
+                            FilterChip(
+                                selected = isAutoAcceptEnabled,
+                                onClick = {
+                                    isAutoAcceptEnabled = !isAutoAcceptEnabled
+                                    Toast.makeText(context, if (isAutoAcceptEnabled) "Auto-Accept Mode Enabled (PKR $autoAcceptMinFare+)" else "Auto-Accept Disabled", Toast.LENGTH_SHORT).show()
+                                },
+                                label = {
+                                    Text(
+                                        text = if (isAutoAcceptEnabled) "⚡ Auto-Accept (PKR $autoAcceptMinFare+)" else "⚡ Auto-Accept",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFFFFB300),
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = Color(0xFF222530),
+                                    labelColor = Color(0xFFFFD54F)
+                                )
+                            )
+                        }
+
+                        // Quick Toggle Chip: On My Way Home Mode
+                        item {
+                            FilterChip(
+                                selected = destinationModeActive,
+                                onClick = {
+                                    destinationModeActive = !destinationModeActive
+                                    if (destinationModeActive && destinationModeText.isBlank()) {
+                                        destinationModeText = "Rawalpindi"
+                                    }
+                                    Toast.makeText(context, if (destinationModeActive) "On My Way Home Mode Active ($destinationModeText)" else "On My Way Home Disabled", Toast.LENGTH_SHORT).show()
+                                },
+                                label = {
+                                    Text(
+                                        text = if (destinationModeActive) "🏠 Home: ${destinationModeText.ifBlank { "Active" }}" else "🏠 Home Mode",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = DrigoBrandPurple,
+                                    selectedLabelColor = Color.White,
+                                    containerColor = Color(0xFF222530),
+                                    labelColor = Color(0xFFCE93D8)
+                                )
+                            )
+                        }
+
                         item {
                             FilterChip(
                                 selected = selectedCategoryFilter == "All",
@@ -2061,7 +2624,7 @@ fun DriverModeView(
                                 )
                             )
                         }
-                        listOf("Ride A/C", "Mini", "Bike", "Courier", "City to city").forEach { cat ->
+                        listOf("Share Ride", "Private Ride", "Ride A/C", "Mini", "Bike", "Courier", "City to city").forEach { cat ->
                             item {
                                 FilterChip(
                                     selected = selectedCategoryFilter.equals(cat, ignoreCase = true),
@@ -2153,110 +2716,217 @@ fun DriverModeView(
                                 .weight(1f)
                         ) {
                             items(filteredRequests, key = { it.id }) { req ->
-                                DriverRideRequestCard(
-                                    request = req,
-                                    isSelected = selectedRequestForOffer?.id == req.id,
-                                    isOfferSent = offerSentRequestId == req.id,
-                                    driverLat = driverGeoPoint.latitude,
-                                    driverLon = driverGeoPoint.longitude,
-                                    onSelect = { selectedRequestForOffer = req },
-                                    onAcceptOffer = {
-                                        scope.launch {
-                                            isSendingOffer = true
-                                            val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
-                                            val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+                                if (isCompactListView) {
+                                    DriverCompactRideRequestItem(
+                                        request = req,
+                                        isSelected = selectedRequestForOffer?.id == req.id,
+                                        isOfferSent = offerSentRequestId == req.id,
+                                        driverLat = driverGeoPoint.latitude,
+                                        driverLon = driverGeoPoint.longitude,
+                                        onSelect = { selectedRequestForOffer = req },
+                                        onAcceptOffer = {
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
 
-                                            val offer = DriverOffer(
-                                                requestId = req.id,
-                                                driverId = driverId,
-                                                driverName = driverName,
-                                                driverVehicleMake = driverVehicleMake,
-                                                driverVehicleModel = driverVehicleModel,
-                                                driverPlateNumber = driverVehicleNumber,
-                                                driverPhone = driverPhone,
-                                                offeredFare = req.estimatedFare,
-                                                etaMinutes = etaMins,
-                                                distanceKmAway = distKmToPickup,
-                                                driverLat = driverGeoPoint.latitude,
-                                                driverLon = driverGeoPoint.longitude
-                                            )
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = req.estimatedFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
 
-                                            val order = PassengerOrder(
-                                                id = req.id,
-                                                requestId = req.id,
-                                                passengerId = req.passengerId,
-                                                passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
-                                                passengerEmail = req.passengerEmail,
-                                                passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
-                                                pickupTitle = req.pickupTitle,
-                                                pickupSubtitle = req.pickupSubtitle,
-                                                pickupLat = req.pickupLat,
-                                                pickupLon = req.pickupLon,
-                                                destinationTitle = req.destinationTitle,
-                                                destinationSubtitle = req.destinationSubtitle,
-                                                destinationLat = req.destinationLat,
-                                                destinationLon = req.destinationLon,
-                                                distanceKm = req.distanceKm,
-                                                durationMinutes = req.durationMinutes,
-                                                rideCategory = req.rideCategory,
-                                                agreedFare = req.estimatedFare,
-                                                paymentMethod = req.paymentMethod,
-                                                driverName = driverName,
-                                                driverRating = 4.9,
-                                                driverTotalRides = 1420,
-                                                driverVehicleMake = driverVehicleMake,
-                                                driverVehicleModel = driverVehicleModel,
-                                                driverPlateNumber = driverVehicleNumber,
-                                                driverPhone = driverPhone,
-                                                assignedDriverId = driverId,
-                                                status = PassengerOrderStatus.DRIVER_COMING,
-                                                etaMinutes = etaMins
-                                            )
-                                            // Immediately show Active Ride view on driver screen
-                                            activeDriverTrip = order
-                                            offerSentRequestId = req.id
-                                            selectedRequestForOffer = null
-                                            tollSurchargesPkr = 0
-                                            driverRecenterTrigger++
-                                            Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
-
-                                            val result = repo.acceptRideRequest(req.id, offer, order)
-                                            isSendingOffer = false
-                                            if (!result.isSuccess || !result.getOrDefault(false)) {
-                                                activeDriverTrip = null
-                                                offerSentRequestId = null
+                                                val order = PassengerOrder(
+                                                    id = req.id,
+                                                    requestId = req.id,
+                                                    passengerId = req.passengerId,
+                                                    passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
+                                                    passengerEmail = req.passengerEmail,
+                                                    passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
+                                                    pickupTitle = req.pickupTitle,
+                                                    pickupSubtitle = req.pickupSubtitle,
+                                                    pickupLat = req.pickupLat,
+                                                    pickupLon = req.pickupLon,
+                                                    destinationTitle = req.destinationTitle,
+                                                    destinationSubtitle = req.destinationSubtitle,
+                                                    destinationLat = req.destinationLat,
+                                                    destinationLon = req.destinationLon,
+                                                    distanceKm = req.distanceKm,
+                                                    durationMinutes = req.durationMinutes,
+                                                    rideCategory = req.rideCategory,
+                                                    agreedFare = req.estimatedFare,
+                                                    paymentMethod = req.paymentMethod,
+                                                    driverName = driverName,
+                                                    driverRating = 4.9,
+                                                    driverTotalRides = 1420,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    assignedDriverId = driverId,
+                                                    status = PassengerOrderStatus.DRIVER_COMING,
+                                                    etaMinutes = etaMins
+                                                )
+                                                // Immediately show Active Ride view on driver screen
+                                                activeDriverTrip = order
+                                                offerSentRequestId = req.id
+                                                selectedRequestForOffer = null
+                                                tollSurchargesPkr = 0
                                                 driverRecenterTrigger++
-                                                Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
+
+                                                val result = repo.acceptRideRequest(req.id, offer, order)
+                                                isSendingOffer = false
+                                                if (!result.isSuccess || !result.getOrDefault(false)) {
+                                                    activeDriverTrip = null
+                                                    offerSentRequestId = null
+                                                    driverRecenterTrigger++
+                                                    Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
+                                                }
+                                            }
+                                        },
+                                        onCounterOffer = { counterFare ->
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = counterFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+                                                repo.sendDriverOffer(offer)
+                                                offerSentRequestId = req.id
+                                                isSendingOffer = false
+                                                Toast.makeText(context, "Counter-offer of PKR $counterFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
                                             }
                                         }
-                                    },
-                                    onCounterOffer = { counterFare ->
-                                        scope.launch {
-                                            isSendingOffer = true
-                                            val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
-                                            val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+                                    )
+                                } else {
+                                    DriverRideRequestCard(
+                                        request = req,
+                                        isSelected = selectedRequestForOffer?.id == req.id,
+                                        isOfferSent = offerSentRequestId == req.id,
+                                        driverLat = driverGeoPoint.latitude,
+                                        driverLon = driverGeoPoint.longitude,
+                                        onSelect = { selectedRequestForOffer = req },
+                                        onAcceptOffer = {
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
 
-                                            val offer = DriverOffer(
-                                                requestId = req.id,
-                                                driverId = driverId,
-                                                driverName = driverName,
-                                                driverVehicleMake = driverVehicleMake,
-                                                driverVehicleModel = driverVehicleModel,
-                                                driverPlateNumber = driverVehicleNumber,
-                                                driverPhone = driverPhone,
-                                                offeredFare = counterFare,
-                                                etaMinutes = etaMins,
-                                                distanceKmAway = distKmToPickup,
-                                                driverLat = driverGeoPoint.latitude,
-                                                driverLon = driverGeoPoint.longitude
-                                            )
-                                            repo.sendDriverOffer(offer)
-                                            offerSentRequestId = req.id
-                                            isSendingOffer = false
-                                            Toast.makeText(context, "Counter-offer of PKR $counterFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = req.estimatedFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+
+                                                val order = PassengerOrder(
+                                                    id = req.id,
+                                                    requestId = req.id,
+                                                    passengerId = req.passengerId,
+                                                    passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
+                                                    passengerEmail = req.passengerEmail,
+                                                    passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
+                                                    pickupTitle = req.pickupTitle,
+                                                    pickupSubtitle = req.pickupSubtitle,
+                                                    pickupLat = req.pickupLat,
+                                                    pickupLon = req.pickupLon,
+                                                    destinationTitle = req.destinationTitle,
+                                                    destinationSubtitle = req.destinationSubtitle,
+                                                    destinationLat = req.destinationLat,
+                                                    destinationLon = req.destinationLon,
+                                                    distanceKm = req.distanceKm,
+                                                    durationMinutes = req.durationMinutes,
+                                                    rideCategory = req.rideCategory,
+                                                    agreedFare = req.estimatedFare,
+                                                    paymentMethod = req.paymentMethod,
+                                                    driverName = driverName,
+                                                    driverRating = 4.9,
+                                                    driverTotalRides = 1420,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    assignedDriverId = driverId,
+                                                    status = PassengerOrderStatus.DRIVER_COMING,
+                                                    etaMinutes = etaMins
+                                                )
+                                                // Immediately show Active Ride view on driver screen
+                                                activeDriverTrip = order
+                                                offerSentRequestId = req.id
+                                                selectedRequestForOffer = null
+                                                tollSurchargesPkr = 0
+                                                driverRecenterTrigger++
+                                                Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
+
+                                                val result = repo.acceptRideRequest(req.id, offer, order)
+                                                isSendingOffer = false
+                                                if (!result.isSuccess || !result.getOrDefault(false)) {
+                                                    activeDriverTrip = null
+                                                    offerSentRequestId = null
+                                                    driverRecenterTrigger++
+                                                    Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
+                                                }
+                                            }
+                                        },
+                                        onCounterOffer = { counterFare ->
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = counterFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+                                                repo.sendDriverOffer(offer)
+                                                offerSentRequestId = req.id
+                                                isSendingOffer = false
+                                                Toast.makeText(context, "Counter-offer of PKR $counterFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                     }
@@ -2342,7 +3012,7 @@ fun DriverModeView(
                 .fillMaxSize()
                 .padding(
                     end = 16.dp,
-                    bottom = if (activeDriverTrip != null) 340.dp else if (isDriverOnline) (if (isRequestsFeedExpanded) 90.dp else 470.dp) else 230.dp
+                    bottom = if (activeDriverTrip != null) (if (isActiveTripSheetExpanded) 520.dp else 260.dp) else if (isDriverOnline) (if (isRequestsFeedExpanded) 90.dp else 470.dp) else 230.dp
                 ),
             contentAlignment = Alignment.BottomEnd
         ) {
@@ -2377,6 +3047,146 @@ fun DriverModeView(
                     )
                 }
             }
+        }
+
+        // Bottom Navigation Bar (Image 2: Ride Requests vs Performance Tabs)
+        if (activeDriverTrip == null) {
+            Surface(
+                color = Color(0xFF14171F),
+                border = BorderStroke(1.dp, Color(0xFF2B3142)),
+                shadowElevation = 12.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Ride Requests Tab
+                    Surface(
+                        onClick = { selectedDriverTab = "REQUESTS" },
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("driver_nav_requests_tab")
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FormatListBulleted,
+                                contentDescription = "Ride requests",
+                                tint = if (selectedDriverTab == "REQUESTS") Color(0xFFC6FF00) else Color(0xFF8C98A9),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "Ride requests",
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedDriverTab == "REQUESTS") FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (selectedDriverTab == "REQUESTS") Color.White else Color(0xFF8C98A9)
+                            )
+                        }
+                    }
+
+                    // Performance Tab
+                    Surface(
+                        onClick = { selectedDriverTab = "PERFORMANCE" },
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("driver_nav_performance_tab")
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = "Performance",
+                                tint = if (selectedDriverTab == "PERFORMANCE") Color(0xFFC6FF00) else Color(0xFF8C98A9),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "Performance",
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedDriverTab == "PERFORMANCE") FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (selectedDriverTab == "PERFORMANCE") Color.White else Color(0xFF8C98A9)
+                            )
+                        }
+                    }
+
+                    // Trip History Tab
+                    Surface(
+                        onClick = { selectedDriverTab = "HISTORY" },
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("driver_nav_history_tab")
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = "Trip history",
+                                tint = if (selectedDriverTab == "HISTORY") Color(0xFFC6FF00) else Color(0xFF8C98A9),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "Trip history",
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedDriverTab == "HISTORY") FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (selectedDriverTab == "HISTORY") Color.White else Color(0xFF8C98A9)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Driver Performance Screen Overlay (Image 2)
+        if (selectedDriverTab == "PERFORMANCE" && activeDriverTrip == null) {
+            DriverPerformanceScreen(
+                driverName = driverName,
+                driverRating = driverPerformanceRating,
+                driverRidesThisWeek = driverRidesThisWeek,
+                todayIncomePkr = todayIncomePkr,
+                dailyGoalPkr = dailyGoalPkr,
+                walletBalancePkr = walletBalancePkr,
+                activeBonusesCount = activeBonusesCount,
+                onSeeBenefitsClick = { showTierBenefitsSheet = true },
+                onIncomeClick = { showIncomeDetailsSheet = true },
+                onAddGoalClick = { showAddDailyGoalSheet = true },
+                onTopUpClick = onNavigateToWallet,
+                onBonusesClick = { showBonusesSheet = true },
+                onOpenDrawer = onOpenDrawer,
+                onBackClick = { selectedDriverTab = "REQUESTS" },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Driver Trip History Screen Overlay
+        if (selectedDriverTab == "HISTORY" && activeDriverTrip == null) {
+            DriverTripHistoryScreen(
+                driverName = driverName,
+                completedTrips = activeDriverTripHistoryList,
+                onOpenDrawer = onOpenDrawer,
+                onBackClick = { selectedDriverTab = "REQUESTS" },
+                modifier = Modifier.fillMaxSize()
+            )
         }
 
         // ================= DIALOGS & BOTTOM SHEETS =================
@@ -2461,6 +3271,592 @@ fun DriverModeView(
                     }
                 }
             )
+        }
+
+        // 1.5. Ride Request Details Bottom Sheet (matching reference image)
+        selectedRequestForOffer?.let { req ->
+            var expandedBidding by remember(req.id) { mutableStateOf(false) }
+            var customBidText by remember(req.id) { mutableStateOf("") }
+            val sheetFocusManager = LocalFocusManager.current
+
+            ModalBottomSheet(
+                onDismissRequest = { selectedRequestForOffer = null },
+                containerColor = Color(0xFF13151D),
+                scrimColor = Color.Black.copy(alpha = 0.6f),
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 12.dp)
+                            .width(40.dp)
+                            .height(4.dp)
+                            .background(Color.White.copy(alpha = 0.3f), RoundedCornerShape(2.dp))
+                    )
+                }
+            ) {
+                val distAwayKm = if (driverGeoPoint.latitude != 0.0 && driverGeoPoint.longitude != 0.0 && req.pickupLat != 0.0) {
+                    calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon)
+                } else 0.9
+
+                val etaMins = ((distAwayKm / 25.0) * 60.0).toInt().coerceIn(2, 25)
+                val formattedFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(req.estimatedFare)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    // Profile + Info Main Section
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Left Column: Profile Avatar + Name + Rating + Min Away
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.width(70.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF673AB7), // purple circle color
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = req.passengerName.trim().take(1).uppercase().ifBlank { "J" },
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 24.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = req.passengerName.ifBlank { "jawad" },
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFC107),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = String.format(java.util.Locale.US, "%.2f", if (req.passengerRating > 0.0) req.passengerRating else 4.73),
+                                    color = Color.White.copy(alpha = 0.9f),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            Text(
+                                text = "(44)",
+                                color = Color.Gray,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = "$etaMins min.",
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Right Column: Fare + Routes + Category Pill
+                        Column(modifier = Modifier.weight(1f)) {
+                            // Top Row: Distance & Fare & Fair Price Badge
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = String.format(java.util.Locale.US, "~%.1f km", req.distanceKm),
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "PKR$formattedFare",
+                                        color = Color.White,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+
+                                // Fair price Pill
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF1E1428),
+                                    border = BorderStroke(1.dp, Color(0xFFCE93D8).copy(alpha = 0.4f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.TrendingUp,
+                                            contentDescription = null,
+                                            tint = Color(0xFFE040FB),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = "Fair price",
+                                            color = Color(0xFFCE93D8),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Route Timeline Details (A & B)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                // A & B Indicator Icons with a connecting line
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(top = 4.dp, end = 12.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .background(Color(0xFF2979FF), CircleShape)
+                                    ) {
+                                        Text("A", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .width(1.5.dp)
+                                            .height(30.dp)
+                                            .background(Color.White.copy(alpha = 0.15f))
+                                    )
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .background(Color(0xFF00E676), CircleShape)
+                                    ) {
+                                        Text("B", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                    }
+                                }
+
+                                // Destination and Pickup Text
+                                Column(modifier = Modifier.weight(1f)) {
+                                    // Pickup A Address + Coordinates
+                                    Text(
+                                        text = req.pickupTitle,
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (req.pickupSubtitle.isNotBlank()) {
+                                        Text(
+                                            text = req.pickupSubtitle,
+                                            color = Color.Gray,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", req.pickupLat, req.pickupLon),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF81D4FA)
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Destination B Address + Coordinates
+                                    Text(
+                                        text = req.destinationTitle,
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (req.destinationSubtitle.isNotBlank()) {
+                                        Text(
+                                            text = req.destinationSubtitle,
+                                            color = Color.Gray,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", req.destinationLat, req.destinationLon),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFFFF8A80)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Mini/Ride Category pill
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF263238),
+                                modifier = Modifier.align(Alignment.Start)
+                            ) {
+                                Text(
+                                    text = req.rideCategory.ifBlank { "Mini" },
+                                    color = Color(0xFF90A4AE),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Bidding controls (if expandedBidding is true)
+                    AnimatedVisibility(
+                        visible = expandedBidding,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF1E2026), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Select or Enter Counter-Offer (PKR):",
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val base = req.estimatedFare
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(base + 50, base + 100, base + 150).forEach { fare ->
+                                    val formattedCounterFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(fare)
+                                    Surface(
+                                        onClick = {
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = fare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+                                                repo.sendDriverOffer(offer)
+                                                offerSentRequestId = req.id
+                                                isSendingOffer = false
+                                                selectedRequestForOffer = null
+                                                Toast.makeText(context, "Counter-offer of PKR $fare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                            }
+                                            expandedBidding = false
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = DrigoBrandPurple.copy(alpha = 0.3f),
+                                        border = BorderStroke(1.dp, DrigoBrandPurple),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "+${fare - base}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = "PKR $formattedCounterFare",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = customBidText,
+                                    onValueChange = { customBidText = it },
+                                    placeholder = { Text("Custom Bid", color = Color.Gray, fontSize = 13.sp) },
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Send
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onSend = {
+                                            val customFare = customBidText.toIntOrNull()
+                                            if (customFare != null && customFare > 0) {
+                                                scope.launch {
+                                                    isSendingOffer = true
+                                                    val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                    val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                    val offer = DriverOffer(
+                                                        requestId = req.id,
+                                                        driverId = driverId,
+                                                        driverName = driverName,
+                                                        driverVehicleMake = driverVehicleMake,
+                                                        driverVehicleModel = driverVehicleModel,
+                                                        driverPlateNumber = driverVehicleNumber,
+                                                        driverPhone = driverPhone,
+                                                        offeredFare = customFare,
+                                                        etaMinutes = etaMins,
+                                                        distanceKmAway = distKmToPickup,
+                                                        driverLat = driverGeoPoint.latitude,
+                                                        driverLon = driverGeoPoint.longitude
+                                                    )
+                                                    repo.sendDriverOffer(offer)
+                                                    offerSentRequestId = req.id
+                                                    isSendingOffer = false
+                                                    selectedRequestForOffer = null
+                                                    Toast.makeText(context, "Counter-offer of PKR $customFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                                }
+                                                expandedBidding = false
+                                                customBidText = ""
+                                                sheetFocusManager.clearFocus()
+                                            }
+                                        }
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = DrigoBrandPurple,
+                                        unfocusedBorderColor = Color.Gray,
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                Button(
+                                    onClick = {
+                                        val customFare = customBidText.toIntOrNull()
+                                        if (customFare != null && customFare > 0) {
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = customFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+                                                repo.sendDriverOffer(offer)
+                                                offerSentRequestId = req.id
+                                                isSendingOffer = false
+                                                selectedRequestForOffer = null
+                                                Toast.makeText(context, "Counter-offer of PKR $customFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                            }
+                                            expandedBidding = false
+                                            customBidText = ""
+                                            sheetFocusManager.clearFocus()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                    modifier = Modifier.height(48.dp)
+                                ) {
+                                    Text("Send", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Buttons Area:
+                    // 1. Accept Button (high-contrast Lime Green with Dark text)
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isSendingOffer = true
+                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                val offer = DriverOffer(
+                                    requestId = req.id,
+                                    driverId = driverId,
+                                    driverName = driverName,
+                                    driverVehicleMake = driverVehicleMake,
+                                    driverVehicleModel = driverVehicleModel,
+                                    driverPlateNumber = driverVehicleNumber,
+                                    driverPhone = driverPhone,
+                                    offeredFare = req.estimatedFare,
+                                    etaMinutes = etaMins,
+                                    distanceKmAway = distKmToPickup,
+                                    driverLat = driverGeoPoint.latitude,
+                                    driverLon = driverGeoPoint.longitude
+                                )
+
+                                val order = PassengerOrder(
+                                    id = req.id,
+                                    requestId = req.id,
+                                    passengerId = req.passengerId,
+                                    passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
+                                    passengerEmail = req.passengerEmail,
+                                    passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
+                                    pickupTitle = req.pickupTitle,
+                                    pickupSubtitle = req.pickupSubtitle,
+                                    pickupLat = req.pickupLat,
+                                    pickupLon = req.pickupLon,
+                                    destinationTitle = req.destinationTitle,
+                                    destinationSubtitle = req.destinationSubtitle,
+                                    destinationLat = req.destinationLat,
+                                    destinationLon = req.destinationLon,
+                                    distanceKm = req.distanceKm,
+                                    durationMinutes = req.durationMinutes,
+                                    rideCategory = req.rideCategory,
+                                    agreedFare = req.estimatedFare,
+                                    paymentMethod = req.paymentMethod,
+                                    driverName = driverName,
+                                    driverRating = 4.9,
+                                    driverTotalRides = 1420,
+                                    driverVehicleMake = driverVehicleMake,
+                                    driverVehicleModel = driverVehicleModel,
+                                    driverPlateNumber = driverVehicleNumber,
+                                    driverPhone = driverPhone,
+                                    assignedDriverId = driverId,
+                                    status = PassengerOrderStatus.DRIVER_COMING,
+                                    etaMinutes = etaMins
+                                )
+                                // Immediately show Active Ride view on driver screen
+                                activeDriverTrip = order
+                                offerSentRequestId = req.id
+                                selectedRequestForOffer = null
+                                tollSurchargesPkr = 0
+                                driverRecenterTrigger++
+                                Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
+
+                                val result = repo.acceptRideRequest(req.id, offer, order)
+                                isSendingOffer = false
+                                if (!result.isSuccess || !result.getOrDefault(false)) {
+                                    activeDriverTrip = null
+                                    offerSentRequestId = null
+                                    driverRecenterTrigger++
+                                    Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFCCFF00)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Text(
+                            text = "Accept for PKR$formattedFare",
+                            color = Color(0xFF13151D),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 2. Offer Your Fare Button
+                    Button(
+                        onClick = { expandedBidding = !expandedBidding },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF222634)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Text(
+                            text = if (expandedBidding) "Cancel bidding" else "Offer your fare",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 3. Close Button
+                    Button(
+                        onClick = { selectedRequestForOffer = null },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E2026)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Text(
+                            text = "Close",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+            }
         }
 
         // 2. Filter & "On My Way Home" Preferences Sheet (Item 3 & Item 5)
@@ -2622,6 +4018,57 @@ fun DriverModeView(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        // Quick Presets for Destination Mode
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("Rawalpindi", "Blue Area", "F-10 Markaz", "I-8 Markaz").forEach { loc ->
+                                Surface(
+                                    onClick = { destinationModeText = loc },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (destinationModeText.contains(loc, true)) DrigoBrandPurple.copy(alpha = 0.3f) else Color(0xFF282B36),
+                                    border = BorderStroke(1.dp, if (destinationModeText.contains(loc, true)) DrigoBrandPurple else Color(0xFF3E4354))
+                                ) {
+                                    Text("📍 $loc", fontSize = 10.sp, color = Color.White, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Payment Method Filter
+                    Text(
+                        text = "Payment Method Filter",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFB0BEC5)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("All" to "All Methods", "Cash" to "💵 Cash Only", "Digital" to "💳 Digital Wallet").forEach { (method, label) ->
+                            Surface(
+                                onClick = { selectedPaymentFilter = method },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selectedPaymentFilter == method) DrigoBrandPurple else Color(0xFF2A2D3A),
+                                border = BorderStroke(1.dp, if (selectedPaymentFilter == method) DrigoBrandPurple else Color(0xFF3E4354)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(vertical = 7.dp)
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -3006,14 +4453,21 @@ fun DriverModeView(
                 farePkr = trip.agreedFare,
                 onDismiss = {
                     showPassengerRatingDialog = false
+                    context.getSharedPreferences("drigo_ratings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("rated_or_skipped_${trip.id}", true).putBoolean("rated_or_skipped_${trip.requestId}", true).apply()
                     completedTripForRating = null
                 },
                 onRatingSubmitted = {
                     showPassengerRatingDialog = false
+                    context.getSharedPreferences("drigo_ratings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("rated_or_skipped_${trip.id}", true).putBoolean("rated_or_skipped_${trip.requestId}", true).apply()
                     completedTripForRating = null
                     Toast.makeText(context, "Passenger rating submitted (+10 Captain Points)", Toast.LENGTH_SHORT).show()
                 },
                 onOpenSafetyReport = {
+                    showPassengerRatingDialog = false
+                    context.getSharedPreferences("drigo_ratings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("rated_or_skipped_${trip.id}", true).putBoolean("rated_or_skipped_${trip.requestId}", true).apply()
                     driverReportTargetTrip = trip
                     showDriverReportIncident = true
                 }
@@ -3092,7 +4546,45 @@ fun DriverModeView(
                             val tripToCancel = activeDriverTrip
                             if (tripToCancel != null) {
                                 notifManager.dismissDriverActiveRideNotification()
+                                val cancelledHistoryEntry = DriverHistoryItem(
+                                    id = tripToCancel.id,
+                                    tripId = tripToCancel.id,
+                                    requestId = tripToCancel.requestId.ifBlank { tripToCancel.id },
+                                    driverId = driverId,
+                                    passengerId = tripToCancel.passengerId,
+                                    passengerName = tripToCancel.passengerName.ifBlank { "Passenger" },
+                                    passengerRating = 4.9,
+                                    pickupAddress = tripToCancel.pickupTitle,
+                                    pickupTitle = tripToCancel.pickupTitle,
+                                    pickupLatitude = if (tripToCancel.pickupLat != 0.0) tripToCancel.pickupLat else null,
+                                    pickupLongitude = if (tripToCancel.pickupLon != 0.0) tripToCancel.pickupLon else null,
+                                    destinationAddress = tripToCancel.destinationTitle,
+                                    destinationTitle = tripToCancel.destinationTitle,
+                                    destinationLatitude = if (tripToCancel.destinationLat != 0.0) tripToCancel.destinationLat else null,
+                                    destinationLongitude = if (tripToCancel.destinationLon != 0.0) tripToCancel.destinationLon else null,
+                                    farePkr = tripToCancel.agreedFare,
+                                    agreedFare = tripToCancel.agreedFare,
+                                    paymentMethod = tripToCancel.paymentMethod.ifBlank { "💵 Cash" },
+                                    dateFormatted = "Cancelled",
+                                    distanceKm = if (tripToCancel.distanceKm > 0) tripToCancel.distanceKm else 5.0,
+                                    distance = if (tripToCancel.distanceKm > 0) tripToCancel.distanceKm else 5.0,
+                                    durationMins = if (tripToCancel.durationMinutes > 0) tripToCancel.durationMinutes else 15,
+                                    duration = if (tripToCancel.durationMinutes > 0) tripToCancel.durationMinutes else 15,
+                                    status = "CANCELLED",
+                                    tripStatus = "CANCELLED",
+                                    category = tripToCancel.rideCategory.ifBlank { "Ride Mini" },
+                                    rideType = tripToCancel.rideCategory.ifBlank { "Ride Mini" },
+                                    vehicleType = if (tripToCancel.driverVehicleMake.isNotBlank()) "${tripToCancel.driverVehicleMake} ${tripToCancel.driverVehicleModel}".trim() else tripToCancel.rideCategory,
+                                    timestamp = System.currentTimeMillis(),
+                                    requestedAt = if (tripToCancel.createdAt > 0) tripToCancel.createdAt else null,
+                                    cancelledAt = System.currentTimeMillis(),
+                                    cancellationReason = selectedCancelReason
+                                )
                                 scope.launch {
+                                    repo.saveDriverTripHistoryItem(driverId, cancelledHistoryEntry)
+                                    if (driverPhone.isNotBlank() && driverPhone != driverId) {
+                                        repo.saveDriverTripHistoryItem(driverPhone, cancelledHistoryEntry)
+                                    }
                                     repo.updateDriverTripStatus(
                                         tripToCancel.id,
                                         PassengerOrderStatus.CANCELLED,
@@ -3120,6 +4612,1774 @@ fun DriverModeView(
                 }
             )
         }
+
+        // 6. Tier Benefits Bottom Sheet (Image 2 - "See benefits")
+        if (showTierBenefitsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showTierBenefitsSheet = false },
+                containerColor = Color(0xFF131B24),
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = "Captain Tier Benefits & Perks",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Complete weekly trips and maintain high ratings to unlock higher tiers with maximum earnings.",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    val tiers = listOf(
+                        Triple("Basic ◆", "0–14 rides/week • 4.50+ Rating", listOf("Standard dispatch priority", "Standard platform fee")),
+                        Triple("Bronze ◆", "15–29 rides/week • 4.60+ Rating", listOf("5% Commission Cashback", "Priority ride request alerts", "Bronze badge on driver profile")),
+                        Triple("Silver ◆", "30–49 rides/week • 4.70+ Rating", listOf("10% Commission Cashback", "Priority dispatch for high-fare rides", "1 Free Cancellation protection per week")),
+                        Triple("Platinum ◆", "50+ rides/week • 4.80+ Rating", listOf("15% Commission Cashback", "Top priority dispatch engine", "3 Free Cancellations protection per week", "24/7 Dedicated Priority Hotline"))
+                    )
+
+                    LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
+                        items(tiers) { (tierTitle, desc, perks) ->
+                            val isCurrentTier = driverRidesThisWeek >= when (tierTitle.substringBefore(" ")) {
+                                "Platinum" -> 50
+                                "Silver" -> 30
+                                "Bronze" -> 15
+                                else -> 0
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isCurrentTier) Color(0xFF1B3245) else Color(0xFF1A1F2B),
+                                border = BorderStroke(1.dp, if (isCurrentTier) Color(0xFF29B6F6) else Color(0xFF2A3142)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(text = tierTitle, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                        if (isCurrentTier) {
+                                            Surface(
+                                                shape = RoundedCornerShape(20.dp),
+                                                color = Color(0xFF0288D1)
+                                            ) {
+                                                Text(
+                                                    text = "ACTIVE TIER",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Color.White,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = desc, fontSize = 11.5.sp, color = Color(0xFF81D4FA))
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    perks.forEach { perk ->
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(text = perk, fontSize = 12.sp, color = Color.White)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = { showTierBenefitsSheet = false },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Text("Got It", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // 7. Add Daily Goal Dialog
+        if (showAddDailyGoalSheet) {
+            var customGoalText by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { showAddDailyGoalSheet = false },
+                containerColor = Color(0xFF181C25),
+                titleContentColor = Color.White,
+                textContentColor = Color.White,
+                title = { Text("Set Daily Income Goal", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text("Select your daily target income to stay motivated:", fontSize = 13.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(2000, 3500, 5000, 8000).forEach { preset ->
+                                Surface(
+                                    onClick = {
+                                        dailyGoalPkr = preset
+                                        showAddDailyGoalSheet = false
+                                        Toast.makeText(context, "Daily goal set to PKR $preset", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (dailyGoalPkr == preset) Color(0xFF0288D1) else Color(0xFF262C3A),
+                                    border = BorderStroke(1.dp, Color(0xFF374256)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "${preset / 1000}k",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(vertical = 10.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = customGoalText,
+                            onValueChange = { if (it.all { c -> c.isDigit() }) customGoalText = it },
+                            label = { Text("Custom Amount (PKR)", color = Color.Gray) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF0288D1),
+                                unfocusedBorderColor = Color.Gray,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val customVal = customGoalText.toIntOrNull()
+                            if (customVal != null && customVal > 0) {
+                                dailyGoalPkr = customVal
+                                Toast.makeText(context, "Daily goal set to PKR $customVal", Toast.LENGTH_SHORT).show()
+                            }
+                            showAddDailyGoalSheet = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1))
+                    ) {
+                        Text("Save Goal", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddDailyGoalSheet = false }) {
+                        Text("Cancel", color = Color.Gray)
+                    }
+                }
+            )
+        }
+
+        // 8. Captain Bonuses & Surge Incentives Sheet
+        if (showBonusesSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showBonusesSheet = false },
+                containerColor = Color(0xFF181C25),
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text("Active Captain Bonuses & Quests", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    Text("Complete quests to earn extra cash bonuses on top of ride fares.", fontSize = 12.sp, color = Color.Gray)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val bonuses = listOf(
+                        Triple("Peak Hour Surge Quest", "Complete 3 rides between 5:00 PM – 9:00 PM", "+PKR 400 Extra"),
+                        Triple("Weekend Streak Bonus", "Complete 15 rides Friday to Sunday", "+PKR 1,200 Extra"),
+                        Triple("High Acceptance Reward", "Maintain 90%+ acceptance rate today", "+PKR 300 Extra")
+                    )
+
+                    bonuses.forEach { (title, subtitle, reward) ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF222836),
+                            border = BorderStroke(1.dp, Color(0xFF333B4F)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 5.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = title, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                    Text(text = subtitle, fontSize = 11.5.sp, color = Color.Gray)
+                                }
+                                Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF2E7D32)) {
+                                    Text(text = reward, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(onClick = { showBonusesSheet = false }, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("Close", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // 9. Today's Income Details Breakdown
+        if (showIncomeDetailsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showIncomeDetailsSheet = false },
+                containerColor = Color(0xFF181C25),
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text("Today's Earnings Breakdown", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    Text("Detailed view of all rides, tips, and bonuses earned today.", fontSize = 12.sp, color = Color.Gray)
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    val items = listOf(
+                        "Trip Fares Earned" to "PKR $todayIncomePkr",
+                        "Passenger Cash Tips" to "PKR 0",
+                        "Quest & Surge Bonuses" to "PKR 0",
+                        "Platform Fee Deducted" to "-PKR 0",
+                        "Net Earnings Today" to "PKR $todayIncomePkr"
+                    )
+
+                    items.forEach { (label, value) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = label, fontSize = 14.sp, color = if (label.startsWith("Net")) Color.White else Color.Gray, fontWeight = if (label.startsWith("Net")) FontWeight.Bold else FontWeight.Normal)
+                            Text(text = value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = if (label.startsWith("Net")) Color(0xFF00E676) else Color.White)
+                        }
+                        HorizontalDivider(color = Color(0xFF262C3A))
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(onClick = { showIncomeDetailsSheet = false }, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("Close", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // 10. Smart Vehicle Tariff & Eligibility Sheet (Image 13)
+        if (showTariffsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showTariffsSheet = false },
+                containerColor = Color(0xFF141822),
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Vehicle Tariffs & Category Eligibility",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Manage active ride categories and courier switches.",
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Active Registered Vehicle Header Card (Image 13)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF1C2230),
+                        border = BorderStroke(1.dp, Color(0xFF2C364A)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFF0288D1).copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, Color(0xFF0288D1)),
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.DirectionsCar,
+                                            contentDescription = null,
+                                            tint = Color(0xFF29B6F6),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(text = selectedVehicleModelName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0xFF283244),
+                                            modifier = Modifier.padding(end = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = selectedVehiclePlateNumber,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFFFFD54F),
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Text(text = "• $selectedVehicleCategoryType", fontSize = 11.5.sp, color = Color.Gray)
+                                    }
+                                }
+                            }
+
+                            Button(
+                                onClick = { showChangeVehicleDialog = true },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("change_vehicle_button")
+                            ) {
+                                Text("Change vehicle", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val isAcLocked = selectedVehicleCategoryType.contains("Non-AC") ||
+                            selectedVehicleCategoryType.contains("Motorcycle") ||
+                            selectedVehicleCategoryType.contains("Auto")
+                    val isComfortLocked = !selectedVehicleCategoryType.contains("Sedan")
+
+                    LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
+                        item {
+                            Text("Ride Categories & Tariffs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81D4FA))
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        // Ride Mini
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF1B202C),
+                                border = BorderStroke(1.dp, Color(0xFF2A3142)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Ride Mini", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                        Text("Standard budget rides • Base PKR 35/km", fontSize = 11.sp, color = Color.Gray)
+                                    }
+                                    Switch(
+                                        checked = isTariffMiniEnabled,
+                                        onCheckedChange = { isTariffMiniEnabled = it },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Ride A/C (Locked for Suzuki Mehran / Non-AC)
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isAcLocked) Color(0xFF221A1A) else Color(0xFF1B202C),
+                                border = BorderStroke(1.dp, if (isAcLocked) Color(0xFF4A2828) else Color(0xFF2A3142)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Ride A/C", fontWeight = FontWeight.Bold, color = if (isAcLocked) Color.Gray else Color.White, fontSize = 14.sp)
+                                            if (isAcLocked) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(shape = RoundedCornerShape(4.dp), color = Color(0xFFD32F2F).copy(alpha = 0.2f)) {
+                                                    Text("🚫 Locked: No A/C", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF5350), modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = if (isAcLocked) "Not available for $selectedVehicleModelName (No A/C factory unit)" else "Air-conditioned rides • Base PKR 55/km",
+                                            fontSize = 11.sp,
+                                            color = if (isAcLocked) Color(0xFFEF5350) else Color.Gray
+                                        )
+                                    }
+                                    Switch(
+                                        checked = if (isAcLocked) false else isTariffAcEnabled,
+                                        onCheckedChange = { if (!isAcLocked) isTariffAcEnabled = it },
+                                        enabled = !isAcLocked,
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Ride Comfort (Locked for Hatchbacks/Bikes)
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isComfortLocked) Color(0xFF221A1A) else Color(0xFF1B202C),
+                                border = BorderStroke(1.dp, if (isComfortLocked) Color(0xFF4A2828) else Color(0xFF2A3142)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Ride Comfort", fontWeight = FontWeight.Bold, color = if (isComfortLocked) Color.Gray else Color.White, fontSize = 14.sp)
+                                            if (isComfortLocked) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(shape = RoundedCornerShape(4.dp), color = Color(0xFFD32F2F).copy(alpha = 0.2f)) {
+                                                    Text("🚫 Requires Sedan", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF5350), modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = if (isComfortLocked) "Requires Executive/Premium Sedan model" else "Spacious premium sedan rides • Base PKR 75/km",
+                                            fontSize = 11.sp,
+                                            color = if (isComfortLocked) Color(0xFFEF5350) else Color.Gray
+                                        )
+                                    }
+                                    Switch(
+                                        checked = if (isComfortLocked) false else isTariffComfortEnabled,
+                                        onCheckedChange = { if (!isComfortLocked) isTariffComfortEnabled = it },
+                                        enabled = !isComfortLocked,
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Courier & Delivery
+                        item {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("Courier & Sub-Category Controls (Image 13)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81D4FA))
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF1B202C),
+                                border = BorderStroke(1.dp, Color(0xFF2A3142)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Courier / Delivery Orders", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                            Text("Accept package, food & item deliveries", fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                        Switch(
+                                            checked = isTariffCourierEnabled,
+                                            onCheckedChange = { isTariffCourierEnabled = it },
+                                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                        )
+                                    }
+
+                                    if (isTariffCourierEnabled) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        HorizontalDivider(color = Color(0xFF283142))
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        // Sub-toggle: Parcel Delivery
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("📄 Documents & Small Parcels", fontSize = 12.5.sp, color = Color.White)
+                                            Switch(
+                                                checked = isCourierParcelEnabled,
+                                                onCheckedChange = { isCourierParcelEnabled = it },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                            )
+                                        }
+
+                                        // Sub-toggle: Thermal Bag (Food)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("🎒 Insulated Thermal Bag Available", fontSize = 12.5.sp, color = Color.White)
+                                                Text("Required for hot food & perishables", fontSize = 10.5.sp, color = Color.Gray)
+                                            }
+                                            Switch(
+                                                checked = hasCourierThermalBag,
+                                                onCheckedChange = { hasCourierThermalBag = it },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                            )
+                                        }
+
+                                        // Sub-toggle: Heavy Cargo
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("📦 Heavy Cargo / Large Boxes", fontSize = 12.5.sp, color = Color.White)
+                                            Switch(
+                                                checked = isCourierHeavyCargoEnabled,
+                                                onCheckedChange = { isCourierHeavyCargoEnabled = it },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tariff Strategy Multiplier
+                        item {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("Base Rate Multiplier", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81D4FA))
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(1.0f to "1.0x Standard", 1.1f to "1.1x (+10%)", 1.2f to "1.2x (+20%)").forEach { (mult, label) ->
+                                    Surface(
+                                        onClick = { selectedTariffMultiplier = mult },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (selectedTariffMultiplier == mult) Color(0xFF0288D1) else Color(0xFF1E2432),
+                                        border = BorderStroke(1.dp, Color(0xFF2C364A)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            showTariffsSheet = false
+                            Toast.makeText(context, "Tariff & Vehicle eligibility settings saved!", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Text("Save Tariff Preferences", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // 11. Change Vehicle Dialog (Image 13)
+        if (showChangeVehicleDialog) {
+            val vehiclesList = listOf(
+                Triple("Suzuki Mehran (2018)", "LEA-18-4921", "Hatchback (Non-AC)"),
+                Triple("Toyota Corolla (2021)", "ICT-21-9820", "Sedan (AC)"),
+                Triple("Honda Civic (2022)", "ISB-22-1102", "Executive Sedan (AC)"),
+                Triple("Honda CG125 (2022)", "RIW-22-3049", "Motorcycle (Bike)"),
+                Triple("Sazgar Auto (2020)", "RWP-20-7711", "Auto Rickshaw")
+            )
+
+            AlertDialog(
+                onDismissRequest = { showChangeVehicleDialog = false },
+                containerColor = Color(0xFF181C26),
+                titleContentColor = Color.White,
+                textContentColor = Color.White,
+                title = { Text("Select Driver Vehicle", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text("Category eligibility locks adapt dynamically to your active vehicle:", fontSize = 12.5.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
+                            items(vehiclesList) { (model, plate, type) ->
+                                val isSelected = selectedVehicleModelName == model
+                                Surface(
+                                    onClick = {
+                                        selectedVehicleModelName = model
+                                        selectedVehiclePlateNumber = plate
+                                        selectedVehicleCategoryType = type
+
+                                        // Auto update tariff eligibility locks
+                                        if (type.contains("Non-AC") || type.contains("Motorcycle") || type.contains("Auto")) {
+                                            isTariffAcEnabled = false
+                                        } else {
+                                            isTariffAcEnabled = true
+                                        }
+
+                                        if (type.contains("Sedan")) {
+                                            isTariffComfortEnabled = true
+                                        } else {
+                                            isTariffComfortEnabled = false
+                                        }
+
+                                        showChangeVehicleDialog = false
+                                        Toast.makeText(context, "Active vehicle set to $model", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) Color(0xFF0288D1).copy(alpha = 0.2f) else Color(0xFF222836),
+                                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF0288D1) else Color(0xFF333D52)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(text = model, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.5.sp)
+                                            Text(text = "$plate • $type", fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                        if (isSelected) {
+                                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF0288D1), modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showChangeVehicleDialog = false }) {
+                        Text("Close", color = Color(0xFF81D4FA))
+                    }
+                }
+            )
+        }
+    }
+}
+
+// ================= DRIVER PERFORMANCE SCREEN (Image 2) =================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DriverPerformanceScreen(
+    driverName: String,
+    driverRating: Double,
+    driverRidesThisWeek: Int,
+    todayIncomePkr: Int,
+    dailyGoalPkr: Int,
+    walletBalancePkr: Int,
+    activeBonusesCount: Int,
+    onSeeBenefitsClick: () -> Unit,
+    onIncomeClick: () -> Unit,
+    onAddGoalClick: () -> Unit,
+    onTopUpClick: () -> Unit,
+    onBonusesClick: () -> Unit,
+    onOpenDrawer: () -> Unit,
+    onBackClick: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    val currentTierName = when {
+        driverRidesThisWeek >= 50 && driverRating >= 4.80 -> "Platinum"
+        driverRidesThisWeek >= 30 && driverRating >= 4.70 -> "Silver"
+        driverRidesThisWeek >= 15 && driverRating >= 4.60 -> "Bronze"
+        else -> "Basic"
+    }
+
+    val nextTierName = when (currentTierName) {
+        "Basic" -> "Bronze"
+        "Bronze" -> "Silver"
+        "Silver" -> "Platinum"
+        else -> "Platinum"
+    }
+
+    val nextTierRequiredRides = when (currentTierName) {
+        "Basic" -> 15
+        "Bronze" -> 30
+        "Silver" -> 50
+        else -> 50
+    }
+
+    val ridesRemaining = (nextTierRequiredRides - driverRidesThisWeek).coerceAtLeast(0)
+    val progressFraction = (driverRidesThisWeek.toFloat() / nextTierRequiredRides.toFloat()).coerceIn(0f, 1f)
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F1218))
+            .padding(bottom = 70.dp)
+    ) {
+        // Top Header Card (Teal/Navy gradient matching Image 2)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF133043))
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Menu Drawer Button
+                Surface(
+                    onClick = onOpenDrawer,
+                    shape = CircleShape,
+                    color = Color(0xFF102534),
+                    border = BorderStroke(1.dp, Color(0xFF23445A)),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(imageVector = Icons.Default.Menu, contentDescription = "Menu", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+
+                Text("Performance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+
+                Surface(
+                    onClick = onBackClick,
+                    shape = CircleShape,
+                    color = Color(0xFF102534),
+                    border = BorderStroke(1.dp, Color(0xFF23445A)),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Avatar + Rating + Tier Title
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFF1E3A4E),
+                        border = BorderStroke(2.dp, Color(0xFF00E676)),
+                        modifier = Modifier.size(54.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = driverName.take(1).uppercase().ifBlank { "C" },
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 22.sp,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF1B232A),
+                        border = BorderStroke(1.dp, Color(0xFFFFD54F)),
+                        modifier = Modifier.offset(y = 4.dp, x = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(imageVector = Icons.Default.Star, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(11.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(text = String.format(java.util.Locale.US, "%.2f", driverRating), fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "$currentTierName ◆", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Text(text = "Your tier this week", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Progress to Next Tier Card
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF0F2231),
+                border = BorderStroke(1.dp, Color(0xFF1A394E)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = if (ridesRemaining > 0) "$ridesRemaining rides to $nextTierName" else "Top Tier Reached ($currentTierName)",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Progress Slider
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF1A3346))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(fraction = progressFraction)
+                                .background(Brush.horizontalGradient(colors = listOf(Color(0xFF0288D1), Color(0xFF29B6F6))))
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(text = "Keep 4.75+ rating", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // "See benefits" Button
+            Button(
+                onClick = onSeeBenefitsClick,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF102534)),
+                border = BorderStroke(1.dp, Color(0xFF23445A)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .testTag("see_benefits_button")
+            ) {
+                Text(text = "See benefits", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        }
+
+        // Body Section
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Section: Today's income >
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onIncomeClick() },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "Today's income >", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(text = "PKR $todayIncomePkr", fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Daily goal button
+                if (dailyGoalPkr > 0) {
+                    Surface(
+                        onClick = onAddGoalClick,
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1C222D),
+                        border = BorderStroke(1.dp, Color(0xFF2A3142)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(text = "Daily Goal: PKR $dailyGoalPkr", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                val pct = ((todayIncomePkr.toFloat() / dailyGoalPkr.toFloat()).coerceIn(0f, 1f) * 100).toInt()
+                                Text(text = "Progress: $pct% (PKR ${(dailyGoalPkr - todayIncomePkr).coerceAtLeast(0)} left)", fontSize = 12.sp, color = Color(0xFF00E676))
+                            }
+                            Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit Goal", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                } else {
+                    Surface(
+                        onClick = onAddGoalClick,
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF181C25),
+                        border = BorderStroke(1.dp, Color(0xFF2C3242)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = "Add daily goal", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Wallet Balance Card
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF181C25),
+                    border = BorderStroke(1.dp, Color(0xFF272D3B)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(shape = CircleShape, color = Color(0xFF263238), modifier = Modifier.size(42.dp)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(imageVector = Icons.Default.AccountBalanceWallet, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(22.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text(text = "PKR $walletBalancePkr", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text(text = "Wallet balance", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+
+                        Button(
+                            onClick = onTopUpClick,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262C3A)),
+                            modifier = Modifier.testTag("top_up_button")
+                        ) {
+                            Text(text = "Top up", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Bonuses Card
+                Surface(
+                    onClick = onBonusesClick,
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF181C25),
+                    border = BorderStroke(1.dp, Color(0xFF272D3B)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(shape = CircleShape, color = Color(0xFF332A15), modifier = Modifier.size(42.dp)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(imageVector = Icons.Default.CardGiftcard, contentDescription = null, tint = Color(0xFFFFB300), modifier = Modifier.size(22.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Text(text = "$activeBonusesCount Bonuses >", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+
+                        Icon(imageVector = Icons.Default.ChevronRight, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+// ================= DRIVER TRIP HISTORY SCREEN =================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DriverTripHistoryScreen(
+    driverName: String,
+    completedTrips: List<DriverHistoryItem>,
+    onOpenDrawer: () -> Unit,
+    onBackClick: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("All") }
+    var selectedTripForDetail by remember { mutableStateOf<DriverHistoryItem?>(null) }
+    var showReportIssueDialog by remember { mutableStateOf<DriverHistoryItem?>(null) }
+    val context = LocalContext.current
+
+    val filteredList = remember(searchQuery, selectedFilter, completedTrips) {
+        completedTrips.filter { trip ->
+            val matchesFilter = when (selectedFilter) {
+                "Completed" -> trip.status == "COMPLETED"
+                "Cancelled" -> trip.status == "CANCELLED"
+                "Cash" -> trip.paymentMethod.contains("Cash", true)
+                "Digital" -> !trip.paymentMethod.contains("Cash", true)
+                else -> true
+            }
+            val matchesSearch = searchQuery.isBlank() ||
+                    trip.passengerName.contains(searchQuery, ignoreCase = true) ||
+                    trip.pickupTitle.contains(searchQuery, ignoreCase = true) ||
+                    trip.destinationTitle.contains(searchQuery, ignoreCase = true) ||
+                    trip.category.contains(searchQuery, ignoreCase = true)
+            matchesFilter && matchesSearch
+        }
+    }
+
+    val totalNetEarnings = remember(completedTrips) {
+        completedTrips.filter { it.status == "COMPLETED" }.sumOf { it.netEarningsPkr }
+    }
+    val totalRidesCount = remember(completedTrips) {
+        completedTrips.count { it.status == "COMPLETED" }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F121A))
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Header Bar
+            Surface(
+                color = Color(0xFF161A26),
+                border = BorderStroke(1.dp, Color(0xFF262E3D)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = onBackClick,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF222838))
+                                .testTag("driver_history_back_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Requests",
+                                tint = Color.White
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        IconButton(
+                            onClick = onOpenDrawer,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF222838))
+                                .testTag("driver_history_drawer_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Open Drawer",
+                                tint = Color.White
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Trip History",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "$totalRidesCount Completed • PKR ${NumberFormat.getNumberInstance(Locale.US).format(totalNetEarnings)} Net Earned",
+                                fontSize = 12.sp,
+                                color = Color(0xFF00E676),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Summary Analytics Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Card 1: Completed Rides
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E2433),
+                            border = BorderStroke(1.dp, Color(0xFF2E384D)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Total Rides", fontSize = 10.5.sp, color = Color.Gray)
+                                Text(
+                                    text = "$totalRidesCount",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+
+                        // Card 2: Net Earnings
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E2433),
+                            border = BorderStroke(1.dp, Color(0xFF2E384D)),
+                            modifier = Modifier.weight(1.2f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Net Earned", fontSize = 10.5.sp, color = Color.Gray)
+                                Text(
+                                    text = "PKR ${NumberFormat.getNumberInstance(Locale.US).format(totalNetEarnings)}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF00E676)
+                                )
+                            }
+                        }
+
+                        // Card 3: Avg Fare
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF1E2433),
+                            border = BorderStroke(1.dp, Color(0xFF2E384D)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Avg / Ride", fontSize = 10.5.sp, color = Color.Gray)
+                                val avg = if (totalRidesCount > 0) totalNetEarnings / totalRidesCount else 0
+                                Text(
+                                    text = "PKR $avg",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF81D4FA)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Search Field
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search passenger or location...", fontSize = 12.sp, color = Color.Gray) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(18.dp)) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color(0xFF12151F),
+                            unfocusedContainerColor = Color(0xFF12151F),
+                            focusedBorderColor = DrigoBrandPurple,
+                            unfocusedBorderColor = Color(0xFF2A3142),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("driver_history_search_input")
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Filter Chips Row
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        listOf("All", "Completed", "Cancelled", "Cash", "Digital").forEach { filter ->
+                            item {
+                                FilterChip(
+                                    selected = selectedFilter == filter,
+                                    onClick = { selectedFilter = filter },
+                                    label = { Text(filter, fontSize = 11.5.sp, fontWeight = FontWeight.Bold) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = DrigoBrandPurple,
+                                        selectedLabelColor = Color.White,
+                                        containerColor = Color(0xFF1E2433),
+                                        labelColor = Color(0xFFB0BEC5)
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = selectedFilter == filter,
+                                        borderColor = Color(0xFF2E384D),
+                                        selectedBorderColor = DrigoBrandPurple
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Trips List
+            if (filteredList.isEmpty()) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(24.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            tint = Color.Gray.copy(alpha = 0.5f),
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No trips found",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Try adjusting your search query or filter.",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp, start = 16.dp, end = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    items(filteredList) { trip ->
+                        val isCompleted = trip.status == "COMPLETED"
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFF161A24),
+                            border = BorderStroke(1.dp, Color(0xFF262D3D)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                // Header: Passenger Name & Ride Category Badge
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = Color(0xFF2A3144),
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Person,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF81D4FA),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = trip.passengerName,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White,
+                                                    fontSize = 14.5.sp
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "★ ${trip.passengerRating}",
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFFFFD54F),
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Text(
+                                                text = trip.dateFormatted,
+                                                fontSize = 11.sp,
+                                                color = Color.Gray
+                                            )
+                                        }
+                                    }
+
+                                    // Category Pill + Status
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isCompleted) Color(0xFF00E676).copy(alpha = 0.15f) else Color(0xFFEF5350).copy(alpha = 0.15f),
+                                            border = BorderStroke(1.dp, if (isCompleted) Color(0xFF00E676).copy(alpha = 0.5f) else Color(0xFFEF5350).copy(alpha = 0.5f))
+                                        ) {
+                                            Text(
+                                                text = if (isCompleted) "✓ Completed" else "✕ Cancelled",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isCompleted) Color(0xFF00E676) else Color(0xFFEF5350),
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = trip.category,
+                                            fontSize = 10.5.sp,
+                                            color = Color(0xFF90A4AE)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                HorizontalDivider(color = Color(0xFF222838))
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Route Details (Pickup -> Destination)
+                                Row(modifier = Modifier.fillMaxWidth()) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    ) {
+                                        Surface(shape = CircleShape, color = Color(0xFF00E676), modifier = Modifier.size(8.dp)) {}
+                                        Box(
+                                            modifier = Modifier
+                                                .width(2.dp)
+                                                .height(24.dp)
+                                                .background(Color(0xFF37474F))
+                                        )
+                                        Surface(shape = CircleShape, color = Color(0xFFEF5350), modifier = Modifier.size(8.dp)) {}
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = trip.pickupTitle,
+                                            fontSize = 12.5.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = trip.destinationTitle,
+                                            fontSize = 12.5.sp,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Fare & Details Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFF222838),
+                                            border = BorderStroke(1.dp, Color(0xFF333D52))
+                                        ) {
+                                            Text(
+                                                text = trip.paymentMethod,
+                                                fontSize = 11.sp,
+                                                color = Color(0xFFFFD54F),
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "${trip.distanceKm} km • ${trip.durationMins} mins",
+                                            fontSize = 11.5.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "PKR ${NumberFormat.getNumberInstance(Locale.US).format(trip.farePkr)}",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (isCompleted) Color(0xFF00E676) else Color.Gray
+                                        )
+                                        if (isCompleted) {
+                                            Text(
+                                                text = "Net: PKR ${NumberFormat.getNumberInstance(Locale.US).format(trip.netEarningsPkr)}",
+                                                fontSize = 10.5.sp,
+                                                color = Color(0xFF81D4FA)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Action Buttons
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { selectedTripForDetail = trip },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, Color(0xFF38435A)),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = Color(0xFF81D4FA), modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Receipt & Details", fontSize = 11.5.sp, color = Color.White)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { showReportIssueDialog = trip },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, Color(0xFF38435A)),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(Icons.Default.HelpOutline, contentDescription = null, tint = Color(0xFFEF5350), modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Report Issue", fontSize = 11.5.sp, color = Color(0xFFEF5350))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Receipt Modal Bottom Sheet
+        if (selectedTripForDetail != null) {
+            val trip = selectedTripForDetail!!
+            ModalBottomSheet(
+                onDismissRequest = { selectedTripForDetail = null },
+                containerColor = Color(0xFF141822),
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "Trip Receipt & Breakdown",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Trip ID: ${trip.id}",
+                                fontSize = 11.5.sp,
+                                color = Color.Gray
+                            )
+                        }
+                        IconButton(onClick = { selectedTripForDetail = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF1B202C),
+                        border = BorderStroke(1.dp, Color(0xFF2C3549)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Passenger", fontSize = 12.sp, color = Color.Gray)
+                                Text(trip.passengerName, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Date & Time", fontSize = 12.sp, color = Color.Gray)
+                                Text(trip.dateFormatted, fontSize = 12.5.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Ride Category", fontSize = 12.sp, color = Color.Gray)
+                                Text(trip.category, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81D4FA))
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Payment Method", fontSize = 12.sp, color = Color.Gray)
+                                Text(trip.paymentMethod, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD54F))
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider(color = Color(0xFF283142))
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text("Fare Breakdown", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81D4FA))
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Base Booking Fare", fontSize = 12.sp, color = Color.LightGray)
+                                Text("PKR ${trip.baseFarePkr}", fontSize = 12.sp, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Distance Charge (${trip.distanceKm} km)", fontSize = 12.sp, color = Color.LightGray)
+                                Text("PKR ${trip.distanceFarePkr}", fontSize = 12.sp, color = Color.White)
+                            }
+                            if (trip.tollPkr > 0) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Tolls & Extra Surcharges", fontSize = 12.sp, color = Color.LightGray)
+                                    Text("PKR ${trip.tollPkr}", fontSize = 12.sp, color = Color.White)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = Color(0xFF283142))
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Total Fare Collected", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("PKR ${trip.farePkr}", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Drigo Platform Fee (10%)", fontSize = 12.sp, color = Color(0xFFEF5350))
+                                Text("- PKR ${trip.platformFeePkr}", fontSize = 12.sp, color = Color(0xFFEF5350))
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = Color(0xFF283142))
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Driver Net Payout", fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF00E676))
+                                Text("PKR ${trip.netEarningsPkr}", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF00E676))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                Toast.makeText(context, "Receipt exported / shared successfully!", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Share Receipt", fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = { selectedTripForDetail = null },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFF38435A)),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text("Close", color = Color.White)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // Report Issue Dialog
+        if (showReportIssueDialog != null) {
+            val trip = showReportIssueDialog!!
+            var selectedIssueReason by remember { mutableStateOf("Fare mismatch") }
+
+            AlertDialog(
+                onDismissRequest = { showReportIssueDialog = null },
+                containerColor = Color(0xFF181C26),
+                titleContentColor = Color.White,
+                textContentColor = Color.White,
+                title = { Text("Report Issue for Trip #${trip.id}", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+                text = {
+                    Column {
+                        Text("Select problem encountered during trip with ${trip.passengerName}:", fontSize = 12.5.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        listOf("Fare mismatch / unpaid cash", "Passenger behavior", "Safety concerns", "Route discrepancy / wrong location").forEach { reason ->
+                            Surface(
+                                onClick = { selectedIssueReason = reason },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selectedIssueReason == reason) Color(0xFFEF5350).copy(alpha = 0.2f) else Color(0xFF222836),
+                                border = BorderStroke(1.dp, if (selectedIssueReason == reason) Color(0xFFEF5350) else Color(0xFF333D52)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = reason,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showReportIssueDialog = null
+                            Toast.makeText(context, "Support ticket submitted for Trip #${trip.id}!", Toast.LENGTH_LONG).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                    ) {
+                        Text("Submit Ticket", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showReportIssueDialog = null }) {
+                        Text("Cancel", color = Color.Gray)
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -3138,12 +6398,14 @@ fun DriverRideRequestCard(
     var customBidText by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
 
-    val categoryIcon = when (request.rideCategory.lowercase()) {
-        "bike" -> Icons.Default.TwoWheeler
-        "mini" -> Icons.Default.DirectionsCar
-        "ride a/c" -> Icons.Default.AcUnit
-        "courier" -> Icons.Default.LocalShipping
-        "city to city" -> Icons.Default.AltRoute
+    val categoryIcon = when {
+        request.rideCategory.contains("Share", ignoreCase = true) -> Icons.Default.Groups
+        request.rideCategory.contains("Private", ignoreCase = true) -> Icons.Default.DirectionsCar
+        request.rideCategory.contains("Bike", ignoreCase = true) -> Icons.Default.TwoWheeler
+        request.rideCategory.contains("Mini", ignoreCase = true) -> Icons.Default.DirectionsCar
+        request.rideCategory.contains("A/C", ignoreCase = true) || request.rideCategory.contains("AC", ignoreCase = true) -> Icons.Default.AcUnit
+        request.rideCategory.contains("Courier", ignoreCase = true) || request.rideCategory.contains("Parcel", ignoreCase = true) -> Icons.Default.LocalShipping
+        request.rideCategory.contains("City", ignoreCase = true) -> Icons.Default.AltRoute
         else -> Icons.Default.LocalTaxi
     }
 
@@ -3421,7 +6683,12 @@ fun DriverRideRequestCard(
                         ) {}
                     }
 
-                    // Right Titles & Subtitles
+                    // Right Titles, Subtitles & Lat/Lon Coordinates
+                    val reqPickupLat = if (request.pickupLat != 0.0) request.pickupLat else 34.0151
+                    val reqPickupLon = if (request.pickupLon != 0.0) request.pickupLon else 71.5249
+                    val reqDestLat = if (request.destinationLat != 0.0) request.destinationLat else 34.0351
+                    val reqDestLon = if (request.destinationLon != 0.0) request.destinationLon else 71.5449
+
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = request.pickupTitle.ifBlank { "Pickup Location" },
@@ -3440,6 +6707,12 @@ fun DriverRideRequestCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Text(
+                            text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", reqPickupLat, reqPickupLon),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF81D4FA)
+                        )
 
                         Spacer(modifier = Modifier.height(8.dp))
 
@@ -3460,6 +6733,12 @@ fun DriverRideRequestCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        Text(
+                            text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", reqDestLat, reqDestLon),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFFF8A80)
+                        )
                     }
                 }
             }
@@ -3658,6 +6937,288 @@ fun DriverRideRequestCard(
                                 modifier = Modifier.height(48.dp)
                             ) {
                                 Text("Send", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DriverCompactRideRequestItem(
+    request: RideRequest,
+    isSelected: Boolean,
+    isOfferSent: Boolean,
+    driverLat: Double = 0.0,
+    driverLon: Double = 0.0,
+    onSelect: () -> Unit,
+    onAcceptOffer: () -> Unit,
+    onCounterOffer: (Int) -> Unit
+) {
+    var expandedBidding by remember { mutableStateOf(false) }
+
+    val categoryIcon = when {
+        request.rideCategory.contains("Share", ignoreCase = true) -> Icons.Default.Groups
+        request.rideCategory.contains("Private", ignoreCase = true) -> Icons.Default.DirectionsCar
+        request.rideCategory.contains("Bike", ignoreCase = true) -> Icons.Default.TwoWheeler
+        request.rideCategory.contains("Mini", ignoreCase = true) -> Icons.Default.DirectionsCar
+        request.rideCategory.contains("A/C", ignoreCase = true) || request.rideCategory.contains("AC", ignoreCase = true) -> Icons.Default.AcUnit
+        request.rideCategory.contains("Courier", ignoreCase = true) || request.rideCategory.contains("Parcel", ignoreCase = true) -> Icons.Default.LocalShipping
+        request.rideCategory.contains("City", ignoreCase = true) -> Icons.Default.AltRoute
+        else -> Icons.Default.LocalTaxi
+    }
+
+    val distAwayKm = if (driverLat != 0.0 && driverLon != 0.0 && request.pickupLat != 0.0) {
+        calculateDistanceKm(driverLat, driverLon, request.pickupLat, request.pickupLon)
+    } else 0.0
+
+    val formattedFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(request.estimatedFare)
+
+    Surface(
+        onClick = onSelect,
+        shape = RoundedCornerShape(14.dp),
+        color = if (isSelected) Color(0xFF1E2230) else Color(0xFF161822),
+        border = BorderStroke(
+            if (isSelected) 1.5.dp else 1.dp,
+            if (isSelected) DrigoBrandPurple else Color(0xFF2A2E3E)
+        ),
+        shadowElevation = if (isSelected) 6.dp else 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("driver_compact_ride_item_${request.id}")
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            // Header: Category Icon, Passenger Name/Rating, Fare Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Category & Passenger
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = DrigoBrandPurple.copy(alpha = 0.25f),
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = categoryIcon,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = request.passengerName.ifBlank { "Passenger" },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = Color(0xFFFFC107),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = String.format(java.util.Locale.US, "%.1f", if (request.passengerRating > 0.0) request.passengerRating else 4.9),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFFC107)
+                            )
+                        }
+                        Text(
+                            text = "${request.rideCategory} • ${request.paymentMethod.ifBlank { "Cash" }}",
+                            fontSize = 10.sp,
+                            color = Color(0xFFB0BEC5)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Price Badge
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF092913),
+                    border = BorderStroke(1.dp, Color(0xFF00E676))
+                ) {
+                    Text(
+                        text = "PKR $formattedFare",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF00E676),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Route Summary Box: Pickup -> Destination with Lat/Lon Coordinates
+            val compPickLat = if (request.pickupLat != 0.0) request.pickupLat else 34.0151
+            val compPickLon = if (request.pickupLon != 0.0) request.pickupLon else 71.5249
+            val compDestLat = if (request.destinationLat != 0.0) request.destinationLat else 34.0351
+            val compDestLon = if (request.destinationLon != 0.0) request.destinationLon else 71.5449
+
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFF10121A),
+                border = BorderStroke(1.dp, Color(0xFF222636)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = CircleShape, color = Color(0xFF00E676), modifier = Modifier.size(7.dp)) {}
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = request.pickupTitle.ifBlank { "Pickup" },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", compPickLat, compPickLon),
+                                fontSize = 9.5.sp,
+                                color = Color(0xFF81D4FA)
+                            )
+                        }
+                        if (distAwayKm > 0.0) {
+                            Text(
+                                text = "${String.format(java.util.Locale.US, "%.1f", distAwayKm)} km away",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF38BDF8)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = CircleShape, color = Color(0xFFFF5252), modifier = Modifier.size(7.dp)) {}
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = request.destinationTitle.ifBlank { "Destination" },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.9f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", compDestLat, compDestLon),
+                                fontSize = 9.5.sp,
+                                color = Color(0xFFFF8A80)
+                            )
+                        }
+                        Text(
+                            text = "${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km (${request.durationMinutes}m)",
+                            fontSize = 9.5.sp,
+                            color = Color(0xFFB0BEC5)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Bottom Actions (Accept / Bid)
+            if (isOfferSent) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF00C853).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFF00C853)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "✓ Offer Sent • Waiting for passenger",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF00C853),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(6.dp)
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Button(
+                        onClick = onAcceptOffer,
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(38.dp)
+                    ) {
+                        Text("Accept PKR $formattedFare", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp, color = Color.White)
+                    }
+
+                    OutlinedButton(
+                        onClick = { expandedBidding = !expandedBidding },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, DrigoBrandPurple),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (expandedBidding) DrigoBrandPurple.copy(alpha = 0.2f) else Color.Transparent
+                        ),
+                        modifier = Modifier
+                            .weight(0.7f)
+                            .height(38.dp)
+                    ) {
+                        Text(if (expandedBidding) "Close" else "Raise", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = expandedBidding,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column(modifier = Modifier.padding(top = 8.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            val base = request.estimatedFare
+                            listOf(base + 50, base + 100, base + 150).forEach { fare ->
+                                Surface(
+                                    onClick = {
+                                        onCounterOffer(fare)
+                                        expandedBidding = false
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF282138),
+                                    border = BorderStroke(1.dp, DrigoBrandPurple),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "+${fare - base}\nPKR $fare",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+                                }
                             }
                         }
                     }

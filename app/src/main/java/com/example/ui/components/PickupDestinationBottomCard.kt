@@ -323,12 +323,31 @@ fun PickupDestinationBottomCard(
                                 modifier = Modifier.size(10.dp)
                             ) {}
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = pickupLocation.title.ifBlank { "Locating pickup point in Peshawar..." },
-                                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
-                                color = Color.White,
-                                fontWeight = FontWeight.Normal
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = pickupLocation.title.ifBlank { "Locating pickup point in Peshawar..." },
+                                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (pickupLocation.subtitle.isNotBlank()) {
+                                    Text(
+                                        text = pickupLocation.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF9E9E9E),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                val pLat = if (pickupLocation.latitude != 0.0) pickupLocation.latitude else 34.0151
+                                val pLon = if (pickupLocation.longitude != 0.0) pickupLocation.longitude else 71.5249
+                                Text(
+                                    text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", pLat, pLon),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF81D4FA)
+                                )
+                            }
                         }
                         if (!isLocked) {
                             IconButton(
@@ -607,6 +626,13 @@ fun PickupDestinationBottomCard(
                                     color = Color(0xFF9E9E9E),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", item.latitude, item.longitude),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF81D4FA),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 10.sp
                                 )
                             }
                             Icon(

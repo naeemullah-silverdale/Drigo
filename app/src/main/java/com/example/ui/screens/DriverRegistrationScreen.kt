@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -85,6 +86,15 @@ fun DriverRegistrationScreen(
                 DriverRegStep.PROFILE_AND_IDENTITY
             }
         )
+    }
+
+    BackHandler {
+        when (currentStep) {
+            DriverRegStep.PROFILE_AND_IDENTITY -> onBackToPassenger()
+            DriverRegStep.VEHICLE_DETAILS -> currentStep = DriverRegStep.PROFILE_AND_IDENTITY
+            DriverRegStep.DRIVING_LICENSE -> currentStep = DriverRegStep.VEHICLE_DETAILS
+            DriverRegStep.CONFIRMATION_PENDING -> onBackToPassenger()
+        }
     }
 
     // Step 1: Profile & Identity
