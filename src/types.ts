@@ -375,6 +375,14 @@ export interface RideRating {
   tags: string[];
   timestamp: string;
   isSuspicious?: boolean;
+  flagReason?: string;
+  moderationStatus?: 'published' | 'flagged' | 'hidden' | 'investigating' | 'resolved';
+  adminNote?: string;
+  moderatedBy?: string;
+  moderatedAt?: string;
+  city?: string;
+  vehicleType?: string;
+  fareAmount?: number;
 }
 
 export interface AdminNotification {
@@ -409,7 +417,7 @@ export interface PayoutRequest {
   driverAvatar?: string;
   amount: number;
   currency: string;
-  paymentMethod: 'jazzcash' | 'easypaisa' | 'bank_transfer' | 'cash';
+  paymentMethod: 'jazzcash' | 'easypaisa' | 'bank_transfer' | 'cash' | 'raast';
   accountTitle: string;
   accountNumber: string;
   bankName?: string;
@@ -419,6 +427,8 @@ export interface PayoutRequest {
   processedBy?: string;
   transactionRef?: string;
   rejectionReason?: string;
+  gatewayFee?: number;
+  note?: string;
 }
 
 export interface OperationalRecommendation {

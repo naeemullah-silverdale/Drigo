@@ -5,6 +5,7 @@ import {
   onValue,
   set,
   update,
+  remove,
   get,
   Database,
   Unsubscribe as RTDBUnsubscribe
@@ -16,6 +17,7 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
+  deleteDoc,
   getDoc,
   getDocs,
   writeBatch,
@@ -1660,12 +1662,45 @@ export async function approveDriverRegistrationInFirebase(
         verificationStatus: 'APPROVED',
         isOnline: true,
       });
+
+      // Update documents in drivers/${driverId} if any
+      const driverSnap = await get(driverRef);
+      if (driverSnap.exists()) {
+        const dVal = driverSnap.val();
+        if (dVal && Array.isArray(dVal.documents)) {
+          const updatedDocs = dVal.documents.map((dItem: any) => ({
+            ...dItem,
+            status: 'APPROVED',
+            verificationStatus: 'APPROVED',
+            rejectionReason: '',
+            verifiedAt: new Date().toISOString()
+          }));
+          await update(driverRef, { documents: updatedDocs });
+        }
+      }
+
       await update(ref(db, `driver_verifications/${driverId}`), {
         accountStatus: 'ACTIVE',
         verificationStatus: 'APPROVED',
         status: 'APPROVED',
         isOnline: true,
       });
+
+      const verifSnap = await get(ref(db, `driver_verifications/${driverId}`));
+      if (verifSnap.exists()) {
+        const vVal = verifSnap.val();
+        if (vVal && Array.isArray(vVal.documents)) {
+          const updatedDocs = vVal.documents.map((dItem: any) => ({
+            ...dItem,
+            status: 'APPROVED',
+            verificationStatus: 'APPROVED',
+            rejectionReason: '',
+            verifiedAt: new Date().toISOString()
+          }));
+          await update(ref(db, `driver_verifications/${driverId}`), { documents: updatedDocs });
+        }
+      }
+
       await update(ref(db, `users/${driverId}`), {
         status: 'online',
         accountStatus: 'ACTIVE',
@@ -1682,21 +1717,29 @@ export async function approveDriverRegistrationInFirebase(
   if (firestore) {
     try {
       const dRef = doc(firestore, 'drivers', driverId);
-      await updateDoc(dRef, {
+      await setDoc(dRef, {
         status: 'online',
         accountStatus: 'ACTIVE',
         verificationStatus: 'APPROVED',
-      });
-      await updateDoc(doc(firestore, 'driver_verifications', driverId), {
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      const verifRef = doc(firestore, 'driver_verifications', driverId);
+      await setDoc(verifRef, {
         accountStatus: 'ACTIVE',
         verificationStatus: 'APPROVED',
         status: 'APPROVED',
-      });
-      await updateDoc(doc(firestore, 'users', driverId), {
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      const uRef = doc(firestore, 'users', driverId);
+      await setDoc(uRef, {
         status: 'online',
         accountStatus: 'ACTIVE',
         verificationStatus: 'APPROVED',
-      });
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
       success = true;
     } catch (err) {
       console.warn('Error updating driver in Firestore:', err);
@@ -1723,15 +1766,16 @@ export async function updateDriverDocumentInFirebase(
     try {
       // 1. Update drivers/${driverId}
       const driverRef = ref(db, `drivers/${driverId}`);
-      onValue(driverRef, async (snapshot) => {
-        const dVal = snapshot.val();
+      const driverSnap = await get(driverRef);
+      if (driverSnap.exists()) {
+        const dVal = driverSnap.val();
         if (dVal) {
           const updates: Record<string, any> = {};
           if (dVal.documents) {
             if (Array.isArray(dVal.documents)) {
               const updated = dVal.documents.map((docItem: any, idx: number) => {
                 const matchKey = docItem.id || docItem.docType || docItem.type || `doc_${idx}`;
-                if (matchKey === docId || docItem.docType === docId) {
+                if (matchKey === docId || docItem.docType === docId || docItem.id === docId || docItem.type === docId) {
                   return {
                     ...docItem,
                     status: firebaseDocStatus,
@@ -1742,7 +1786,7 @@ export async function updateDriverDocumentInFirebase(
                 return docItem;
               });
               updates[`documents`] = updated;
-              const allApproved = updated.every((d: any) => {
+              const allApproved = updated.length > 0 && updated.every((d: any) => {
                 const s = (d.status || d.verificationStatus || '').toUpperCase();
                 return s === 'APPROVED' || s === 'VERIFIED';
               });
@@ -1753,9 +1797,9 @@ export async function updateDriverDocumentInFirebase(
 
               if (allApproved) {
                 updates['verificationStatus'] = 'APPROVED';
-                if (dVal.accountStatus === 'PENDING_REVIEW' || !dVal.accountStatus) {
-                  updates['accountStatus'] = 'ACTIVE';
-                }
+                updates['status'] = 'online';
+                updates['accountStatus'] = 'ACTIVE';
+                updates['isOnline'] = true;
               } else if (anyRejected) {
                 updates['verificationStatus'] = 'REJECTED';
               }
@@ -1771,18 +1815,19 @@ export async function updateDriverDocumentInFirebase(
             await update(driverRef, updates);
           }
         }
-      }, { onlyOnce: true });
+      }
 
       // 2. Update driver_verifications/${driverId}
       const verifRef = ref(db, `driver_verifications/${driverId}`);
-      onValue(verifRef, async (snapshot) => {
-        const vVal = snapshot.val();
+      const verifSnap = await get(verifRef);
+      if (verifSnap.exists()) {
+        const vVal = verifSnap.val();
         if (vVal) {
           const vUpdates: Record<string, any> = {};
           if (vVal.documents && Array.isArray(vVal.documents)) {
             const updated = vVal.documents.map((docItem: any, idx: number) => {
               const matchKey = docItem.id || docItem.docType || docItem.type || `doc_${idx}`;
-              if (matchKey === docId || docItem.docType === docId) {
+              if (matchKey === docId || docItem.docType === docId || docItem.id === docId || docItem.type === docId) {
                 return {
                   ...docItem,
                   status: firebaseDocStatus,
@@ -1793,7 +1838,7 @@ export async function updateDriverDocumentInFirebase(
               return docItem;
             });
             vUpdates['documents'] = updated;
-            const allApproved = updated.every((d: any) => {
+            const allApproved = updated.length > 0 && updated.every((d: any) => {
               const s = (d.status || d.verificationStatus || '').toUpperCase();
               return s === 'APPROVED' || s === 'VERIFIED';
             });
@@ -1804,30 +1849,30 @@ export async function updateDriverDocumentInFirebase(
 
             if (allApproved) {
               vUpdates['status'] = 'APPROVED';
-              if (vVal.accountStatus === 'PENDING_REVIEW' || !vVal.accountStatus) {
-                vUpdates['accountStatus'] = 'ACTIVE';
-              }
+              vUpdates['accountStatus'] = 'ACTIVE';
               vUpdates['verificationStatus'] = 'APPROVED';
               vUpdates['isVerified'] = true;
             } else if (anyRejected) {
               vUpdates['verificationStatus'] = 'REJECTED';
+              vUpdates['status'] = 'REJECTED';
             }
           }
           if (Object.keys(vUpdates).length > 0) {
             await update(verifRef, vUpdates);
           }
         }
-      }, { onlyOnce: true });
+      }
 
       // 3. Update users/${driverId}/driverVerification
       const userRef = ref(db, `users/${driverId}`);
-      onValue(userRef, async (snapshot) => {
-        const uVal = snapshot.val();
+      const userSnap = await get(userRef);
+      if (userSnap.exists()) {
+        const uVal = userSnap.val();
         if (uVal && uVal.driverVerification && uVal.driverVerification.documents) {
           if (Array.isArray(uVal.driverVerification.documents)) {
             const updated = uVal.driverVerification.documents.map((docItem: any, idx: number) => {
               const matchKey = docItem.id || docItem.docType || docItem.type || `doc_${idx}`;
-              if (matchKey === docId || docItem.docType === docId) {
+              if (matchKey === docId || docItem.docType === docId || docItem.id === docId || docItem.type === docId) {
                 return {
                   ...docItem,
                   status: firebaseDocStatus,
@@ -1837,7 +1882,7 @@ export async function updateDriverDocumentInFirebase(
               }
               return docItem;
             });
-            const allApproved = updated.every((d: any) => {
+            const allApproved = updated.length > 0 && updated.every((d: any) => {
               const s = (d.status || d.verificationStatus || '').toUpperCase();
               return s === 'APPROVED' || s === 'VERIFIED';
             });
@@ -1851,16 +1896,15 @@ export async function updateDriverDocumentInFirebase(
             };
             if (allApproved) {
               uUpdates['verificationStatus'] = 'APPROVED';
-              if (uVal.accountStatus === 'PENDING_REVIEW' || !uVal.accountStatus) {
-                uUpdates['accountStatus'] = 'ACTIVE';
-              }
+              uUpdates['accountStatus'] = 'ACTIVE';
+              uUpdates['status'] = 'online';
             } else if (anyRejected) {
               uUpdates['verificationStatus'] = 'REJECTED';
             }
             await update(ref(db, `users/${driverId}`), uUpdates);
           }
         }
-      }, { onlyOnce: true });
+      }
 
       success = true;
     } catch (err) {
@@ -1870,10 +1914,50 @@ export async function updateDriverDocumentInFirebase(
 
   if (firestore) {
     try {
+      const verifRef = doc(firestore, 'driver_verifications', driverId);
+      const verifDoc = await getDoc(verifRef);
+      let updatedDocs: any[] = [];
+      let allApproved = false;
+      let anyRejected = false;
+
+      if (verifDoc.exists()) {
+        const data = verifDoc.data();
+        if (data && Array.isArray(data.documents)) {
+          updatedDocs = data.documents.map((docItem: any, idx: number) => {
+            const matchKey = docItem.id || docItem.docType || docItem.type || `doc_${idx}`;
+            if (matchKey === docId || docItem.docType === docId || docItem.id === docId || docItem.type === docId) {
+              return {
+                ...docItem,
+                status: status === 'verified' ? 'verified' : 'rejected',
+                verificationStatus: firebaseDocStatus,
+                rejectionReason: reason || ''
+              };
+            }
+            return docItem;
+          });
+          allApproved = updatedDocs.length > 0 && updatedDocs.every((d: any) => d.status === 'verified' || d.verificationStatus === 'APPROVED');
+          anyRejected = updatedDocs.some((d: any) => d.status === 'rejected' || d.verificationStatus === 'REJECTED');
+        }
+      }
+
+      await setDoc(verifRef, {
+        documents: updatedDocs,
+        status: allApproved ? 'APPROVED' : anyRejected ? 'REJECTED' : 'PENDING',
+        verificationStatus: allApproved ? 'APPROVED' : anyRejected ? 'REJECTED' : 'PENDING',
+        accountStatus: allApproved ? 'ACTIVE' : undefined,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
       const dRef = doc(firestore, 'drivers', driverId);
-      await updateDoc(dRef, {
+      await setDoc(dRef, {
         [`document_${docId}_status`]: status,
-      });
+        documents: updatedDocs.length > 0 ? updatedDocs : undefined,
+        verificationStatus: allApproved ? 'APPROVED' : anyRejected ? 'REJECTED' : undefined,
+        status: allApproved ? 'online' : undefined,
+        accountStatus: allApproved ? 'ACTIVE' : undefined,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
       success = true;
     } catch (err) {
       console.warn('Failed updating driver doc in Firestore:', err);
@@ -2181,6 +2265,90 @@ export function subscribeToRideRatings(callback: (ratings: RideRating[]) => void
 
   callback([]);
   return () => {};
+}
+
+/**
+ * Update Ride Rating & Review details in Firebase RTDB / Firestore
+ */
+export async function updateRideRatingInFirebase(
+  ratingId: string,
+  updates: Partial<RideRating>
+): Promise<boolean> {
+  const { db, firestore } = initFirebaseService();
+  let success = false;
+  const updateData: Record<string, any> = {
+    ...updates,
+    updatedAt: new Date().toISOString()
+  };
+
+  if (db) {
+    try {
+      await update(ref(db, `ride_ratings/${ratingId}`), updateData);
+      success = true;
+    } catch (err) {
+      console.warn('RTDB update ride rating error:', err);
+    }
+  }
+
+  if (firestore) {
+    try {
+      await updateDoc(doc(firestore, 'ride_ratings', ratingId), updateData);
+      success = true;
+    } catch (err) {
+      console.warn('Firestore update ride rating error:', err);
+    }
+  }
+
+  return success;
+}
+
+/**
+ * Toggle Suspicious/Flagged status of a Ride Rating in Firebase
+ */
+export async function toggleRatingSuspiciousInFirebase(
+  ratingId: string,
+  isSuspicious: boolean,
+  reason?: string,
+  adminNote?: string,
+  adminUser?: string
+): Promise<boolean> {
+  const updates: Partial<RideRating> = {
+    isSuspicious,
+    flagReason: isSuspicious ? (reason || 'Flagged by Admin for Review') : '',
+    moderationStatus: isSuspicious ? 'flagged' : 'published',
+    adminNote: adminNote || '',
+    moderatedBy: adminUser || 'Admin Ops Manager',
+    moderatedAt: new Date().toISOString()
+  };
+  return updateRideRatingInFirebase(ratingId, updates);
+}
+
+/**
+ * Delete / Remove a Ride Rating from Firebase
+ */
+export async function deleteRideRatingInFirebase(ratingId: string): Promise<boolean> {
+  const { db, firestore } = initFirebaseService();
+  let success = false;
+
+  if (db) {
+    try {
+      await remove(ref(db, `ride_ratings/${ratingId}`));
+      success = true;
+    } catch (err) {
+      console.warn('RTDB delete ride rating error:', err);
+    }
+  }
+
+  if (firestore) {
+    try {
+      await deleteDoc(doc(firestore, 'ride_ratings', ratingId));
+      success = true;
+    } catch (err) {
+      console.warn('Firestore delete ride rating error:', err);
+    }
+  }
+
+  return success;
 }
 
 /**

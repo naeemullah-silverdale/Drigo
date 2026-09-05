@@ -21,11 +21,14 @@ import {
   toggleDriverStatusInFirebase,
   toggleRiderStatusInFirebase,
   updateDriverDocumentInFirebase,
+  approveDriverRegistrationInFirebase,
   adjustDriverWalletInFirebase,
   seedFirebaseDatabase,
   subscribeToSafetyReports,
   updateSafetyReportStatusInFirebase,
   subscribeToRideRatings,
+  updateRideRatingInFirebase,
+  deleteRideRatingInFirebase,
   subscribeToAdminNotifications,
   markNotificationAsReadInFirebase,
   markAllNotificationsAsReadInFirebase,
@@ -376,21 +379,36 @@ export default function App() {
     setDrivers((prev) =>
       prev.map((d) => {
         if (d.id === driverId) {
-          const updatedDocs = d.documents.map((doc) =>
-            doc.id === docId ? { ...doc, status: 'verified' as const, lastReviewedAt: 'Just now', lastReviewedBy: 'Admin (Alex Sterling)' } : doc
-          );
-          const allVerified = updatedDocs.every((doc) => doc.status === 'verified');
+          const updatedDocs = (d.documents || []).map((doc) => {
+            const isMatch = doc.id === docId || doc.docType === docId || doc.type === docId;
+            return isMatch
+              ? {
+                  ...doc,
+                  status: 'verified' as const,
+                  lastReviewedAt: 'Just now',
+                  lastReviewedBy: 'Admin (Alex Sterling)',
+                  rejectionReason: '',
+                }
+              : doc;
+          });
+          const allVerified = updatedDocs.length > 0 && updatedDocs.every((doc) => doc.status === 'verified');
           return {
             ...d,
             documents: updatedDocs,
             status: allVerified ? ('online' as const) : d.status,
+            accountStatus: allVerified ? ('ACTIVE' as const) : d.accountStatus,
+            verificationStatus: allVerified
+              ? ('APPROVED' as const)
+              : updatedDocs.some((doc) => doc.status === 'rejected')
+              ? ('REJECTED' as const)
+              : ('PENDING' as const),
           };
         }
         return d;
       })
     );
     await updateDriverDocumentInFirebase(driverId, docId, 'verified');
-    showToast(`Driver document approved & synced to Firebase Realtime Database!`);
+    showToast(`Driver document approved & verified in Firebase!`);
   };
 
   // Driver KYC Document Rejection
@@ -398,12 +416,22 @@ export default function App() {
     setDrivers((prev) =>
       prev.map((d) => {
         if (d.id === driverId) {
-          const updatedDocs = d.documents.map((doc) =>
-            doc.id === docId ? { ...doc, status: 'rejected' as const, rejectionReason: reason } : doc
-          );
+          const updatedDocs = (d.documents || []).map((doc) => {
+            const isMatch = doc.id === docId || doc.docType === docId || doc.type === docId;
+            return isMatch
+              ? {
+                  ...doc,
+                  status: 'rejected' as const,
+                  rejectionReason: reason,
+                  lastReviewedAt: 'Just now',
+                  lastReviewedBy: 'Admin (Alex Sterling)',
+                }
+              : doc;
+          });
           return {
             ...d,
             documents: updatedDocs,
+            verificationStatus: 'REJECTED' as const,
           };
         }
         return d;
@@ -411,6 +439,33 @@ export default function App() {
     );
     await updateDriverDocumentInFirebase(driverId, docId, 'rejected', reason);
     showToast(`Driver document rejected & synced to Firebase!`);
+  };
+
+  // Batch approve all documents for a driver
+  const handleApproveAllDriverDocuments = async (driverId: string) => {
+    setDrivers((prev) =>
+      prev.map((d) => {
+        if (d.id === driverId) {
+          const updatedDocs = (d.documents || []).map((doc) => ({
+            ...doc,
+            status: 'verified' as const,
+            lastReviewedAt: 'Just now',
+            lastReviewedBy: 'Admin (Alex Sterling)',
+            rejectionReason: '',
+          }));
+          return {
+            ...d,
+            documents: updatedDocs,
+            status: 'online' as const,
+            accountStatus: 'ACTIVE' as const,
+            verificationStatus: 'APPROVED' as const,
+          };
+        }
+        return d;
+      })
+    );
+    await approveDriverRegistrationInFirebase(driverId);
+    showToast(`All documents for driver approved & account activated!`);
   };
 
   // Toggle Driver status (Approve registration, Suspend, Reactivate)
@@ -482,7 +537,7 @@ export default function App() {
       })
     );
     await adjustDriverWalletInFirebase(driverId, targetNewBalance);
-    showToast(`Driver wallet balance adjusted by $${amount.toFixed(2)} in Firebase.`);
+    showToast(`Driver wallet balance adjusted by Rs. ${Math.abs(amount).toLocaleString('en-PK', { minimumFractionDigits: 2 })} in Firebase.`);
   };
 
   // Toggle Rider status
@@ -559,6 +614,22 @@ export default function App() {
         ? `Payout #${payoutId} settled and recorded in Firebase.`
         : `Payout #${payoutId} status updated to '${status}'.`
     );
+  };
+
+  // Update and Moderation of Ride Ratings in Firebase
+  const handleUpdateRating = async (ratingId: string, updates: Partial<RideRating>) => {
+    setRatings((prev) =>
+      prev.map((r) => (r.id === ratingId ? { ...r, ...updates } : r))
+    );
+    await updateRideRatingInFirebase(ratingId, updates);
+    showToast('Rating review moderation recorded in Firebase.');
+  };
+
+  // Delete Ride Rating in Firebase
+  const handleDeleteRating = async (ratingId: string) => {
+    setRatings((prev) => prev.filter((r) => r.id !== ratingId));
+    await deleteRideRatingInFirebase(ratingId);
+    showToast('Rating record removed from Firebase.');
   };
 
   // Execute Operational Recommendation from Autonomous AI System
@@ -727,6 +798,7 @@ export default function App() {
               riders={filteredRiders}
               onApproveDriverDocument={handleApproveDriverDocument}
               onRejectDriverDocument={handleRejectDriverDocument}
+              onApproveAllDriverDocuments={handleApproveAllDriverDocuments}
               onToggleDriverStatus={handleToggleDriverStatus}
               onAdjustDriverWallet={handleAdjustDriverWallet}
               onToggleRiderStatus={handleToggleRiderStatus}
@@ -746,6 +818,8 @@ export default function App() {
                 setSelectedTripId(tripId);
                 setActiveTab('dispatch');
               }}
+              onUpdateRating={handleUpdateRating}
+              onDeleteRating={handleDeleteRating}
             />
           )}
 
