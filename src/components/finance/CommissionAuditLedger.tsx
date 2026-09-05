@@ -238,13 +238,13 @@ export const CommissionAuditLedger: React.FC<CommissionAuditLedgerProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredTrips.map((t) => {
+                filteredTrips.map((t, idx) => {
                   const gross = t.fare?.total || 0;
                   const commission = t.fare?.drigoCommissionAmount || gross * 0.18;
                   const driverNet = gross - commission;
 
                   return (
-                    <tr key={t.id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={t.id ? `audit-trip-${t.id}-${idx}` : `audit-trip-${idx}`} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-4 font-mono font-bold text-slate-900">
                         {t.tripCode || t.id.slice(0, 8)}
                         <div className="text-[10px] text-slate-400 font-sans font-normal">

@@ -2664,8 +2664,11 @@ export function subscribeToPayoutRequests(callback: (payouts: PayoutRequest[]) =
     unsubRTDB = onValue(payoutRef, (snapshot) => {
       const val = snapshot.val();
       if (val && typeof val === 'object') {
-        const list: PayoutRequest[] = Object.values(val);
-        callback(list.sort((a, b) => (b.requestedAt > a.requestedAt ? 1 : -1)));
+        const list: PayoutRequest[] = Object.entries(val).map(([k, v]: [string, any]) => ({
+          ...v,
+          id: v?.id || k,
+        }));
+        callback(list.sort((a, b) => (String(b.requestedAt || '') > String(a.requestedAt || '') ? 1 : -1)));
         return;
       }
       callback([]);
@@ -2678,9 +2681,10 @@ export function subscribeToPayoutRequests(callback: (payouts: PayoutRequest[]) =
     unsubFirestore = onSnapshot(colRef, (snapshot) => {
       const list: PayoutRequest[] = [];
       snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as PayoutRequest);
+        const data = docSnap.data() as PayoutRequest;
+        list.push({ ...data, id: data.id || docSnap.id });
       });
-      callback(list.sort((a, b) => (b.requestedAt > a.requestedAt ? 1 : -1)));
+      callback(list.sort((a, b) => (String(b.requestedAt || '') > String(a.requestedAt || '') ? 1 : -1)));
     }, (err) => {
       console.warn('Firestore subscribeToPayoutRequests error:', err);
       callback([]);

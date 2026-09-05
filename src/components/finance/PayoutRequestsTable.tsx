@@ -233,7 +233,7 @@ export const PayoutRequestsTable: React.FC<PayoutRequestsTableProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredPayouts.map((p) => {
+                filteredPayouts.map((p, idx) => {
                   const isTitleMatch =
                     (p.accountTitle || '').toLowerCase().trim() === (p.driverName || '').toLowerCase().trim();
                   const isPending = p.status === 'pending';
@@ -241,7 +241,7 @@ export const PayoutRequestsTable: React.FC<PayoutRequestsTableProps> = ({
 
                   return (
                     <tr
-                      key={p.id}
+                      key={p.id ? `payout-tr-${p.id}-${idx}` : `payout-tr-${idx}`}
                       className={`hover:bg-slate-50/80 transition-colors ${
                         isSelected ? 'bg-blue-50/60' : ''
                       }`}
@@ -398,14 +398,14 @@ export const PayoutRequestsTable: React.FC<PayoutRequestsTableProps> = ({
             No withdrawal requests matching your filters.
           </div>
         ) : (
-          filteredPayouts.map((p) => {
+          filteredPayouts.map((p, idx) => {
             const isTitleMatch =
               (p.accountTitle || '').toLowerCase().trim() === (p.driverName || '').toLowerCase().trim();
             const isPending = p.status === 'pending';
 
             return (
               <div
-                key={p.id}
+                key={p.id ? `payout-card-${p.id}-${idx}` : `payout-card-${idx}`}
                 className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3"
               >
                 <div className="flex items-start justify-between">

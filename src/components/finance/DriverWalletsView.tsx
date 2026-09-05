@@ -171,14 +171,14 @@ export const DriverWalletsView: React.FC<DriverWalletsViewProps> = ({
             No driver wallets found matching the selected filters.
           </div>
         ) : (
-          filteredDrivers.map((d) => {
+          filteredDrivers.map((d, idx) => {
             const balance = d.walletBalance || 0;
             const isNegative = balance < 0;
             const isHigh = balance >= 5000;
 
             return (
               <div
-                key={d.id}
+                key={d.id ? `driver-wallet-${d.id}-${idx}` : `driver-wallet-${idx}`}
                 className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4 relative overflow-hidden"
               >
                 {/* Top Driver Info */}
