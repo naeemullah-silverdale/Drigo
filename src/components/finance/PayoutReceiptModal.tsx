@@ -130,7 +130,7 @@ export const PayoutReceiptModal: React.FC<PayoutReceiptModalProps> = ({ payout, 
           <div className="bg-white rounded-xl p-3 border border-slate-200/90 space-y-2">
             <div className="flex justify-between text-xs text-slate-600">
               <span>Gross Payout Requested:</span>
-              <span className="font-mono font-semibold">Rs. {payout.amount.toLocaleString()}</span>
+              <span className="font-mono font-semibold">Rs. {(payout.amount ?? 0).toLocaleString()}</span>
             </div>
             <div className="flex justify-between text-xs text-slate-600">
               <span>Gateway Transfer Fee:</span>
@@ -138,7 +138,7 @@ export const PayoutReceiptModal: React.FC<PayoutReceiptModalProps> = ({ payout, 
             </div>
             <div className="pt-2 border-t border-slate-100 flex justify-between text-sm font-extrabold text-slate-900">
               <span>Total Dispatched Amount:</span>
-              <span className="font-mono text-emerald-700">Rs. {payout.amount.toLocaleString()}</span>
+              <span className="font-mono text-emerald-700">Rs. {(payout.amount ?? 0).toLocaleString()}</span>
             </div>
           </div>
 

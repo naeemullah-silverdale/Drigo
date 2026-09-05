@@ -232,7 +232,17 @@ export const SafetySOSCenter: React.FC<SafetySOSCenterProps> = ({
           <div className="space-y-4">
             {safetyReports.map((report, idx) => {
               const repId = report?.id || `safety-rep-${idx}`;
-              const dateStr = report?.timestamp ? new Date(report.timestamp).toLocaleString() : 'Recent';
+              let dateStr = 'Recent';
+              if (report?.timestamp) {
+                try {
+                  const d = new Date(report.timestamp);
+                  if (!isNaN(d.getTime())) {
+                    dateStr = d.toLocaleString();
+                  }
+                } catch {
+                  dateStr = 'Recent';
+                }
+              }
               return (
                 <div key={repId} className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3 hover:border-slate-300 transition-colors">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">

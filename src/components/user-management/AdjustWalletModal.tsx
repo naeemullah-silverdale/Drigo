@@ -60,7 +60,7 @@ export const AdjustWalletModal: React.FC<AdjustWalletModalProps> = ({
           <div>
             <span className="text-slate-500 block text-[10px] font-semibold">Current Balance</span>
             <span className="text-base font-black text-slate-900 font-mono">
-              Rs. {currentBalance.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
+              Rs. {(currentBalance ?? 0).toLocaleString('en-PK', { minimumFractionDigits: 2 })}
             </span>
           </div>
           <div className="border-l border-slate-200 pl-3">
@@ -68,7 +68,7 @@ export const AdjustWalletModal: React.FC<AdjustWalletModalProps> = ({
             <span className={`text-base font-black font-mono ${
               newProjectedBalance >= 0 ? 'text-emerald-700' : 'text-rose-600'
             }`}>
-              Rs. {newProjectedBalance.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
+              Rs. {(newProjectedBalance ?? 0).toLocaleString('en-PK', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>

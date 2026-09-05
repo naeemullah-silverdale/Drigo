@@ -537,7 +537,7 @@ export default function App() {
       })
     );
     await adjustDriverWalletInFirebase(driverId, targetNewBalance);
-    showToast(`Driver wallet balance adjusted by Rs. ${Math.abs(amount).toLocaleString('en-PK', { minimumFractionDigits: 2 })} in Firebase.`);
+    showToast(`Driver wallet balance adjusted by Rs. ${Math.abs(amount || 0).toLocaleString('en-PK', { minimumFractionDigits: 2 })} in Firebase.`);
   };
 
   // Toggle Rider status

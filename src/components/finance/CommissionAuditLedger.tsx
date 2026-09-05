@@ -117,11 +117,11 @@ export const CommissionAuditLedger: React.FC<CommissionAuditLedgerProps> = ({
             </span>
           </div>
           <div className="text-2xl font-extrabold text-slate-900 font-mono">
-            Rs. {Math.round(totalCommission).toLocaleString()}
+            Rs. {Math.round(totalCommission || 0).toLocaleString()}
           </div>
           <div className="text-[11px] text-slate-500 flex justify-between pt-1 border-t border-slate-100">
             <span>Gross Platform GMV:</span>
-            <span className="font-mono font-bold text-slate-700">Rs. {Math.round(totalGrossFares).toLocaleString()}</span>
+            <span className="font-mono font-bold text-slate-700">Rs. {Math.round(totalGrossFares || 0).toLocaleString()}</span>
           </div>
         </div>
 
@@ -136,11 +136,11 @@ export const CommissionAuditLedger: React.FC<CommissionAuditLedgerProps> = ({
             </span>
           </div>
           <div className="text-2xl font-extrabold text-slate-900 font-mono">
-            Rs. {Math.round(cashCommission).toLocaleString()}
+            Rs. {Math.round(cashCommission || 0).toLocaleString()}
           </div>
           <div className="text-[11px] text-slate-500 flex justify-between pt-1 border-t border-slate-100">
             <span>Deducted from driver wallet:</span>
-            <span className="font-mono font-bold text-amber-700">Rs. {Math.round(cashGross).toLocaleString()} (Cash Collected)</span>
+            <span className="font-mono font-bold text-amber-700">Rs. {Math.round(cashGross || 0).toLocaleString()} (Cash Collected)</span>
           </div>
         </div>
 
@@ -155,11 +155,11 @@ export const CommissionAuditLedger: React.FC<CommissionAuditLedgerProps> = ({
             </span>
           </div>
           <div className="text-2xl font-extrabold text-slate-900 font-mono">
-            Rs. {Math.round(digitalCommission).toLocaleString()}
+            Rs. {Math.round(digitalCommission || 0).toLocaleString()}
           </div>
           <div className="text-[11px] text-slate-500 flex justify-between pt-1 border-t border-slate-100">
             <span>Credited to driver net:</span>
-            <span className="font-mono font-bold text-emerald-700">Rs. {Math.round(digitalGross - digitalCommission).toLocaleString()}</span>
+            <span className="font-mono font-bold text-emerald-700">Rs. {Math.round((digitalGross - digitalCommission) || 0).toLocaleString()}</span>
           </div>
         </div>
       </div>
@@ -279,15 +279,15 @@ export const CommissionAuditLedger: React.FC<CommissionAuditLedgerProps> = ({
                       </td>
 
                       <td className="p-4 text-right font-mono font-bold text-slate-900">
-                        Rs. {Math.round(gross).toLocaleString()}
+                        Rs. {Math.round(gross || 0).toLocaleString()}
                       </td>
 
                       <td className="p-4 text-right font-mono font-extrabold text-blue-600">
-                        Rs. {Math.round(commission).toLocaleString()}
+                        Rs. {Math.round(commission || 0).toLocaleString()}
                       </td>
 
                       <td className="p-4 text-right font-mono font-extrabold text-emerald-600">
-                        Rs. {Math.round(driverNet).toLocaleString()}
+                        Rs. {Math.round(driverNet || 0).toLocaleString()}
                       </td>
                     </tr>
                   );

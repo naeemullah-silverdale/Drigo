@@ -93,25 +93,47 @@ export const RatingsManagement: React.FC<RatingsManagementProps> = ({
 
   const formatTimestampDisplay = (ts: any): string => {
     if (!ts) return 'Recent';
-    if (typeof ts === 'number') {
-      return new Date(ts).toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+    try {
+      if (typeof ts === 'number') {
+        const d = new Date(ts);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      }
+      if (typeof ts === 'object' && typeof ts.seconds === 'number') {
+        const d = new Date(ts.seconds * 1000);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      }
+      if (typeof ts === 'string') {
+        const d = new Date(ts);
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      }
+      return String(ts);
+    } catch {
+      return 'Recent';
     }
-    if (typeof ts === 'object' && typeof ts.seconds === 'number') {
-      return new Date(ts.seconds * 1000).toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
-    return String(ts);
   };
 
   // Helper: Normalize reviewer direction/type

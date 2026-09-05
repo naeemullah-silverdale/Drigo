@@ -85,7 +85,7 @@ export const FinanceStatCards: React.FC<FinanceStatCardsProps> = ({
           </div>
           <div className="mt-2.5">
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
-              Rs. {Math.round(totalCommission).toLocaleString('en-US')}
+              Rs. {Math.round(totalCommission || 0).toLocaleString('en-US')}
             </div>
             <div className="flex items-center space-x-1.5 mt-1.5">
               <span className="text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
@@ -113,7 +113,7 @@ export const FinanceStatCards: React.FC<FinanceStatCardsProps> = ({
           </div>
           <div className="mt-2.5">
             <div className="text-2xl sm:text-3xl font-extrabold text-amber-600 font-mono tracking-tight">
-              Rs. {Math.round(pendingAmount).toLocaleString('en-US')}
+              Rs. {Math.round(pendingAmount || 0).toLocaleString('en-US')}
             </div>
             <div className="flex items-center space-x-1.5 mt-1.5">
               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
@@ -141,7 +141,7 @@ export const FinanceStatCards: React.FC<FinanceStatCardsProps> = ({
           </div>
           <div className="mt-2.5">
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
-              Rs. {Math.round(totalDriverWalletBalance).toLocaleString('en-US')}
+              Rs. {Math.round(totalDriverWalletBalance || 0).toLocaleString('en-US')}
             </div>
             <div className="flex items-center space-x-1.5 mt-1.5">
               <span className="text-[11px] text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200/60">
@@ -165,7 +165,7 @@ export const FinanceStatCards: React.FC<FinanceStatCardsProps> = ({
           </div>
           <div className="mt-2.5">
             <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
-              Rs. {Math.round(totalGrossFares).toLocaleString('en-US')}
+              Rs. {Math.round(totalGrossFares || 0).toLocaleString('en-US')}
             </div>
             <div className="flex items-center space-x-1.5 mt-1.5">
               <span className="text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">

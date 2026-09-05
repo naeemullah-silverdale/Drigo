@@ -146,7 +146,7 @@ export const PayoutActionModal: React.FC<PayoutActionModalProps> = ({
             <div className="text-right">
               <span className="text-[10px] font-bold text-slate-400 uppercase">Amount</span>
               <div className="text-xl font-extrabold font-mono text-emerald-700">
-                Rs. {payout.amount.toLocaleString()}
+                Rs. {(payout.amount ?? 0).toLocaleString()}
               </div>
             </div>
           </div>
@@ -225,7 +225,7 @@ export const PayoutActionModal: React.FC<PayoutActionModalProps> = ({
                 <div>
                   <div className="font-bold">Banking & Gateway Verification</div>
                   <p className="text-[11px] text-emerald-800/90 mt-0.5">
-                    Ensure the manual funds transfer of <span className="font-bold">Rs. {payout.amount.toLocaleString()}</span> has been dispatched via your {payout.paymentMethod.toUpperCase()} corporate portal before confirming.
+                    Ensure the manual funds transfer of <span className="font-bold">Rs. {(payout.amount ?? 0).toLocaleString()}</span> has been dispatched via your {String(payout.paymentMethod || '').toUpperCase()} corporate portal before confirming.
                   </p>
                 </div>
               </div>

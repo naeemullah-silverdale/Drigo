@@ -478,7 +478,7 @@ export const PayoutRequestsTable: React.FC<PayoutRequestsTableProps> = ({
                         className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer min-h-[44px] flex items-center justify-center gap-1"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>Settle Rs. {p.amount.toLocaleString()}</span>
+                        <span>Settle Rs. {(p.amount ?? 0).toLocaleString()}</span>
                       </button>
                     </>
                   ) : (

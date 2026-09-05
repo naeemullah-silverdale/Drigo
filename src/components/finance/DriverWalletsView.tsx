@@ -282,7 +282,7 @@ export const DriverWalletsView: React.FC<DriverWalletsViewProps> = ({
                 <p className="text-xs text-slate-500">
                   Phone: {selectedDriverForHistory.phone} | Wallet:{' '}
                   <span className="font-mono font-bold text-slate-800">
-                    Rs. {selectedDriverForHistory.walletBalance.toLocaleString()}
+                    Rs. {(selectedDriverForHistory.walletBalance ?? 0).toLocaleString()}
                   </span>
                 </p>
               </div>
@@ -313,10 +313,10 @@ export const DriverWalletsView: React.FC<DriverWalletsViewProps> = ({
                       <div className="text-right">
                         <div
                           className={`font-mono font-extrabold text-sm ${
-                            tx.netImpact > 0 ? 'text-emerald-600' : 'text-rose-600'
+                            (tx.netImpact || 0) > 0 ? 'text-emerald-600' : 'text-rose-600'
                           }`}
                         >
-                          {tx.netImpact > 0 ? `+Rs. ${tx.netImpact.toLocaleString()}` : `-Rs. ${Math.abs(tx.netImpact).toLocaleString()}`}
+                          {(tx.netImpact || 0) > 0 ? `+Rs. ${(tx.netImpact || 0).toLocaleString()}` : `-Rs. ${Math.abs(tx.netImpact || 0).toLocaleString()}`}
                         </div>
                         {tx.commission > 0 && (
                           <div className="text-[10px] text-slate-400 font-mono">
