@@ -1,4 +1,4 @@
-import { Driver, Rider, Trip, SurgeZone, PricingConfig, SupportTicket, LiveActivityFeedItem, RideRating, AdminNotification, PayoutRequest, OperationalRecommendation } from './types';
+import { Driver, Rider, Trip, SurgeZone, PricingConfig, SupportTicket, LiveActivityFeedItem, RideRating, AdminNotification, PayoutRequest, OperationalRecommendation, SafetyReport } from './types';
 
 // Centered around metropolitan area (Lahore, Punjab, Pakistan)
 export const METRO_CENTER = { lat: 31.5204, lng: 74.3587 }; // Lahore Metro Hub Coordinates
@@ -1583,5 +1583,109 @@ export const INITIAL_OPERATIONAL_RECOMMENDATIONS: OperationalRecommendation[] = 
     actionPayload: { payoutId: 'pay-001' },
   },
 ];
+
+export const INITIAL_SAFETY_REPORTS: SafetyReport[] = [
+  {
+    id: 'srep-101',
+    rideId: 'trp-899',
+    category: 'harassment',
+    categoryLabel: 'Inappropriate Remarks & Harassment',
+    description: 'Driver repeatedly asked intrusive personal questions about marital status and suggested taking a detour through secluded canal road.',
+    reporterId: 'rdr-201',
+    reporterName: 'Fatima Zahra',
+    reporterPhone: '+92 301 8882233',
+    reporterRole: 'PASSENGER',
+    reportedUserId: 'drv-101',
+    reportedUserName: 'Muhammad Hamza',
+    reportedUserRole: 'DRIVER',
+    ridePickupTitle: 'DHA Phase 5 Sector C',
+    rideDestinationTitle: 'Packages Mall, Walton Road',
+    driverPlateNumber: 'LED-5031',
+    status: 'PENDING_ADMIN_REVIEW',
+    timestamp: Date.now() - 1000 * 60 * 45, // 45m ago
+    blockUser: true,
+  },
+  {
+    id: 'srep-102',
+    rideId: 'trp-900',
+    category: 'reckless_driving',
+    categoryLabel: 'Dangerous & Reckless Speeding',
+    description: 'Driver crossed multiple red signals on Ferozepur Road and was texting on mobile phone at 90 km/h in dense traffic.',
+    reporterId: 'rdr-202',
+    reporterName: 'Muhammad Usman',
+    reporterPhone: '+92 321 9876543',
+    reporterRole: 'PASSENGER',
+    reportedUserId: 'drv-102',
+    reportedUserName: 'Ali Raza',
+    reportedUserRole: 'DRIVER',
+    ridePickupTitle: 'Johar Town G1 Market',
+    rideDestinationTitle: 'Gulberg III Main Blvd',
+    driverPlateNumber: 'LEA-9921',
+    status: 'UNDER_INVESTIGATION',
+    timestamp: Date.now() - 1000 * 60 * 180, // 3 hours ago
+    blockUser: false,
+  },
+  {
+    id: 'srep-103',
+    rideId: 'trp-901',
+    category: 'overcharging',
+    categoryLabel: 'Cash Extortion / Overcharging Demands',
+    description: 'Driver refused to release passenger baggage until an extra Rs. 200 unmetered tip was paid in cash despite pre-agreed fare.',
+    reporterId: 'rdr-203',
+    reporterName: 'Ayesha Malik',
+    reporterPhone: '+92 333 1122334',
+    reporterRole: 'PASSENGER',
+    reportedUserId: 'drv-103',
+    reportedUserName: 'Usman Ali',
+    reportedUserRole: 'DRIVER',
+    ridePickupTitle: 'Emporium Mall',
+    rideDestinationTitle: 'Mall Road, Anarkali',
+    driverPlateNumber: 'LEB-7742',
+    status: 'PENDING_ADMIN_REVIEW',
+    timestamp: Date.now() - 1000 * 60 * 360, // 6 hours ago
+    blockUser: true,
+  },
+  {
+    id: 'srep-104',
+    rideId: 'trp-902',
+    category: 'passenger_misconduct',
+    categoryLabel: 'Passenger Verbal Abuse & Damage',
+    description: 'Passenger was heavily intoxicated, used abusive language against driver, and damaged rear seat fabric when asked to put on seatbelt.',
+    reporterId: 'drv-104',
+    reporterName: 'Bilal Ahmed',
+    reporterPhone: '+92 345 6789012',
+    reporterRole: 'DRIVER',
+    reportedUserId: 'rdr-204',
+    reportedUserName: 'Hammad Chaudhry',
+    reportedUserRole: 'PASSENGER',
+    ridePickupTitle: 'Liberty Market Gulberg',
+    rideDestinationTitle: 'Bahria Town Sector C',
+    driverPlateNumber: 'LEC-1284',
+    status: 'UNDER_INVESTIGATION',
+    timestamp: Date.now() - 1000 * 60 * 720, // 12 hours ago
+    blockUser: true,
+  },
+  {
+    id: 'srep-105',
+    rideId: 'trp-903',
+    category: 'route_refusal',
+    categoryLabel: 'Refusal to Complete Destination Drop-off',
+    description: 'Driver stopped 2.5 km away from designated hospital drop-off at 11 PM and insisted passenger walk rest of way.',
+    reporterId: 'rdr-205',
+    reporterName: 'Zainab Bibi',
+    reporterPhone: '+92 300 4455667',
+    reporterRole: 'PASSENGER',
+    reportedUserId: 'drv-105',
+    reportedUserName: 'Tariq Jamil',
+    reportedUserRole: 'DRIVER',
+    ridePickupTitle: 'Model Town C Block',
+    rideDestinationTitle: 'Services Hospital Jail Road',
+    driverPlateNumber: 'RIK-4410',
+    status: 'RESOLVED',
+    timestamp: Date.now() - 1000 * 60 * 1440, // 1 day ago
+    blockUser: false,
+  },
+];
+
 
 

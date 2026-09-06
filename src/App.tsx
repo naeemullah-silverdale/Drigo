@@ -46,7 +46,9 @@ import {
 } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  DEFAULT_PRICING_CONFIGS
+  DEFAULT_PRICING_CONFIGS,
+  INITIAL_SUPPORT_TICKETS,
+  INITIAL_SAFETY_REPORTS
 } from './mockData';
 import { Driver, Rider, Trip, SurgeZone, PricingConfig, SupportTicket, LocationPoint, LiveDriverLocation, SafetyReport, LiveActivityFeedItem, RideRating, AdminNotification, PayoutRequest, OperationalRecommendation } from './types';
 import { CheckCircle2, Info, Loader2 } from 'lucide-react';
@@ -68,8 +70,8 @@ export default function App() {
   const [liveLocations, setLiveLocations] = useState<Record<string, LiveDriverLocation>>({});
   const [surgeZones, setSurgeZones] = useState<SurgeZone[]>([]);
   const [pricingConfigs, setPricingConfigs] = useState<PricingConfig[]>(DEFAULT_PRICING_CONFIGS);
-  const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [safetyReports, setSafetyReports] = useState<SafetyReport[]>([]);
+  const [tickets, setTickets] = useState<SupportTicket[]>(INITIAL_SUPPORT_TICKETS);
+  const [safetyReports, setSafetyReports] = useState<SafetyReport[]>(INITIAL_SAFETY_REPORTS);
   const [ratings, setRatings] = useState<RideRating[]>([]);
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
   const [payoutRequests, setPayoutRequests] = useState<PayoutRequest[]>([]);
