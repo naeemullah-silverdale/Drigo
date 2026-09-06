@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -116,6 +117,15 @@ fun MyOrdersScreen(
                         color = Color.White,
                         fontSize = 20.sp
                     )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onRequestNewRide) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to Map",
+                            tint = Color.White
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0xFF14161B),
@@ -745,20 +755,22 @@ fun AcceptedOrderCard(
                 }
 
                 // Cancel Order
-                Surface(
-                    onClick = onCancelOrder,
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF252936),
-                    border = BorderStroke(1.dp, Color(0xFF383D4E)),
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Cancel Ride",
-                            tint = Color(0xFFE57373),
-                            modifier = Modifier.size(18.dp)
-                        )
+                if (order.status != PassengerOrderStatus.COMPLETED && order.status != PassengerOrderStatus.IN_TRIP) {
+                    Surface(
+                        onClick = onCancelOrder,
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF252936),
+                        border = BorderStroke(1.dp, Color(0xFF383D4E)),
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cancel Ride",
+                                tint = Color(0xFFE57373),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }

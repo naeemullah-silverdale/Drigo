@@ -40,6 +40,10 @@ fun RouteTopLocationsPanel(
     destinationAddress: String,
     distanceKm: Double,
     durationMinutes: Int,
+    pickupLat: Double = 0.0,
+    pickupLon: Double = 0.0,
+    destinationLat: Double = 0.0,
+    destinationLon: Double = 0.0,
     isCalculating: Boolean = false,
     onEditPickupClick: () -> Unit,
     onEditDestinationClick: () -> Unit,
@@ -220,6 +224,14 @@ fun RouteTopLocationsPanel(
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp
                                 )
+                                val pLat = if (pickupLat != 0.0) pickupLat else 34.0151
+                                val pLon = if (pickupLon != 0.0) pickupLon else 71.5249
+                                Text(
+                                    text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", pLat, pLon),
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF81D4FA),
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                             Icon(
                                 imageVector = Icons.Default.Edit,
@@ -261,6 +273,14 @@ fun RouteTopLocationsPanel(
                                     overflow = TextOverflow.Ellipsis,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp
+                                )
+                                val dLat = if (destinationLat != 0.0) destinationLat else 34.0351
+                                val dLon = if (destinationLon != 0.0) destinationLon else 71.5449
+                                Text(
+                                    text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", dLat, dLon),
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFFF8A80),
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                             Icon(

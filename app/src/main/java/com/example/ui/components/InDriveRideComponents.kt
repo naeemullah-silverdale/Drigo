@@ -561,6 +561,10 @@ fun InDriveRouteTopCard(
     pickupTitle: String,
     destinationTitle: String,
     durationMinutes: Int,
+    pickupLat: Double = 0.0,
+    pickupLon: Double = 0.0,
+    destinationLat: Double = 0.0,
+    destinationLon: Double = 0.0,
     onPickupClick: () -> Unit,
     onDestinationClick: () -> Unit,
     onAddStopClick: () -> Unit,
@@ -599,18 +603,29 @@ fun InDriveRouteTopCard(
                         .clickable { onPickupClick() }
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = pickupTitle.ifBlank { "Choose pickup location" },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier
                         .weight(1f)
                         .clickable { onPickupClick() }
-                )
+                ) {
+                    Text(
+                        text = pickupTitle.ifBlank { "Choose pickup location" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val pLat = if (pickupLat != 0.0) pickupLat else 34.0151
+                    val pLon = if (pickupLon != 0.0) pickupLon else 71.5249
+                    Text(
+                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", pLat, pLon),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF81D4FA)
+                    )
+                }
 
                 if (onPickPickupOnMap != null) {
                     IconButton(
@@ -643,18 +658,29 @@ fun InDriveRouteTopCard(
                         .clickable { onDestinationClick() }
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "${destinationTitle.ifBlank { "Where to?" }} ~$durationMinutes min.",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier
                         .weight(1f)
                         .clickable { onDestinationClick() }
-                )
+                ) {
+                    Text(
+                        text = "${destinationTitle.ifBlank { "Where to?" }} ~$durationMinutes min.",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val dLat = if (destinationLat != 0.0) destinationLat else 34.0351
+                    val dLon = if (destinationLon != 0.0) destinationLon else 71.5449
+                    Text(
+                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", dLat, dLon),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFFF8A80)
+                    )
+                }
 
                 if (onPickDestinationOnMap != null) {
                     IconButton(

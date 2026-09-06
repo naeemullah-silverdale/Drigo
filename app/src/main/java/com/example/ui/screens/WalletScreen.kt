@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -44,9 +46,9 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-private val EasypaisaGreen = Color(0xFFFF00CC) // Unified Brand Fuchsia
-private val EasypaisaDarkGreen = Color(0xFF8B004F) // Unified Deep Magenta
-private val EasypaisaLightBg = Color(0xFFFFE5F7) // Light Tint Background
+private val EasypaisaGreen = Color(0xFF00A859) // Authentic vibrant green
+private val EasypaisaDarkGreen = Color(0xFF005E32) // Authentic dark green
+private val EasypaisaLightBg = Color(0xFFE8F5E9) // Authentic soft green tint
 private val DarkCardBg = Color(0xFF1E1420)
 private val DarkSurfaceBg = Color(0xFF140C16)
 private val BorderColor = Color(0xFF381C34)
@@ -61,6 +63,10 @@ fun WalletScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    BackHandler {
+        onBackClick()
+    }
     val repo = remember { FirebaseRepository.getInstance(context) }
     val userId = user?.uid ?: "guest_user"
 
@@ -87,14 +93,14 @@ fun WalletScreen(
 
     // Listen to real-time wallet & transactions from backend
     LaunchedEffect(userId, userRole) {
-        scope.launch {
+        launch {
             repo.listenToUserWallet(userId, userRole).collectLatest { w ->
                 if (w != null) {
                     wallet = w
                 }
             }
         }
-        scope.launch {
+        launch {
             repo.listenToUserTransactions(userId).collectLatest { list ->
                 transactions = list
             }
@@ -368,6 +374,8 @@ fun WalletScreen(
             }
         )
     }
+
+
 }
 
 @Composable
@@ -378,7 +386,8 @@ private fun WalletBalanceCard(
     totalAdded: Double,
     totalSpent: Double,
     currencyFormatter: NumberFormat,
-    onAddMoneyClick: () -> Unit
+    onAddMoneyClick: () -> Unit,
+    onPayoutClick: () -> Unit = {}
 ) {
     Card(
         shape = RoundedCornerShape(24.dp),

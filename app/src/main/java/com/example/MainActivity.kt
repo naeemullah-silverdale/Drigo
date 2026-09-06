@@ -67,6 +67,9 @@ class MainActivity : ComponentActivity() {
         if (intent?.getBooleanExtra("OPEN_DRIVER_MODE", false) == true) {
             viewModel.setUserMode(UserMode.DRIVER)
             viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
+        } else if (intent?.getBooleanExtra("OPEN_PASSENGER_MODE", false) == true) {
+            viewModel.setUserMode(UserMode.PASSENGER)
+            viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
         }
     }
 }
@@ -95,15 +98,10 @@ fun DrigoApp(viewModel: MainViewModel) {
     val driverVerification by viewModel.driverVerification.collectAsState()
     val liveRideRequests by viewModel.liveRideRequests.collectAsState()
 
-    // Handle back button presses according to screen stack
-    BackHandler(enabled = currentScreen != AppScreen.WELCOME && currentScreen != AppScreen.HOME_PLACEHOLDER && currentScreen != AppScreen.SIGN_IN) {
-        when (currentScreen) {
-            AppScreen.SIGN_UP -> viewModel.navigateTo(AppScreen.SIGN_IN)
-            AppScreen.WALLET -> viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
-            AppScreen.DRIVER_REGISTRATION -> viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
-            AppScreen.GOOGLE_DRIVE_DOCUMENTS -> viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
-            else -> viewModel.navigateTo(AppScreen.SIGN_IN)
-        }
+    // Handle top-level back button presses according to navigation stack
+    val canNavigateBack = viewModel.canNavigateBack()
+    BackHandler(enabled = canNavigateBack) {
+        viewModel.popBackStack()
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -122,7 +120,7 @@ fun DrigoApp(viewModel: MainViewModel) {
             AppScreen.SIGN_IN -> {
                 SignInScreen(
                     onBackClick = {
-                        // Stay on Sign In
+                        viewModel.popBackStack()
                     },
                     onNavigateToSignUp = {
                         viewModel.navigateTo(AppScreen.SIGN_UP)
@@ -147,7 +145,7 @@ fun DrigoApp(viewModel: MainViewModel) {
             AppScreen.SIGN_UP -> {
                 SignUpScreen(
                     onBackClick = {
-                        viewModel.navigateTo(AppScreen.SIGN_IN)
+                        viewModel.popBackStack()
                     },
                     onNavigateToSignIn = {
                         viewModel.navigateTo(AppScreen.SIGN_IN)
@@ -195,7 +193,7 @@ fun DrigoApp(viewModel: MainViewModel) {
                     user = currentUser,
                     userRole = if (userMode == UserMode.DRIVER) "DRIVER" else "PASSENGER",
                     onBackClick = {
-                        viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
+                        viewModel.popBackStack()
                     }
                 )
             }
@@ -204,7 +202,7 @@ fun DrigoApp(viewModel: MainViewModel) {
                     user = currentUser,
                     existingVerification = driverVerification,
                     onBackToPassenger = {
-                        viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
+                        viewModel.popBackStack()
                     },
                     onVerificationCompleted = { ver ->
                         viewModel.updateDriverVerification(ver)
@@ -221,7 +219,7 @@ fun DrigoApp(viewModel: MainViewModel) {
             AppScreen.ADMIN_VERIFICATION -> {
                 AdminVerificationScreen(
                     onBackClick = {
-                        viewModel.navigateTo(AppScreen.DRIVER_REGISTRATION)
+                        viewModel.popBackStack()
                     }
                 )
             }
@@ -229,7 +227,7 @@ fun DrigoApp(viewModel: MainViewModel) {
                 GoogleDriveDocumentsScreen(
                     viewModel = viewModel,
                     onBackClick = {
-                        viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
+                        viewModel.popBackStack()
                     }
                 )
             }

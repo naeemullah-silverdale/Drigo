@@ -66,7 +66,8 @@ class RouteService(private val context: Context) {
     )
 
     /**
-     * Search destination suggestions using query with local matches + Android Geocoder
+     * Search destination suggestions using Google Places Autocomplete API, Google Geocoding API,
+     * Nominatim HTTP search fallback, and Android Geocoder with local popular places.
      */
     suspend fun searchDestinations(query: String, currentLat: Double, currentLng: Double): List<DestinationSuggestion> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
@@ -76,57 +77,147 @@ class RouteService(private val context: Context) {
 
         val results = mutableListOf<DestinationSuggestion>()
 
-        // 1. First search in popular suggestions
+        // 1. Local popular suggestions match
         val localMatches = popularSuggestions.filter {
             it.title.contains(trimmed, ignoreCase = true) || it.subtitle.contains(trimmed, ignoreCase = true)
         }
         results.addAll(localMatches)
 
-        // 2. Query Geocoder for real address lookup
-        try {
-            val geocoder = Geocoder(context, Locale.getDefault())
-            val searchQuery = if (!trimmed.contains("peshawar", ignoreCase = true) && !trimmed.contains("pakistan", ignoreCase = true)) {
-                "$trimmed, Peshawar, Pakistan"
-            } else {
-                trimmed
-            }
+        val apiKey = try {
+            com.example.BuildConfig::class.java.getField("MAPS_API_KEY").get(null) as? String ?: ""
+        } catch (_: Exception) { "" }
 
-            val addresses: List<Address>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                var list: List<Address>? = null
-                geocoder.getFromLocationName(searchQuery, 5) { addressesList ->
-                    list = addressesList
-                }
-                list
-            } else {
-                @Suppress("DEPRECATION")
-                geocoder.getFromLocationName(searchQuery, 5)
-            }
+        // 2. Google Places Autocomplete API lookup if MAPS_API_KEY is configured
+        if (apiKey.isNotBlank() && apiKey != "MY_MAPS_API_KEY") {
+            try {
+                val encodedQuery = java.net.URLEncoder.encode(trimmed, "UTF-8")
+                val autocompleteUrl = "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$encodedQuery&location=$currentLat,$currentLng&radius=50000&key=$apiKey"
+                val req = Request.Builder().url(autocompleteUrl).build()
+                val resp = client.newCall(req).execute()
+                if (resp.isSuccessful) {
+                    val bodyStr = resp.body?.string()
+                    if (!bodyStr.isNullOrBlank()) {
+                        val json = JSONObject(bodyStr)
+                        val predictions = json.optJSONArray("predictions")
+                        if (predictions != null && predictions.length() > 0) {
+                            for (i in 0 until minOf(5, predictions.length())) {
+                                val item = predictions.getJSONObject(i)
+                                val placeId = item.optString("place_id")
+                                val structured = item.optJSONObject("structured_formatting")
+                                val mainText = structured?.optString("main_text") ?: item.optString("description")
+                                val secondaryText = structured?.optString("secondary_text") ?: "Selected Location"
 
-            addresses?.forEach { address ->
-                val title = address.featureName ?: address.thoroughfare ?: address.subLocality ?: trimmed
-                val subtitle = address.getAddressLine(0) ?: "${address.locality ?: "Peshawar"}, ${address.countryName ?: "Pakistan"}"
-                val suggestion = DestinationSuggestion(
-                    title = title,
-                    subtitle = subtitle,
-                    latitude = address.latitude,
-                    longitude = address.longitude
-                )
-                // Avoid exact duplicate titles
-                if (results.none { abs(it.latitude - suggestion.latitude) < 0.001 && abs(it.longitude - suggestion.longitude) < 0.001 }) {
-                    results.add(suggestion)
+                                if (placeId.isNotBlank()) {
+                                    val detailsUrl = "https://maps.googleapis.com/maps/api/place/details/json?place_id=$placeId&fields=geometry,name,formatted_address&key=$apiKey"
+                                    val dReq = Request.Builder().url(detailsUrl).build()
+                                    val dResp = client.newCall(dReq).execute()
+                                    if (dResp.isSuccessful) {
+                                        val dBody = dResp.body?.string()
+                                        if (!dBody.isNullOrBlank()) {
+                                            val dJson = JSONObject(dBody).optJSONObject("result")
+                                            val loc = dJson?.optJSONObject("geometry")?.optJSONObject("location")
+                                            if (loc != null) {
+                                                val lat = loc.optDouble("lat", currentLat)
+                                                val lng = loc.optDouble("lng", currentLng)
+                                                val title = dJson.optString("name", mainText)
+                                                val subtitle = dJson.optString("formatted_address", secondaryText)
+                                                
+                                                val suggestion = DestinationSuggestion(title, subtitle, lat, lng)
+                                                if (results.none { abs(it.latitude - lat) < 0.0008 && abs(it.longitude - lng) < 0.0008 }) {
+                                                    results.add(suggestion)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        } catch (_: Exception) {
+            } catch (_: Exception) {}
         }
 
-        // If still empty, add query as a custom destination near the general area
+        // 3. OpenStreetMap Nominatim HTTP Search fallback
+        if (results.size < 3) {
+            try {
+                val searchQuery = if (!trimmed.contains("pakistan", ignoreCase = true)) "$trimmed, Pakistan" else trimmed
+                val encodedQuery = java.net.URLEncoder.encode(searchQuery, "UTF-8")
+                val nomUrl = "https://nominatim.openstreetmap.org/search?format=jsonv2&q=$encodedQuery&limit=5&countrycodes=pk"
+                val req = Request.Builder().url(nomUrl).header("User-Agent", "DrigoRideshareApp/1.0").build()
+                val resp = client.newCall(req).execute()
+                if (resp.isSuccessful) {
+                    val bodyStr = resp.body?.string()
+                    if (!bodyStr.isNullOrBlank()) {
+                        val array = org.json.JSONArray(bodyStr)
+                        for (i in 0 until array.length()) {
+                            val item = array.getJSONObject(i)
+                            val lat = item.optDouble("lat", 0.0)
+                            val lon = item.optDouble("lon", 0.0)
+                            val displayName = item.optString("display_name", "")
+                            val name = item.optString("name", "").ifBlank { displayName.split(",").firstOrNull() ?: trimmed }
+
+                            if (lat != 0.0 && lon != 0.0) {
+                                val suggestion = DestinationSuggestion(
+                                    title = name,
+                                    subtitle = displayName,
+                                    latitude = lat,
+                                    longitude = lon
+                                )
+                                if (results.none { abs(it.latitude - lat) < 0.0008 && abs(it.longitude - lon) < 0.0008 }) {
+                                    results.add(suggestion)
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 4. Android Geocoder lookup
+        if (results.size < 3) {
+            try {
+                val geocoder = Geocoder(context, Locale.getDefault())
+                val searchQuery = if (!trimmed.contains("peshawar", ignoreCase = true) && !trimmed.contains("pakistan", ignoreCase = true)) {
+                    "$trimmed, Peshawar, Pakistan"
+                } else {
+                    trimmed
+                }
+
+                val addresses: List<Address>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    var list: List<Address>? = null
+                    geocoder.getFromLocationName(searchQuery, 5) { addressesList ->
+                        list = addressesList
+                    }
+                    list
+                } else {
+                    @Suppress("DEPRECATION")
+                    geocoder.getFromLocationName(searchQuery, 5)
+                }
+
+                addresses?.forEach { address ->
+                    val title = address.featureName ?: address.thoroughfare ?: address.subLocality ?: trimmed
+                    val subtitle = address.getAddressLine(0) ?: "${address.locality ?: "Peshawar"}, ${address.countryName ?: "Pakistan"}"
+                    val suggestion = DestinationSuggestion(
+                        title = title,
+                        subtitle = subtitle,
+                        latitude = address.latitude,
+                        longitude = address.longitude
+                    )
+                    if (results.none { abs(it.latitude - suggestion.latitude) < 0.0008 && abs(it.longitude - suggestion.longitude) < 0.0008 }) {
+                        results.add(suggestion)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 5. If still empty, add query as a custom destination near current location
         if (results.isEmpty()) {
             results.add(
                 DestinationSuggestion(
                     title = trimmed,
-                    subtitle = "Destination in Peshawar",
-                    latitude = currentLat + 0.02,
-                    longitude = currentLng + 0.02
+                    subtitle = "Custom Selected Location",
+                    latitude = currentLat + 0.015,
+                    longitude = currentLng + 0.015
                 )
             )
         }
