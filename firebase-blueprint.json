@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Admin": {
+      "title": "Admin",
+      "description": "Administrative account representing a system operator",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Primary email of the admin"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "Role of the user, must be admin"
+        },
+        "isAdmin": {
+          "type": "boolean",
+          "description": "Indicator of admin status"
+        },
+        "exists": {
+          "type": "boolean",
+          "description": "Marker of registration existence"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last updated timestamp"
+        }
+      },
+      "required": ["email", "role", "isAdmin", "exists"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Standard user profile that can be a passenger or a driver",
+      "type": "object",
+      "properties": {
+        "fullName": {
+          "type": "string",
+          "description": "Full display name"
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone number"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["driver", "rider", "admin"],
+          "description": "User role identifier"
+        },
+        "status": {
+          "type": "string",
+          "description": "Current status of the account"
+        },
+        "city": {
+          "type": "string",
+          "description": "Assigned Pakistani city or territory"
+        }
+      },
+      "required": ["fullName", "email", "phone", "role"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Collection of system admin operators"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Core unified users list"
+    }
+  }
+}
