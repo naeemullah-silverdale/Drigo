@@ -1062,6 +1062,7 @@ fun DriverModeView(
                     startAddress = "Current Location",
                     destinationAddress = trip.pickupTitle
                 )
+                driverRouteResult = pickupNavRoute ?: passengerRoute
                 currentNavInstruction = "Drive to Pickup: ${trip.pickupTitle}"
 
                 val points = pickupNavRoute?.points ?: listOf(GeoPoint(startLat, startLon), GeoPoint(targetLat, targetLon))
