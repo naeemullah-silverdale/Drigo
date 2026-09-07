@@ -588,15 +588,16 @@ fun HomeScreen(
         val email = user?.email ?: ""
         val repo = FirebaseRepository.getInstance(context)
         repo.listenToPassengerOrders(uid, email).collectLatest { cloudOrders ->
-            val cloudIds = cloudOrders.map { it.id }.toSet()
+            val cloudIds = cloudOrders.map { it.id }.filter { it.isNotBlank() }.toSet()
             val cloudReqIds = cloudOrders.map { it.requestId }.filter { it.isNotBlank() }.toSet()
+            val cloudKeys = cloudIds + cloudReqIds
             val localOnly = passengerOrders.filter { 
-                it.id !in cloudIds && 
-                it.requestId !in cloudReqIds && 
-                (it.id !in cloudReqIds) &&
-                it.status != PassengerOrderStatus.CANCELLED
+                it.id !in cloudKeys && 
+                it.requestId !in cloudKeys && 
+                it.status != PassengerOrderStatus.CANCELLED &&
+                it.status != PassengerOrderStatus.COMPLETED
             }
-            passengerOrders = (localOnly + cloudOrders).distinctBy { it.id.ifBlank { it.requestId } }
+            passengerOrders = (cloudOrders + localOnly).distinctBy { it.id.ifBlank { it.requestId } }
         }
     }
 
