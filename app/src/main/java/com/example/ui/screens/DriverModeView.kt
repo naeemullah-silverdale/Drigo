@@ -187,6 +187,7 @@ fun DriverModeView(
     val allRequests = remember(firebaseRequests, driverId) {
         val now = System.currentTimeMillis()
         firebaseRequests.filter { req ->
+            if (req == null) return@filter false
             val isTerminal = req.status.equals("CANCELLED", true) ||
                     req.status.equals("COMPLETED", true) ||
                     req.status.equals("REJECTED", true) ||
@@ -204,7 +205,7 @@ fun DriverModeView(
                     req.assignedDriverId == "0" ||
                     req.assignedDriverId == driverId
             isActive && notExpired && notAssigned
-        }
+        }.distinctBy { it.id.ifBlank { "req_${it.hashCode()}" } }
     }
 
     // Centralized Ride Notification Manager
@@ -765,7 +766,7 @@ fun DriverModeView(
             val matchDistance = if (selectedMaxDistanceFilterKm == null) {
                 true
             } else if (driverGeoPoint.latitude != 0.0 && req.pickupLat != 0.0) {
-                distToPickupKm <= selectedMaxDistanceFilterKm!!
+                distToPickupKm <= (selectedMaxDistanceFilterKm ?: 100.0)
             } else {
                 true
             }
@@ -1226,21 +1227,25 @@ fun DriverModeView(
             modifier = Modifier.fillMaxSize(),
             currentLatitude = driverGeoPoint.latitude,
             currentLongitude = driverGeoPoint.longitude,
-            fromLocation = if (activeDriverTrip != null) AppLocation(
-                title = activeDriverTrip!!.pickupTitle,
-                subtitle = activeDriverTrip!!.pickupSubtitle,
-                latitude = if (activeDriverTrip!!.pickupLat != 0.0) activeDriverTrip!!.pickupLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151),
-                longitude = if (activeDriverTrip!!.pickupLon != 0.0) activeDriverTrip!!.pickupLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249)
-            ) else selectedRequestForOffer?.let {
-                AppLocation(title = it.pickupTitle, subtitle = it.pickupSubtitle, latitude = it.pickupLat, longitude = it.pickupLon)
+            fromLocation = activeDriverTrip?.let { trip ->
+                AppLocation(
+                    title = trip.pickupTitle,
+                    subtitle = trip.pickupSubtitle,
+                    latitude = if (trip.pickupLat != 0.0) trip.pickupLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151),
+                    longitude = if (trip.pickupLon != 0.0) trip.pickupLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249)
+                )
+            } ?: selectedRequestForOffer?.let { req ->
+                AppLocation(title = req.pickupTitle, subtitle = req.pickupSubtitle, latitude = req.pickupLat, longitude = req.pickupLon)
             },
-            toLocation = if (activeDriverTrip != null) AppLocation(
-                title = activeDriverTrip!!.destinationTitle,
-                subtitle = activeDriverTrip!!.destinationSubtitle,
-                latitude = if (activeDriverTrip!!.destinationLat != 0.0) activeDriverTrip!!.destinationLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151) + 0.02,
-                longitude = if (activeDriverTrip!!.destinationLon != 0.0) activeDriverTrip!!.destinationLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249) + 0.02
-            ) else selectedRequestForOffer?.let {
-                AppLocation(title = it.destinationTitle, subtitle = it.destinationSubtitle, latitude = it.destinationLat, longitude = it.destinationLon)
+            toLocation = activeDriverTrip?.let { trip ->
+                AppLocation(
+                    title = trip.destinationTitle,
+                    subtitle = trip.destinationSubtitle,
+                    latitude = if (trip.destinationLat != 0.0) trip.destinationLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151) + 0.02,
+                    longitude = if (trip.destinationLon != 0.0) trip.destinationLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249) + 0.02
+                )
+            } ?: selectedRequestForOffer?.let { req ->
+                AppLocation(title = req.destinationTitle, subtitle = req.destinationSubtitle, latitude = req.destinationLat, longitude = req.destinationLon)
             },
             routeResult = driverRouteResult,
             driverCarLocation = driverGeoPoint,
@@ -2818,7 +2823,7 @@ fun DriverModeView(
             )
         } else if (isDriverOnline && selectedRequestForOffer != null) {
             // Route Inspection Map Floating Callout Badges
-            val inspectReq = selectedRequestForOffer!!
+            selectedRequestForOffer?.let { inspectReq ->
             val distKmToPickup = if (driverGeoPoint.latitude != 0.0 && driverGeoPoint.longitude != 0.0 && inspectReq.pickupLat != 0.0) {
                 calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, inspectReq.pickupLat, inspectReq.pickupLon)
             } else 0.8
@@ -2878,6 +2883,7 @@ fun DriverModeView(
                         }
                     }
                 }
+            }
             }
         } else if (isDriverOnline) {
             // ================= PASSENGER RIDE REQUESTS FEED (inDrive style) =================
@@ -3271,7 +3277,7 @@ fun DriverModeView(
                                 .fillMaxWidth()
                                 .weight(1f)
                         ) {
-                            items(filteredRequests, key = { it.id }) { req ->
+                            items(filteredRequests, key = { req -> req.id.ifBlank { "req_${req.hashCode()}" } }) { req ->
                                 if (isCompactListView) {
                                     DriverCompactRideRequestItem(
                                         request = req,
