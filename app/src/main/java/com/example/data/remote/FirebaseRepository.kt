@@ -1650,6 +1650,10 @@ class FirebaseRepository private constructor(private val context: Context) {
                 }
             }
 
+            try {
+                RideManager.saveActiveTrip(order)
+            } catch (_: Exception) {}
+
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error saving passenger order: ${e.message}", e)
@@ -4141,6 +4145,16 @@ class FirebaseRepository private constructor(private val context: Context) {
         }
 
         val safeReqId = requestId.ifBlank { orderId }
+
+        try {
+            RideManager.updateTripStatus(
+                orderId = orderId,
+                status = status,
+                requestId = requestId,
+                passengerId = passengerId,
+                driverId = driverId
+            )
+        } catch (_: Exception) {}
 
         try {
             val db = try {

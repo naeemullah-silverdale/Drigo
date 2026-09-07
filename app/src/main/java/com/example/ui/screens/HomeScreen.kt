@@ -582,6 +582,30 @@ fun HomeScreen(
         }
     }
 
+    // Observe RideManager active trip reactive state model (active_trips/{tripId})
+    LaunchedEffect(Unit) {
+        com.example.data.remote.RideManager.activeTrip.collectLatest { rideManagerTrip ->
+            if (rideManagerTrip != null) {
+                val safeId = rideManagerTrip.id.ifBlank { rideManagerTrip.requestId }
+                if (safeId.isNotBlank()) {
+                    val existingFiltered = passengerOrders.filter { 
+                        it.id != safeId && it.requestId != safeId && it.id != rideManagerTrip.requestId && it.requestId != rideManagerTrip.id 
+                    }
+                    passengerOrders = listOf(rideManagerTrip) + existingFiltered
+
+                    if (rideManagerTrip.status == PassengerOrderStatus.COMPLETED) {
+                        val repo = FirebaseRepository.getInstance(context)
+                        val alreadyRated = repo.hasUserRatedRide(safeId, "PASSENGER")
+                        if (!alreadyRated) {
+                            completedOrderForRating = rideManagerTrip
+                            showPassengerRatingDialog = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Listen to passenger orders from Firebase Realtime Database & Firestore
     LaunchedEffect(user?.uid, user?.email) {
         val uid = user?.uid ?: ""
@@ -598,6 +622,19 @@ fun HomeScreen(
                 it.status != PassengerOrderStatus.COMPLETED
             }
             passengerOrders = (cloudOrders + localOnly).distinctBy { it.id.ifBlank { it.requestId } }
+
+            // Ensure RideManager observes the active trip document
+            cloudOrders.firstOrNull { 
+                it.status == PassengerOrderStatus.ACCEPTED || 
+                it.status == PassengerOrderStatus.DRIVER_COMING || 
+                it.status == PassengerOrderStatus.DRIVER_ARRIVED || 
+                it.status == PassengerOrderStatus.IN_TRIP 
+            }?.let { activeOrder ->
+                val activeId = activeOrder.id.ifBlank { activeOrder.requestId }
+                if (activeId.isNotBlank()) {
+                    com.example.data.remote.RideManager.observeActiveTrip(activeId)
+                }
+            }
         }
     }
 

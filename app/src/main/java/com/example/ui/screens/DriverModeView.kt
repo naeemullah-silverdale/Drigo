@@ -834,10 +834,43 @@ fun DriverModeView(
         }
     }
 
+    // Observe RideManager active trip reactive state model (active_trips/{tripId})
+    LaunchedEffect(Unit) {
+        com.example.data.remote.RideManager.activeTrip.collectLatest { managerTrip ->
+            if (managerTrip != null) {
+                if (managerTrip.status == PassengerOrderStatus.COMPLETED || managerTrip.status == PassengerOrderStatus.CANCELLED) {
+                    if (activeDriverTrip != null && (activeDriverTrip?.id == managerTrip.id || activeDriverTrip?.requestId == managerTrip.requestId)) {
+                        notifManager.dismissDriverActiveRideNotification()
+                        if (managerTrip.status == PassengerOrderStatus.COMPLETED && completedTripForRating == null) {
+                            completedTripForRating = managerTrip
+                        }
+                        activeDriverTrip = null
+                        driverRouteResult = null
+                        offerSentRequestId = null
+                        driverRecenterTrigger++
+                    }
+                } else if (managerTrip.status == PassengerOrderStatus.DRIVER_COMING || 
+                           managerTrip.status == PassengerOrderStatus.ACCEPTED || 
+                           managerTrip.status == PassengerOrderStatus.DRIVER_ARRIVED || 
+                           managerTrip.status == PassengerOrderStatus.IN_TRIP) {
+                    if (activeDriverTrip == null || activeDriverTrip?.id != managerTrip.id || activeDriverTrip?.status != managerTrip.status) {
+                        activeDriverTrip = managerTrip
+                        offerSentRequestId = managerTrip.requestId.ifBlank { managerTrip.id }
+                        driverRecenterTrigger++
+                    }
+                }
+            }
+        }
+    }
+
     // Real-time synchronization & restoration of Active Driver Trip from Firebase (single source of truth)
     LaunchedEffect(driverId, driverPhone) {
         repo.listenToDriverActiveTrip(driverId, driverPhone).collectLatest { remoteTrip ->
             if (remoteTrip != null) {
+                val activeId = remoteTrip.id.ifBlank { remoteTrip.requestId }
+                if (activeId.isNotBlank()) {
+                    com.example.data.remote.RideManager.observeActiveTrip(activeId)
+                }
                 val now = System.currentTimeMillis()
                 val isStale = (now - remoteTrip.createdAt) > (2 * 60 * 60 * 1000L) && remoteTrip.createdAt > 0
                 if (isStale) {
