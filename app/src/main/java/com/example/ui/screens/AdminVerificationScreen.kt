@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
@@ -57,6 +59,9 @@ val StatusReviewBlue = Color(0xFF3B82F6)
 fun AdminVerificationScreen(
     onBackClick: () -> Unit
 ) {
+    BackHandler {
+        onBackClick()
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }

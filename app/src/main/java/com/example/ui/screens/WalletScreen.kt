@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -36,6 +38,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.*
 import com.example.data.remote.FirebaseRepository
 import com.example.ui.theme.DrigoBrandPurple
+import com.example.ui.theme.drigoColors
 import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -44,12 +47,9 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-private val EasypaisaGreen = Color(0xFFFF00CC) // Unified Brand Fuchsia
-private val EasypaisaDarkGreen = Color(0xFF8B004F) // Unified Deep Magenta
-private val EasypaisaLightBg = Color(0xFFFFE5F7) // Light Tint Background
-private val DarkCardBg = Color(0xFF1E1420)
-private val DarkSurfaceBg = Color(0xFF140C16)
-private val BorderColor = Color(0xFF381C34)
+private val EasypaisaGreen = Color(0xFF00A859) // Authentic vibrant green
+private val EasypaisaDarkGreen = Color(0xFF005E32) // Authentic dark green
+private val EasypaisaLightBg = Color(0xFFE8F5E9) // Authentic soft green tint
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +61,10 @@ fun WalletScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    BackHandler {
+        onBackClick()
+    }
     val repo = remember { FirebaseRepository.getInstance(context) }
     val userId = user?.uid ?: "guest_user"
 
@@ -87,14 +91,14 @@ fun WalletScreen(
 
     // Listen to real-time wallet & transactions from backend
     LaunchedEffect(userId, userRole) {
-        scope.launch {
+        launch {
             repo.listenToUserWallet(userId, userRole).collectLatest { w ->
                 if (w != null) {
                     wallet = w
                 }
             }
         }
-        scope.launch {
+        launch {
             repo.listenToUserTransactions(userId).collectLatest { list ->
                 transactions = list
             }
@@ -125,12 +129,13 @@ fun WalletScreen(
         transactions.filter { it.type == TransactionType.RIDE_PAYMENT && it.status == TransactionStatus.SUCCESS }
             .sumOf { it.amount }
     }
+    val isDark = MaterialTheme.drigoColors.isDark
 
     Scaffold(
         modifier = modifier
             .fillMaxSize()
             .testTag("wallet_screen"),
-        containerColor = DarkSurfaceBg,
+        containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -140,7 +145,7 @@ fun WalletScreen(
                             text = "My Wallet",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(
@@ -152,7 +157,7 @@ fun WalletScreen(
                                     text = if (userRole == "DRIVER") "DRIVER ACCOUNT" else "PASSENGER ACCOUNT",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (userRole == "DRIVER") Color(0xFFD1C4E9) else Color(0xFF80DEEA),
+                                    color = if (userRole == "DRIVER") (if (isDark) Color(0xFFD1C4E9) else DrigoBrandPurple) else (if (isDark) Color(0xFF80DEEA) else Color(0xFF00838F)),
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
@@ -174,7 +179,7 @@ fun WalletScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back to Home",
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
@@ -190,12 +195,12 @@ fun WalletScreen(
                         Icon(
                             imageVector = Icons.Default.Sync,
                             contentDescription = "Refresh Balance",
-                            tint = Color.White
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkSurfaceBg
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
             )
         }
@@ -240,12 +245,12 @@ fun WalletScreen(
                             text = "Recent Transactions",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "${transactions.size} records",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -268,11 +273,11 @@ fun WalletScreen(
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = DrigoBrandPurple,
                                     selectedLabelColor = Color.White,
-                                    containerColor = DarkCardBg,
-                                    labelColor = Color.LightGray
+                                    containerColor = if (isDark) Color(0xFF1E1420) else MaterialTheme.colorScheme.surfaceVariant,
+                                    labelColor = if (isDark) Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant
                                 ),
                                 border = FilterChipDefaults.filterChipBorder(
-                                    borderColor = if (isSelected) DrigoBrandPurple else BorderColor,
+                                    borderColor = if (isSelected) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant,
                                     enabled = true,
                                     selected = isSelected
                                 ),
@@ -368,6 +373,8 @@ fun WalletScreen(
             }
         )
     }
+
+
 }
 
 @Composable
@@ -378,13 +385,15 @@ private fun WalletBalanceCard(
     totalAdded: Double,
     totalSpent: Double,
     currencyFormatter: NumberFormat,
-    onAddMoneyClick: () -> Unit
+    onAddMoneyClick: () -> Unit,
+    onPayoutClick: () -> Unit = {}
 ) {
+    val isDark = MaterialTheme.drigoColors.isDark
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        border = BorderStroke(1.2.dp, DrigoBrandPurple.copy(alpha = 0.5f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        border = BorderStroke(1.2.dp, DrigoBrandPurple.copy(alpha = if (isDark) 0.5f else 0.3f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("wallet_balance_card")
@@ -394,10 +403,17 @@ private fun WalletBalanceCard(
                 .fillMaxWidth()
                 .background(
                     brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFF2E1B4E),
-                            Color(0xFF191B22)
-                        )
+                        colors = if (isDark) {
+                            listOf(
+                                Color(0xFF2E1B4E),
+                                Color(0xFF191B22)
+                            )
+                        } else {
+                            listOf(
+                                Color(0xFFF3E8FF),
+                                MaterialTheme.colorScheme.surface
+                            )
+                        }
                     )
                 )
                 .padding(20.dp)
@@ -412,7 +428,7 @@ private fun WalletBalanceCard(
                         Text(
                             text = "Current Balance",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFB39DDB),
+                            color = if (isDark) Color(0xFFB39DDB) else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -421,14 +437,14 @@ private fun WalletBalanceCard(
                                 text = "$currency ",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF81C784),
+                                color = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32),
                                 modifier = Modifier.padding(bottom = 4.dp)
                             )
                             Text(
                                 text = currencyFormatter.format(balance),
                                 style = MaterialTheme.typography.headlineLarge,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
+                                color = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface,
                                 fontSize = 34.sp
                             )
                         }
@@ -454,14 +470,17 @@ private fun WalletBalanceCard(
                                 text = "Active",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFA5D6A7)
+                                color = if (isDark) Color(0xFFA5D6A7) else Color(0xFF1B5E20)
                             )
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
-                HorizontalDivider(color = Color(0xFF3B2F5E), thickness = 1.dp)
+                HorizontalDivider(
+                    color = if (isDark) Color(0xFF3B2F5E) else MaterialTheme.colorScheme.outlineVariant,
+                    thickness = 1.dp
+                )
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Stats breakdown
@@ -473,13 +492,13 @@ private fun WalletBalanceCard(
                         Text(
                             text = "Total Added",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.LightGray
+                            color = if (isDark) Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
                             text = "+ $currency ${currencyFormatter.format(totalAdded)}",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF81C784)
+                            color = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
                         )
                     }
 
@@ -487,13 +506,13 @@ private fun WalletBalanceCard(
                         Text(
                             text = if (userRole == "DRIVER") "Total Earned" else "Total Spent",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.LightGray
+                            color = if (isDark) Color.LightGray else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
                             text = "- $currency ${currencyFormatter.format(totalSpent)}",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFF8A80)
+                            color = if (isDark) Color(0xFFFF8A80) else Color(0xFFC62828)
                         )
                     }
                 }
@@ -534,10 +553,11 @@ private fun WalletBalanceCard(
 private fun EasypaisaProviderBanner(
     onAddMoneyClick: () -> Unit
 ) {
+    val isDark = MaterialTheme.drigoColors.isDark
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkCardBg),
-        border = BorderStroke(1.dp, BorderColor),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.drigoColors.cardBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -569,19 +589,19 @@ private fun EasypaisaProviderBanner(
                     text = "Easypaisa Instant Top-up",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = "Fast 0% fee deposit via your mobile account",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             IconButton(
                 onClick = onAddMoneyClick,
                 modifier = Modifier
-                    .background(Color(0xFF2A2D36), CircleShape)
+                    .background(if (isDark) Color(0xFF2A2D36) else MaterialTheme.colorScheme.surfaceVariant, CircleShape)
                     .size(36.dp)
             ) {
                 Icon(
@@ -608,8 +628,8 @@ private fun TransactionItemCard(
 
     Card(
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkCardBg),
-        border = BorderStroke(1.dp, BorderColor),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.drigoColors.cardBorder),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("transaction_item_${transaction.transactionId}")
@@ -664,14 +684,14 @@ private fun TransactionItemCard(
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 if (transaction.notes.isNotBlank()) {
                     Text(
                         text = transaction.notes,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.LightGray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -684,14 +704,14 @@ private fun TransactionItemCard(
                     Text(
                         text = formattedDate,
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
                     if (transaction.referenceId.isNotBlank()) {
                         Text(
                             text = "• ${transaction.referenceId.takeLast(10)}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.DarkGray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp
                         )
                     }
@@ -706,7 +726,7 @@ private fun TransactionItemCard(
                     text = (if (isCredit) "+ " else "- ") + "PKR ${currencyFormatter.format(transaction.amount)}",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.ExtraBold,
-                    color = if (isCredit) Color(0xFF81C784) else Color(0xFFFF8A80)
+                    color = if (isCredit) EasypaisaGreen else (if (transaction.status == TransactionStatus.FAILED) Color.Gray else MaterialTheme.colorScheme.onSurface)
                 )
 
                 Spacer(modifier = Modifier.height(3.dp))
@@ -745,8 +765,8 @@ private fun EmptyTransactionsPlaceholder(
 ) {
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkCardBg),
-        border = BorderStroke(1.dp, BorderColor),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.drigoColors.cardBorder),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 20.dp)
@@ -777,13 +797,13 @@ private fun EmptyTransactionsPlaceholder(
                 text = "No $filter Transactions Found",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             Text(
                 text = "Top up your wallet using Easypaisa to start booking rides seamlessly.",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
 
@@ -812,10 +832,12 @@ private fun AddMoneyBottomSheet(
 
     val presetAmounts = listOf(500, 1000, 2000, 5000)
 
+    val isDark = MaterialTheme.drigoColors.isDark
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E2026),
-        dragHandle = { BottomSheetDefaults.DragHandle(color = Color.Gray) }
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.onSurfaceVariant) }
     ) {
         Column(
             modifier = Modifier
@@ -834,12 +856,12 @@ private fun AddMoneyBottomSheet(
                         text = "Add Money",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Top up your Drigo $userRole Wallet",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -864,7 +886,7 @@ private fun AddMoneyBottomSheet(
                     text = "Amount (PKR)",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.LightGray
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 OutlinedTextField(
                     value = amountInput,
@@ -878,11 +900,11 @@ private fun AddMoneyBottomSheet(
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = EasypaisaGreen,
-                        unfocusedBorderColor = BorderColor,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedContainerColor = Color(0xFF13151A),
-                        unfocusedContainerColor = Color(0xFF13151A)
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -896,14 +918,14 @@ private fun AddMoneyBottomSheet(
                     val isSelected = amountInput == amt.toString()
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) EasypaisaGreen.copy(alpha = 0.25f) else Color(0xFF2A2D36),
-                        border = BorderStroke(1.dp, if (isSelected) EasypaisaGreen else BorderColor),
+                        color = if (isSelected) EasypaisaGreen.copy(alpha = 0.25f) else (if (isDark) Color(0xFF2A2D36) else MaterialTheme.colorScheme.surfaceVariant),
+                        border = BorderStroke(1.dp, if (isSelected) EasypaisaGreen else MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.clickable { amountInput = amt.toString() }
                     ) {
                         Text(
                             text = "+ PKR $amt",
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color.White else Color.LightGray,
+                            color = if (isSelected) (if (isDark) Color.White else EasypaisaDarkGreen) else MaterialTheme.colorScheme.onSurface,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                         )
@@ -917,7 +939,7 @@ private fun AddMoneyBottomSheet(
                     text = "Easypaisa Mobile Number",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.LightGray
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 OutlinedTextField(
                     value = mobileInput,
@@ -928,17 +950,17 @@ private fun AddMoneyBottomSheet(
                     leadingIcon = {
                         Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = EasypaisaGreen)
                     },
-                    placeholder = { Text("0300 1234567", color = Color.Gray) },
+                    placeholder = { Text("0300 1234567", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = EasypaisaGreen,
-                        unfocusedBorderColor = BorderColor,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedContainerColor = Color(0xFF13151A),
-                        unfocusedContainerColor = Color(0xFF13151A)
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -952,12 +974,12 @@ private fun AddMoneyBottomSheet(
                     text = "Payment Method",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.LightGray
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF13151A),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     border = BorderStroke(1.2.dp, EasypaisaGreen),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -977,12 +999,12 @@ private fun AddMoneyBottomSheet(
                             Text(
                                 text = "Easypaisa Mobile Account",
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Direct gateway verification with 0% fee",
                                 fontSize = 12.sp,
-                                color = Color.Gray
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -1053,7 +1075,7 @@ private fun EasypaisaGatewayDialog(
     ) {
         Card(
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1D24)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(1.5.dp, EasypaisaGreen),
             elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
             modifier = Modifier
@@ -1094,7 +1116,7 @@ private fun EasypaisaGatewayDialog(
                                 text = "Easypaisa Checkout",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Secure Payment Gateway",
@@ -1106,18 +1128,18 @@ private fun EasypaisaGatewayDialog(
 
                     if (!isVerifying && !isSuccessPhase) {
                         IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
 
-                HorizontalDivider(color = BorderColor)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Order summary container
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF12141A),
-                    border = BorderStroke(1.dp, BorderColor),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -1130,33 +1152,33 @@ private fun EasypaisaGatewayDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Order Reference", fontSize = 12.sp, color = Color.Gray)
+                            Text("Order Reference", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
                                 text = paymentRequest.orderId.takeLast(12),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Mobile Account", fontSize = 12.sp, color = Color.Gray)
+                            Text("Mobile Account", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
                                 text = paymentRequest.mobileNumber,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.LightGray
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        HorizontalDivider(color = Color(0xFF252833))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("Top-up Amount", fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("Top-up Amount", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                             Text(
                                 text = "PKR ${currencyFormatter.format(paymentRequest.amount)}",
                                 fontWeight = FontWeight.ExtraBold,
@@ -1177,7 +1199,7 @@ private fun EasypaisaGatewayDialog(
                             text = "Enter 4-digit Easypaisa PIN / OTP",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.LightGray
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         OutlinedTextField(
                             value = otpInput,
@@ -1193,11 +1215,11 @@ private fun EasypaisaGatewayDialog(
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = EasypaisaGreen,
-                                unfocusedBorderColor = BorderColor,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedContainerColor = Color(0xFF12141A),
-                                unfocusedContainerColor = Color(0xFF12141A)
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1206,7 +1228,7 @@ private fun EasypaisaGatewayDialog(
                         Text(
                             text = "Sandbox test default: 7890. Verified on backend.",
                             fontSize = 11.sp,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -1224,7 +1246,7 @@ private fun EasypaisaGatewayDialog(
                             Text(
                                 text = verificationStep,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color.LightGray
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -1247,8 +1269,8 @@ private fun EasypaisaGatewayDialog(
                             onClick = onDismiss,
                             enabled = !isVerifying,
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, BorderColor),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.LightGray),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text("Cancel")
@@ -1312,13 +1334,13 @@ private fun EasypaisaGatewayDialog(
                             text = "Payment Verified!",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = MaterialTheme.colorScheme.onSurface
                         )
 
                         Text(
                             text = "PKR ${currencyFormatter.format(paymentRequest.amount)} has been credited to your wallet.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.LightGray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
                     }

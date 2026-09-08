@@ -25,22 +25,44 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.DriverOffer
 import com.example.ui.theme.DrigoBrandPurple
+import java.util.Locale
 
 // Colors matching unified brand theme
 val InDriveLimeGreen = Color(0xFFFF00CC) // Unified Brand Fuchsia for primary action CTA
-val InDriveDarkBg = Color(0xFF191B20)
-val InDriveCardBg = Color(0xFF22252C)
-val InDriveSelectedCardBg = Color(0xFF2E192D)
-val InDriveTextPrimary = Color.White
-val InDriveTextSecondary = Color(0xFFA0A6B5)
-val InDriveBorder = Color(0xFF4A1E44)
+
+val InDriveDarkBg: Color
+    @Composable
+    get() = MaterialTheme.colorScheme.surface
+
+val InDriveCardBg: Color
+    @Composable
+    get() = MaterialTheme.colorScheme.surfaceVariant
+
+val InDriveSelectedCardBg: Color
+    @Composable
+    get() = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+
+val InDriveTextPrimary: Color
+    @Composable
+    get() = MaterialTheme.colorScheme.onSurface
+
+val InDriveTextSecondary: Color
+    @Composable
+    get() = MaterialTheme.colorScheme.onSurfaceVariant
+
+val InDriveBorder: Color
+    @Composable
+    get() = MaterialTheme.colorScheme.outlineVariant
 
 data class InDriveRideOption(
     val id: String,
@@ -158,14 +180,14 @@ fun InDriveRideOptionsList(
                             // Base Price badge
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF1D2027),
-                                border = BorderStroke(1.dp, Color(0xFF333744)),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 modifier = Modifier.padding(start = 6.dp)
                             ) {
                                 Text(
                                     text = "Base PKR ${option.baseFare}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFFA0A6B5),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -178,8 +200,8 @@ fun InDriveRideOptionsList(
                         // Fare Negotiation Box with [-] PKR amount [+]
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFF1D2027),
-                            border = BorderStroke(1.dp, Color(0xFF333744)),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
@@ -195,7 +217,8 @@ fun InDriveRideOptionsList(
                                 Surface(
                                     onClick = onDecreaseFare,
                                     shape = CircleShape,
-                                    color = Color(0xFF2C303B),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     modifier = Modifier
                                         .size(42.dp)
                                         .testTag("fare_minus_btn")
@@ -203,7 +226,7 @@ fun InDriveRideOptionsList(
                                     Box(contentAlignment = Alignment.Center) {
                                         Text(
                                             text = "—",
-                                            color = Color.White,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             fontSize = 18.sp,
                                             fontWeight = FontWeight.ExtraBold
                                         )
@@ -219,13 +242,13 @@ fun InDriveRideOptionsList(
                                         text = "PKR $customFare",
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color.White,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         fontSize = 19.sp
                                     )
                                     Text(
                                         text = if (customFare >= option.baseFare) "Competitive fare • Fast pickup" else "Recommended PKR ${option.baseFare}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (customFare >= option.baseFare) Color(0xFF00E676) else InDriveTextSecondary,
+                                        color = if (customFare >= option.baseFare) Color(0xFF00C853) else InDriveTextSecondary,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -235,7 +258,8 @@ fun InDriveRideOptionsList(
                                 Surface(
                                     onClick = onIncreaseFare,
                                     shape = CircleShape,
-                                    color = Color(0xFF2C303B),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     modifier = Modifier
                                         .size(42.dp)
                                         .testTag("fare_plus_btn")
@@ -244,7 +268,7 @@ fun InDriveRideOptionsList(
                                         Icon(
                                             imageVector = Icons.Default.Add,
                                             contentDescription = "Increase Fare",
-                                            tint = Color.White,
+                                            tint = MaterialTheme.colorScheme.onSurface,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -254,42 +278,12 @@ fun InDriveRideOptionsList(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Quick Fare Negotiation Chips: [-50], [Reset Base], [+50], [+100]
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val chips = listOf(
-                                "-50" to (customFare - 50).coerceAtLeast(50),
-                                "PKR ${option.baseFare}" to option.baseFare,
-                                "+50" to (customFare + 50),
-                                "+100" to (customFare + 100)
-                            )
-                            chips.forEach { (label, targetFare) ->
-                                Surface(
-                                    onClick = { onSetFare(targetFare) },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (customFare == targetFare) InDriveLimeGreen.copy(alpha = 0.25f) else Color(0xFF262A35),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (customFare == targetFare) InDriveLimeGreen else Color(0xFF353B4B)
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(32.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = label,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (customFare == targetFare) InDriveLimeGreen else Color.White
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        // Quick Fare Negotiation Chips: [-50 PKR], [Reset Base], [+50 PKR], [+100 PKR]
+                        TactileFareAdjustmentChips(
+                            currentFare = customFare,
+                            baseFare = option.baseFare,
+                            onSetFare = onSetFare
+                        )
                     }
                 }
             } else {
@@ -377,7 +371,7 @@ fun InDriveRideOptionsList(
         // Bottom Tax & Tolls Notice
         Surface(
             shape = RoundedCornerShape(10.dp),
-            color = Color(0xFF20232B),
+            color = MaterialTheme.colorScheme.surfaceVariant,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -561,6 +555,10 @@ fun InDriveRouteTopCard(
     pickupTitle: String,
     destinationTitle: String,
     durationMinutes: Int,
+    pickupLat: Double = 0.0,
+    pickupLon: Double = 0.0,
+    destinationLat: Double = 0.0,
+    destinationLon: Double = 0.0,
     onPickupClick: () -> Unit,
     onDestinationClick: () -> Unit,
     onAddStopClick: () -> Unit,
@@ -570,8 +568,8 @@ fun InDriveRouteTopCard(
 ) {
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = Color(0xFF1B1D23).copy(alpha = 0.98f),
-        border = BorderStroke(1.dp, Color(0xFF333742)),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shadowElevation = 10.dp,
         modifier = modifier
             .fillMaxWidth()
@@ -593,24 +591,35 @@ fun InDriveRouteTopCard(
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = "Pickup Location",
-                    tint = Color(0xFF81C784),
+                    tint = Color(0xFF4CAF50),
                     modifier = Modifier
                         .size(20.dp)
                         .clickable { onPickupClick() }
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = pickupTitle.ifBlank { "Choose pickup location" },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier
                         .weight(1f)
                         .clickable { onPickupClick() }
-                )
+                ) {
+                    Text(
+                        text = pickupTitle.ifBlank { "Choose pickup location" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val pLat = if (pickupLat != 0.0) pickupLat else 34.0151
+                    val pLon = if (pickupLon != 0.0) pickupLon else 71.5249
+                    Text(
+                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", pLat, pLon),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF0288D1)
+                    )
+                }
 
                 if (onPickPickupOnMap != null) {
                     IconButton(
@@ -620,7 +629,7 @@ fun InDriveRouteTopCard(
                         Icon(
                             imageVector = Icons.Default.Place,
                             contentDescription = "Select Pickup on Map",
-                            tint = Color(0xFF81C784),
+                            tint = Color(0xFF4CAF50),
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -633,28 +642,39 @@ fun InDriveRouteTopCard(
                     .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // White Flag icon
+                // Flag icon
                 Icon(
                     imageVector = Icons.Default.Flag,
                     contentDescription = "Destination Location",
-                    tint = Color(0xFFFF80AB),
+                    tint = Color(0xFFE53935),
                     modifier = Modifier
                         .size(20.dp)
                         .clickable { onDestinationClick() }
                 )
                 Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "${destinationTitle.ifBlank { "Where to?" }} ~$durationMinutes min.",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Column(
                     modifier = Modifier
                         .weight(1f)
                         .clickable { onDestinationClick() }
-                )
+                ) {
+                    Text(
+                        text = "${destinationTitle.ifBlank { "Where to?" }} ~$durationMinutes min.",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val dLat = if (destinationLat != 0.0) destinationLat else 34.0351
+                    val dLon = if (destinationLon != 0.0) destinationLon else 71.5449
+                    Text(
+                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", dLat, dLon),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFE53935)
+                    )
+                }
 
                 if (onPickDestinationOnMap != null) {
                     IconButton(
@@ -664,7 +684,7 @@ fun InDriveRouteTopCard(
                         Icon(
                             imageVector = Icons.Default.Flag,
                             contentDescription = "Select Destination on Map",
-                            tint = Color(0xFFFF80AB),
+                            tint = Color(0xFFE53935),
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -678,7 +698,7 @@ fun InDriveRouteTopCard(
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Add stop",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -860,3 +880,442 @@ fun CourierVehicleGraphic(modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * Tactile, fast-tap fare adjustment chips for peer-to-peer negotiation.
+ * Delivers instant haptic feedback without requiring keyboard input.
+ */
+@Composable
+fun TactileFareAdjustmentChips(
+    currentFare: Int,
+    baseFare: Int = currentFare,
+    onSetFare: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    val chips = listOf(
+        "-50" to (currentFare - 50).coerceAtLeast(50),
+        "Reset Base" to baseFare,
+        "+50" to (currentFare + 50),
+        "+100" to (currentFare + 100)
+    )
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        chips.forEach { (label, targetFare) ->
+            val isSelected = currentFare == targetFare && label != "Reset Base"
+            Surface(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSetFare(targetFare)
+                },
+                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) InDriveLimeGreen.copy(alpha = 0.22f) else MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(
+                    1.2.dp,
+                    if (isSelected) InDriveLimeGreen else MaterialTheme.colorScheme.outlineVariant
+                ),
+                shadowElevation = if (isSelected) 3.dp else 1.dp,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .testTag("fare_chip_${label.replace(" ", "_")}")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (label == "Reset Base") "PKR $baseFare" else "$label PKR",
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                        color = if (isSelected) InDriveLimeGreen else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+enum class SmartBadgeType {
+    FASTEST_ARRIVAL,
+    BEST_RATED,
+    LOWEST_FARE
+}
+
+private data class BadgeStyle(
+    val bgColor: Color,
+    val borderColor: Color,
+    val textColor: Color,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
+@Composable
+fun SmartBadge(
+    type: SmartBadgeType,
+    label: String = when (type) {
+        SmartBadgeType.FASTEST_ARRIVAL -> "Fastest Arrival"
+        SmartBadgeType.BEST_RATED -> "Best Rated"
+        SmartBadgeType.LOWEST_FARE -> "Lowest Fare"
+    },
+    modifier: Modifier = Modifier
+) {
+    val style = when (type) {
+        SmartBadgeType.FASTEST_ARRIVAL -> BadgeStyle(
+            Color(0xFF00E676).copy(alpha = 0.16f),
+            Color(0xFF00E676),
+            Color(0xFF00E676),
+            Icons.Default.Bolt
+        )
+        SmartBadgeType.BEST_RATED -> BadgeStyle(
+            Color(0xFFFFB300).copy(alpha = 0.18f),
+            Color(0xFFFFB300),
+            Color(0xFFFFD54F),
+            Icons.Default.Star
+        )
+        SmartBadgeType.LOWEST_FARE -> BadgeStyle(
+            Color(0xFF00B0FF).copy(alpha = 0.16f),
+            Color(0xFF00B0FF),
+            Color(0xFF80D8FF),
+            Icons.Default.LocalOffer
+        )
+    }
+
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = style.bgColor,
+        border = BorderStroke(1.dp, style.borderColor.copy(alpha = 0.7f)),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = style.icon,
+                contentDescription = null,
+                tint = style.textColor,
+                modifier = Modifier.size(13.dp)
+            )
+            Text(
+                text = label,
+                color = style.textColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
+    }
+}
+
+/**
+ * Smart Visual Badged Driver Bid Card.
+ * Solves choice paralysis when multiple drivers send bids simultaneously:
+ * - "Fastest Arrival" (ETA < 3 min)
+ * - "Best Rated" (⭐ 4.9+)
+ * - "Lowest Fare" (Exact passenger price match)
+ */
+@Composable
+fun SmartDriverBidCard(
+    offer: DriverOffer,
+    passengerRequestedFare: Int,
+    isFastest: Boolean,
+    isBestRated: Boolean,
+    isLowestFare: Boolean,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    onCounterOffer: ((Int) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    var showCounterRow by remember { mutableStateOf(false) }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.5.dp,
+            if (isFastest || isLowestFare) Color(0xFF00C853).copy(alpha = 0.7f) else MaterialTheme.colorScheme.outlineVariant
+        ),
+        shadowElevation = 4.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("driver_bid_card_${offer.id}")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Smart Badges Row (if any badges apply)
+            if (isFastest || isBestRated || isLowestFare) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isFastest) {
+                        SmartBadge(
+                            type = SmartBadgeType.FASTEST_ARRIVAL,
+                            label = "Fastest (~${offer.etaMinutes}m)"
+                        )
+                    }
+                    if (isBestRated) {
+                        SmartBadge(
+                            type = SmartBadgeType.BEST_RATED,
+                            label = "Best Rated (${String.format(Locale.US, "%.1f", offer.driverRating)}★)"
+                        )
+                    }
+                    if (isLowestFare) {
+                        SmartBadge(
+                            type = SmartBadgeType.LOWEST_FARE,
+                            label = if (offer.offeredFare == passengerRequestedFare) "Exact Match" else "Lowest Fare"
+                        )
+                    }
+                }
+            }
+
+            // Driver Profile & Vehicle Info + Price Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Driver Avatar
+                Surface(
+                    shape = CircleShape,
+                    color = DrigoBrandPurple.copy(alpha = 0.15f),
+                    border = BorderStroke(1.5.dp, InDriveLimeGreen),
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = DrigoBrandPurple,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // Driver Details
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = offer.driverName.ifBlank { "Captain" },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        // Rating Pill
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFFFFB300).copy(alpha = 0.2f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFB300),
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = String.format(Locale.US, "%.1f", offer.driverRating),
+                                    color = Color(0xFFFFB300),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "${offer.driverVehicleColor} ${offer.driverVehicleMake} ${offer.driverVehicleModel}".trim().ifBlank { "Sedan Comfort" },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (offer.driverPlateNumber.isNotBlank()) {
+                            Text(
+                                text = offer.driverPlateNumber,
+                                color = Color(0xFF00C853),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Text(
+                            text = "• ~${offer.etaMinutes} min (${String.format(Locale.US, "%.1f", offer.distanceKmAway)} km)",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                // Fare Display & Difference
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "PKR ${offer.offeredFare}",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 19.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    val fareDiff = offer.offeredFare - passengerRequestedFare
+                    Text(
+                        text = when {
+                            fareDiff == 0 -> "Exact match"
+                            fareDiff > 0 -> "+PKR $fareDiff"
+                            else -> "-PKR ${-fareDiff}"
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = when {
+                            fareDiff <= 0 -> Color(0xFF00C853)
+                            fareDiff <= 50 -> Color(0xFFFFB300)
+                            else -> Color(0xFFE53935)
+                        }
+                    )
+                }
+            }
+
+            // Quick Counter Row (if expanded)
+            AnimatedVisibility(visible = showCounterRow) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Quick Counter to Captain:",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val counterChips = listOf(
+                            "-50" to (offer.offeredFare - 50).coerceAtLeast(50),
+                            "Your PKR $passengerRequestedFare" to passengerRequestedFare,
+                            "+50" to (offer.offeredFare + 50)
+                        )
+                        counterChips.forEach { (label, targetFare) ->
+                            Surface(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onCounterOffer?.invoke(targetFare)
+                                    showCounterRow = false
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Action Buttons: Accept & Decline (+ Counter toggle)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Decline Button
+                OutlinedButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onDecline()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                    modifier = Modifier
+                        .weight(0.32f)
+                        .height(44.dp)
+                        .testTag("decline_bid_${offer.id}")
+                ) {
+                    Text(text = "Decline", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                if (onCounterOffer != null && !showCounterRow) {
+                    OutlinedButton(
+                        onClick = { showCounterRow = true },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFF00C853).copy(alpha = 0.5f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00C853)),
+                        modifier = Modifier
+                            .weight(0.30f)
+                            .height(44.dp)
+                    ) {
+                        Text(text = "Counter", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Primary Accept Button
+                Button(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAccept()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = InDriveLimeGreen),
+                    modifier = Modifier
+                        .weight(if (onCounterOffer != null && !showCounterRow) 0.38f else 0.68f)
+                        .height(44.dp)
+                        .testTag("accept_bid_${offer.id}")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Accept",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

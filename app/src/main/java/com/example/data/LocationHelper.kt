@@ -33,6 +33,34 @@ data class UserLocationData(
 class LocationHelper(private val context: Context) {
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
 
+    companion object {
+        fun isLocationServiceEnabled(context: Context): Boolean {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager ?: return false
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                lm.isLocationEnabled
+            } else {
+                lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+                        lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+            }
+        }
+
+        fun hasLocationPermission(context: Context): Boolean {
+            val fine = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val coarse = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            return fine || coarse
+        }
+
+        fun isLocationReady(context: Context): Boolean {
+            return isLocationServiceEnabled(context) && hasLocationPermission(context)
+        }
+    }
+
     @SuppressLint("MissingPermission")
     suspend fun getCurrentLocation(): UserLocationData? = withContext(Dispatchers.IO) {
         try {
@@ -104,6 +132,66 @@ class LocationHelper(private val context: Context) {
 
     @Suppress("DEPRECATION")
     fun reverseGeocode(latitude: Double, longitude: Double): Triple<String, String, String> {
+        if (latitude == 0.0 && longitude == 0.0) {
+            return Triple("Select Pickup Location", "Current Location", "Peshawar")
+        }
+
+        // 1. Google Maps Reverse Geocoding API when MAPS_API_KEY is available
+        val apiKey = try {
+            com.example.BuildConfig::class.java.getField("MAPS_API_KEY").get(null) as? String ?: ""
+        } catch (_: Exception) { "" }
+
+        if (apiKey.isNotBlank() && apiKey != "MY_MAPS_API_KEY") {
+            try {
+                val urlStr = "https://maps.googleapis.com/maps/api/geocode/json?latlng=$latitude,$longitude&key=$apiKey"
+                val url = java.net.URL(urlStr)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 3000
+                connection.readTimeout = 3000
+                if (connection.responseCode == 200) {
+                    val response = connection.inputStream.bufferedReader().use { it.readText() }
+                    val json = org.json.JSONObject(response)
+                    val status = json.optString("status")
+                    if (status == "OK") {
+                        val results = json.optJSONArray("results")
+                        if (results != null && results.length() > 0) {
+                            val firstResult = results.getJSONObject(0)
+                            val formattedAddr = firstResult.optString("formatted_address", "")
+                            
+                            var subLocality = ""
+                            var locality = ""
+                            val comps = firstResult.optJSONArray("address_components")
+                            if (comps != null) {
+                                for (i in 0 until comps.length()) {
+                                    val c = comps.getJSONObject(i)
+                                    val types = c.optJSONArray("types")
+                                    if (types != null) {
+                                        for (j in 0 until types.length()) {
+                                            val t = types.getString(j)
+                                            if (t == "sublocality" || t == "sublocality_level_1" || t == "neighborhood") {
+                                                if (subLocality.isBlank()) subLocality = c.optString("long_name")
+                                            }
+                                            if (t == "locality" || t == "administrative_area_level_2") {
+                                                if (locality.isBlank()) locality = c.optString("long_name")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (formattedAddr.isNotBlank()) {
+                                val shortTitle = subLocality.ifBlank { formattedAddr.split(",").firstOrNull()?.trim() ?: "Selected Location" }
+                                val city = locality.ifBlank { "Peshawar" }
+                                return Triple(formattedAddr, shortTitle, city)
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Native Android Geocoder lookup
         try {
             val geocoder = Geocoder(context, Locale.getDefault())
             val addresses: List<Address>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -124,13 +212,43 @@ class LocationHelper(private val context: Context) {
 
                 val line1 = if (thoroughfare.isNotBlank()) thoroughfare else subLocality
                 val line2 = if (subLocality.isNotBlank() && subLocality != line1) "$subLocality, $adminArea" else adminArea
-                val fullAddress = if (line1.isNotBlank() && line2.isNotBlank()) "$line1\n$line2" else address.getAddressLine(0) ?: "$latitude, $longitude"
+                val fullAddress = if (line1.isNotBlank() && line2.isNotBlank() && line1 != line2) "$line1, $line2" else address.getAddressLine(0) ?: String.format(Locale.US, "Location (%.4f, %.4f)", latitude, longitude)
 
-                return Triple(fullAddress, subLocality.ifBlank { "Current Location" }, adminArea.ifBlank { "Peshawar" })
+                return Triple(fullAddress, subLocality.ifBlank { "Selected Location" }, adminArea.ifBlank { "Peshawar" })
             }
         } catch (_: Exception) {
         }
-        return Triple("Street Number 9, Shero\nJahngi, Peshawar", "Shero Jahngi", "Peshawar")
+
+        // HTTP OpenStreetMap Nominatim fallback when Android Geocoder service is unavailable
+        try {
+            val urlStr = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$latitude&lon=$longitude"
+            val url = java.net.URL(urlStr)
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", context.packageName)
+            connection.connectTimeout = 3000
+            connection.readTimeout = 3000
+            if (connection.responseCode == 200) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = org.json.JSONObject(response)
+                val displayName = json.optString("display_name")
+                val addressObj = json.optJSONObject("address")
+                val road = addressObj?.optString("road") ?: addressObj?.optString("suburb") ?: addressObj?.optString("neighbourhood") ?: ""
+                val suburb = addressObj?.optString("suburb") ?: addressObj?.optString("city_district") ?: addressObj?.optString("town") ?: ""
+                val city = addressObj?.optString("city") ?: addressObj?.optString("county") ?: addressObj?.optString("state") ?: "Peshawar"
+
+                if (displayName.isNotBlank()) {
+                    val line1 = if (road.isNotBlank()) road else displayName.split(",").firstOrNull()?.trim() ?: displayName
+                    val line2 = if (suburb.isNotBlank() && suburb != line1) "$suburb, $city" else city
+                    val fullAddr = if (line1.isNotBlank() && line2.isNotBlank() && line1 != line2) "$line1, $line2" else displayName
+                    return Triple(fullAddr, suburb.ifBlank { line1 }, city.ifBlank { "Peshawar" })
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Exact coordinate fallback guaranteed to never return a fake/hardcoded address
+        val formattedCoords = String.format(Locale.US, "Location (%.4f, %.4f)", latitude, longitude)
+        return Triple(formattedCoords, "Selected Location", "Peshawar")
     }
 
     @Suppress("DEPRECATION")

@@ -42,15 +42,33 @@ class MainViewModel(
     private val _currentScreen = MutableStateFlow(AppScreen.WELCOME)
     val currentScreen = _currentScreen.asStateFlow()
 
+    private val _screenBackStack = mutableListOf<AppScreen>(AppScreen.WELCOME)
+
     private val _currentUser = MutableStateFlow<FirebaseUser?>(authRepo.currentUser)
     val currentUser = _currentUser.asStateFlow()
+
+    private fun getPersistedDriverOnlineState(): Boolean {
+        return try {
+            val prefs = com.example.DrigoApplication.instance.getSharedPreferences("drigo_driver_prefs", Context.MODE_PRIVATE)
+            prefs.getBoolean("is_driver_online", false)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun persistDriverOnlineState(online: Boolean) {
+        try {
+            val prefs = com.example.DrigoApplication.instance.getSharedPreferences("drigo_driver_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("is_driver_online", online).apply()
+        } catch (_: Exception) {}
+    }
 
     // Default mode is PASSENGER for new and logged-in users
     private val _userMode = MutableStateFlow(UserMode.PASSENGER)
     val userMode = _userMode.asStateFlow()
 
-    // Driver online state when in Driver mode
-    private val _isDriverOnline = MutableStateFlow(false)
+    // Driver online state when in Driver mode (persisted across app restarts and transitions)
+    private val _isDriverOnline = MutableStateFlow(getPersistedDriverOnlineState())
     val isDriverOnline = _isDriverOnline.asStateFlow()
 
     // Driver verification state
@@ -185,10 +203,15 @@ class MainViewModel(
                     _isDriverOnline.value
                 )
 
-                if (verStatus != com.example.data.model.DriverVerificationStatus.APPROVED ||
-                    accStatus == com.example.data.model.DriverAccountStatus.SUSPENDED ||
-                    accStatus == com.example.data.model.DriverAccountStatus.FLAGGED) {
-                    _isDriverOnline.value = false
+                // Realtime Enforcement: Kick driver offline only if explicitly SUSPENDED
+                if (accStatus == com.example.data.model.DriverAccountStatus.SUSPENDED) {
+                    if (_isDriverOnline.value) {
+                        _isDriverOnline.value = false
+                        persistDriverOnlineState(false)
+                        viewModelScope.launch {
+                            FirebaseRepository.getInstance().updateDriverOperationalStatus(uid, "SUSPENDED", false)
+                        }
+                    }
                 }
             }
         }
@@ -285,18 +308,16 @@ class MainViewModel(
             _isDriverOnline.value
         )
 
-        // Rule B.3: Driver can ONLY go Online if verificationStatus == APPROVED and accountStatus != SUSPENDED / FLAGGED
-        val canGoOnline = (verStatus == com.example.data.model.DriverVerificationStatus.APPROVED) &&
-                (accStatus != com.example.data.model.DriverAccountStatus.SUSPENDED) &&
-                (accStatus != com.example.data.model.DriverAccountStatus.FLAGGED)
-
-        if (!canGoOnline) {
+        // Only prevent going online if account is explicitly SUSPENDED
+        if (accStatus == com.example.data.model.DriverAccountStatus.SUSPENDED) {
             _isDriverOnline.value = false
+            persistDriverOnlineState(false)
             return
         }
 
         val nextOnlineState = !_isDriverOnline.value
         _isDriverOnline.value = nextOnlineState
+        persistDriverOnlineState(nextOnlineState)
 
         val uid = _currentUser.value?.uid ?: return
         viewModelScope.launch {
@@ -308,7 +329,29 @@ class MainViewModel(
     }
 
     fun navigateTo(screen: AppScreen) {
+        if (_currentScreen.value == screen) return
+        if (screen == AppScreen.HOME_PLACEHOLDER) {
+            _screenBackStack.clear()
+            _screenBackStack.add(AppScreen.HOME_PLACEHOLDER)
+        } else {
+            if (_screenBackStack.lastOrNull() != screen) {
+                _screenBackStack.add(screen)
+            }
+        }
         _currentScreen.value = screen
+    }
+
+    fun popBackStack(): Boolean {
+        if (_screenBackStack.size > 1) {
+            _screenBackStack.removeAt(_screenBackStack.lastIndex)
+            _currentScreen.value = _screenBackStack.last()
+            return true
+        }
+        return false
+    }
+
+    fun canNavigateBack(): Boolean {
+        return _screenBackStack.size > 1 && _screenBackStack.last() != AppScreen.HOME_PLACEHOLDER
     }
 
     suspend fun signIn(email: String, password: String): Result<Unit> {
@@ -388,6 +431,7 @@ class MainViewModel(
             }
         }
         _isDriverOnline.value = false
+        persistDriverOnlineState(false)
         authRepo.signOut()
         _currentUser.value = null
         _userMode.value = UserMode.PASSENGER

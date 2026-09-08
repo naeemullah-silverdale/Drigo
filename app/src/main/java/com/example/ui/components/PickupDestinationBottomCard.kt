@@ -112,7 +112,7 @@ fun PickupDestinationBottomCard(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF22242B),
+        containerColor = MaterialTheme.colorScheme.surface,
         scrimColor = Color.Black.copy(alpha = 0.55f),
         dragHandle = {
             Surface(
@@ -121,7 +121,7 @@ fun PickupDestinationBottomCard(
                     .width(42.dp)
                     .height(4.dp),
                 shape = CircleShape,
-                color = Color(0xFF616470)
+                color = MaterialTheme.colorScheme.outlineVariant
             ) {}
         },
         shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
@@ -151,7 +151,7 @@ fun PickupDestinationBottomCard(
                         text = if (isLocked) "Ride in Progress (Locked)" else if (isEditingPickup) "Edit Pickup Location" else "Where To?",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = if (isLocked) Color(0xFFFFB74D) else if (isEditingPickup) Color(0xFF81C784) else DrigoBrandPurple,
+                        color = if (isLocked) Color(0xFFFFB74D) else if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
                         fontSize = 22.sp
                     )
                 }
@@ -163,7 +163,7 @@ fun PickupDestinationBottomCard(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close",
-                        tint = Color(0xFF9E9E9E),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -210,7 +210,7 @@ fun PickupDestinationBottomCard(
                 Text(
                     text = "Pickup location (fixed):",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFB0B3BC),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp
                 )
                 if (!isEditingPickup && !isLocked) {
@@ -222,7 +222,7 @@ fun PickupDestinationBottomCard(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
-                        Text("Change Pickup", color = Color(0xFF81C784), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Change Pickup", color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -232,8 +232,8 @@ fun PickupDestinationBottomCard(
             // Pickup Location Box
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF2C2F38),
-                border = BorderStroke(1.2.dp, if (isEditingPickup) Color(0xFF4CAF50) else Color(0xFF4A4E5C)),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.2.dp, if (isEditingPickup) Color(0xFF4CAF50) else MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("pickup_location_card")
@@ -246,14 +246,14 @@ fun PickupDestinationBottomCard(
                         OutlinedTextField(
                             value = editablePickupText,
                             onValueChange = { editablePickupText = it },
-                            label = { Text("Pickup Address", color = Color(0xFFB0B3BC)) },
+                            label = { Text("Pickup Address", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                             singleLine = false,
                             maxLines = 3,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                                 focusedBorderColor = Color(0xFF4CAF50),
-                                unfocusedBorderColor = Color(0xFF616470),
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                                 cursorColor = Color(0xFF4CAF50)
                             ),
                             shape = RoundedCornerShape(10.dp),
@@ -266,7 +266,7 @@ fun PickupDestinationBottomCard(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             TextButton(onClick = { isEditingPickup = false }) {
-                                Text("Cancel", color = Color(0xFFB0B3BC))
+                                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
@@ -300,7 +300,7 @@ fun PickupDestinationBottomCard(
                                         color = Color.White
                                     )
                                 } else {
-                                    Text("Set Pickup")
+                                    Text("Set Pickup", color = Color.White)
                                 }
                             }
                         }
@@ -323,12 +323,31 @@ fun PickupDestinationBottomCard(
                                 modifier = Modifier.size(10.dp)
                             ) {}
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = pickupLocation.title.ifBlank { "Locating pickup point in Peshawar..." },
-                                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
-                                color = Color.White,
-                                fontWeight = FontWeight.Normal
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = pickupLocation.title.ifBlank { "Locating pickup point in Peshawar..." },
+                                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (pickupLocation.subtitle.isNotBlank()) {
+                                    Text(
+                                        text = pickupLocation.subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                val pLat = if (pickupLocation.latitude != 0.0) pickupLocation.latitude else 34.0151
+                                val pLon = if (pickupLocation.longitude != 0.0) pickupLocation.longitude else 71.5249
+                                Text(
+                                    text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", pLat, pLon),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF0288D1)
+                                )
+                            }
                         }
                         if (!isLocked) {
                             IconButton(
@@ -341,7 +360,7 @@ fun PickupDestinationBottomCard(
                                 Icon(
                                     imageVector = Icons.Default.Edit,
                                     contentDescription = "Edit Pickup Address",
-                                    tint = Color(0xFF9E9E9E),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -349,7 +368,7 @@ fun PickupDestinationBottomCard(
                             Icon(
                                 imageVector = Icons.Default.Lock,
                                 contentDescription = "Locked",
-                                tint = Color(0xFF757885),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -368,7 +387,7 @@ fun PickupDestinationBottomCard(
                 placeholder = {
                     Text(
                         text = if (isLocked) "Destination locked during active ride" else if (isEditingPickup) "Search & pick new pickup location..." else "Search destination (e.g. Saddar, Hayatabad...)",
-                        color = Color(0xFF8E92A0),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp
                     )
                 },
@@ -392,7 +411,7 @@ fun PickupDestinationBottomCard(
                             Icon(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Clear",
-                                tint = Color(0xFF9E9E9E),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -401,15 +420,15 @@ fun PickupDestinationBottomCard(
                 singleLine = true,
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    disabledTextColor = Color.White,
-                    focusedContainerColor = Color(0xFF2C2F38),
-                    unfocusedContainerColor = Color(0xFF2C2F38),
-                    disabledContainerColor = Color(0xFF23252E),
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    disabledTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     focusedBorderColor = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
-                    unfocusedBorderColor = Color(0xFF4A4E5C),
-                    disabledBorderColor = Color(0xFF3B3E4A),
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                    disabledBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                     cursorColor = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -465,7 +484,7 @@ fun PickupDestinationBottomCard(
                         onPickOnMap(isEditingPickup)
                     },
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF2C2F38),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     border = BorderStroke(1.2.dp, if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -486,7 +505,7 @@ fun PickupDestinationBottomCard(
                                 Icon(
                                     imageVector = if (isEditingPickup) Icons.Default.Place else Icons.Default.Flag,
                                     contentDescription = null,
-                                    tint = if (isEditingPickup) Color(0xFF81C784) else Color(0xFFFF80AB),
+                                    tint = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -497,19 +516,19 @@ fun PickupDestinationBottomCard(
                                 text = if (isEditingPickup) "Set Pickup (From) on Map" else "Set Destination (To) on Map",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Tap any location point directly on the map",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF9E9E9E),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
                             )
                         }
                         Icon(
                             imageVector = Icons.Default.TouchApp,
                             contentDescription = null,
-                            tint = if (isEditingPickup) Color(0xFF81C784) else Color(0xFFFF80AB),
+                            tint = if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -528,13 +547,13 @@ fun PickupDestinationBottomCard(
                     text = if (isLocked) "Locations (Read-Only)" else if (searchFieldText.isBlank()) "Popular Places in Peshawar" else "Search Results",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFFB0B3BC)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (!isLocked) {
                     Text(
                         text = "${suggestions.size} places",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF757885)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
             }
@@ -565,8 +584,8 @@ fun PickupDestinationBottomCard(
                             }
                         },
                         shape = RoundedCornerShape(12.dp),
-                        color = if (isLocked) Color(0xFF23252E) else Color(0xFF2C2F38),
-                        border = BorderStroke(1.dp, Color(0xFF3B3E4A)),
+                        color = if (isLocked) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("dest_suggestion_${item.title.replace(" ", "_")}")
@@ -579,14 +598,14 @@ fun PickupDestinationBottomCard(
                         ) {
                             Surface(
                                 shape = CircleShape,
-                                color = if (isLocked) Color(0xFF757885).copy(alpha = 0.2f) else if (isEditingPickup) Color(0xFF4CAF50).copy(alpha = 0.2f) else DrigoBrandPurple.copy(alpha = 0.2f),
+                                color = if (isLocked) MaterialTheme.colorScheme.surfaceVariant else if (isEditingPickup) Color(0xFF4CAF50).copy(alpha = 0.2f) else DrigoBrandPurple.copy(alpha = 0.2f),
                                 modifier = Modifier.size(34.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Default.LocationOn,
                                         contentDescription = null,
-                                        tint = if (isLocked) Color(0xFF9E9E9E) else if (isEditingPickup) Color(0xFF81C784) else DrigoBrandPurple,
+                                        tint = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else if (isEditingPickup) Color(0xFF4CAF50) else DrigoBrandPurple,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -597,22 +616,29 @@ fun PickupDestinationBottomCard(
                                     text = item.title,
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isLocked) Color(0xFFCCCCCC) else Color.White,
+                                    color = if (isLocked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = item.subtitle,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF9E9E9E),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", item.latitude, item.longitude),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF0288D1),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 10.sp
                                 )
                             }
                             Icon(
                                 imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.NorthEast,
                                 contentDescription = if (isLocked) "Locked" else "Select",
-                                tint = Color(0xFF757885),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp)
                             )
                         }

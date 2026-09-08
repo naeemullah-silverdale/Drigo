@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -14,6 +15,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -23,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -57,7 +61,16 @@ import androidx.compose.foundation.border
 import com.example.ui.components.RealOsmMapView
 import com.example.ui.components.PostRideRatingDialog
 import com.example.ui.components.SafetyReportDialog
+import com.example.ui.components.NotificationCenterSheet
+import com.example.ui.components.DriverLocationOffScreen
+import com.example.ui.screens.driver.DriverPerformanceScreen
+import com.example.ui.screens.driver.DriverTripHistoryScreen
+import com.example.ui.screens.driver.DriverRideRequestCard
+import com.example.ui.screens.driver.PassengerRequestItemCard
+import com.example.ui.screens.driver.DriverCompactRideRequestItem
+import com.example.ui.screens.driver.DriverContrastTheme
 import com.example.ui.theme.DrigoBrandPurple
+import com.example.ui.theme.drigoColors
 import com.example.util.DriverAudioHelper
 import com.example.util.RideNotificationManager
 import com.google.firebase.auth.FirebaseUser
@@ -158,7 +171,11 @@ fun DriverModeView(
     }.collectAsState(initial = emptyList())
 
     val firebaseRequests = if (isDriverOnline) {
-        liveRideRequests ?: localStreamRequests
+        if (!liveRideRequests.isNullOrEmpty()) {
+            liveRideRequests
+        } else {
+            localStreamRequests
+        }
     } else {
         emptyList()
     }
@@ -171,6 +188,7 @@ fun DriverModeView(
     val allRequests = remember(firebaseRequests, driverId) {
         val now = System.currentTimeMillis()
         firebaseRequests.filter { req ->
+            if (req == null) return@filter false
             val isTerminal = req.status.equals("CANCELLED", true) ||
                     req.status.equals("COMPLETED", true) ||
                     req.status.equals("REJECTED", true) ||
@@ -188,7 +206,7 @@ fun DriverModeView(
                     req.assignedDriverId == "0" ||
                     req.assignedDriverId == driverId
             isActive && notExpired && notAssigned
-        }
+        }.distinctBy { it.id.ifBlank { "req_${it.hashCode()}" } }
     }
 
     // Centralized Ride Notification Manager
@@ -226,11 +244,86 @@ fun DriverModeView(
         }
     }
 
-    val handleToggleOnlineClick: () -> Unit = remember(isDriverOnline, onToggleOnline) {
+    // Realtime Device Location State Tracking (Hardware GPS + App Permissions)
+    var isDeviceLocationReady by remember {
+        mutableStateOf(LocationHelper.isLocationReady(context))
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                isDeviceLocationReady = LocationHelper.isLocationReady(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        val locationReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, intent: Intent?) {
+                isDeviceLocationReady = LocationHelper.isLocationReady(context)
+            }
+        }
+        val filter = android.content.IntentFilter(android.location.LocationManager.PROVIDERS_CHANGED_ACTION).apply {
+            addAction(android.location.LocationManager.MODE_CHANGED_ACTION)
+        }
+        context.registerReceiver(locationReceiver, filter)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            try {
+                context.unregisterReceiver(locationReceiver)
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Opens Android System Location Settings directly so user can switch on location
+    val handleOpenLocationSettings: () -> Unit = remember(context) {
+        {
+            val isServiceEnabled = LocationHelper.isLocationServiceEnabled(context)
+            val intent = if (!isServiceEnabled) {
+                Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+            } else {
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+            }
+            try {
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                    )
+                } catch (_: Exception) {
+                    try {
+                        context.startActivity(
+                            Intent(android.provider.Settings.ACTION_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                        )
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
+    val handleToggleOnlineClick: () -> Unit = remember(isDriverOnline, onToggleOnline, handleOpenLocationSettings) {
         {
             if (isDriverOnline) {
                 onToggleOnline()
             } else {
+                val isServiceEnabled = LocationHelper.isLocationServiceEnabled(context)
+                if (!isServiceEnabled) {
+                    Toast.makeText(context, "Please switch on device location to go online", Toast.LENGTH_SHORT).show()
+                    handleOpenLocationSettings()
+                    return@remember
+                }
+
                 val fineGranted = ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -268,14 +361,99 @@ fun DriverModeView(
     var destinationModeText by remember { mutableStateOf("") }
     var showFilterSheet by remember { mutableStateOf(false) }
 
+    // Bottom Navigation & Performance Gamification System (Image 2)
+    var selectedDriverTab by remember { mutableStateOf("REQUESTS") } // "REQUESTS", "PERFORMANCE", or "HISTORY"
+    var driverRidesThisWeek by remember { mutableIntStateOf(10) }
+    var driverPerformanceRating by remember { mutableDoubleStateOf(5.00) }
+    var todayIncomePkr by remember { mutableIntStateOf(0) }
+    var dailyGoalPkr by remember { mutableIntStateOf(5000) }
+    var walletBalancePkr by remember { mutableIntStateOf(137) }
+    var activeBonusesCount by remember { mutableIntStateOf(0) }
+
+    // Realtime Driver Trip History from Firebase
+    val firebaseDriverTripHistory by repo.observeDriverTripHistory(driverId.ifBlank { driverPhone }, driverPhone)
+        .collectAsState(initial = emptyList())
+
+    val activeDriverTripHistoryList = firebaseDriverTripHistory
+
+    // Smart Vehicle Tariff & Eligibility Controls (Image 13)
+    var selectedVehicleModelName by remember { mutableStateOf("Suzuki Mehran (2018)") }
+    var selectedVehiclePlateNumber by remember { mutableStateOf("LEA-18-4921") }
+    var selectedVehicleCategoryType by remember { mutableStateOf("Hatchback (Non-AC)") }
+    var isTariffMiniEnabled by remember { mutableStateOf(true) }
+    var isTariffAcEnabled by remember { mutableStateOf(true) }
+    var isTariffComfortEnabled by remember { mutableStateOf(true) }
+    var isTariffCourierEnabled by remember { mutableStateOf(true) }
+    var isCourierParcelEnabled by remember { mutableStateOf(true) }
+    var hasCourierThermalBag by remember { mutableStateOf(false) }
+    var isCourierHeavyCargoEnabled by remember { mutableStateOf(false) }
+    var selectedTariffMultiplier by remember { mutableFloatStateOf(1.0f) }
+
+    // Tariff Sheets & Dialogs
+    var showTariffsSheet by remember { mutableStateOf(false) }
+    var showChangeVehicleDialog by remember { mutableStateOf(false) }
+
+    // Performance Sheets & Dialogs
+    var showTierBenefitsSheet by remember { mutableStateOf(false) }
+    var showAddDailyGoalSheet by remember { mutableStateOf(false) }
+    var showBonusesSheet by remember { mutableStateOf(false) }
+    var showIncomeDetailsSheet by remember { mutableStateOf(false) }
+
     // Audio & Voice Preferences (Item 5)
     var voiceLanguageChoice by remember { mutableStateOf("EN") } // "EN" or "UR"
 
     // Driver States
     var selectedRequestForOffer by remember { mutableStateOf<RideRequest?>(null) }
+
+    BackHandler(enabled = selectedRequestForOffer != null) {
+        selectedRequestForOffer = null
+    }
     var activeDriverTrip by remember { mutableStateOf<PassengerOrder?>(null) }
+    var isActiveTripSheetExpanded by remember { mutableStateOf(false) }
     var isSendingOffer by remember { mutableStateOf(false) }
     var offerSentRequestId by remember { mutableStateOf<String?>(null) }
+    var isCompactListView by remember { mutableStateOf(false) }
+    var driverContrastTheme by remember { mutableStateOf(DriverContrastTheme.NORMAL) }
+
+    // Audio announcements for active ride status transitions (e.g. Passenger accepted bid, arrived, start, complete)
+    LaunchedEffect(activeDriverTrip?.id, activeDriverTrip?.status, isVoiceAlertsEnabled) {
+        val trip = activeDriverTrip
+        if (trip != null && isVoiceAlertsEnabled) {
+            when (trip.status) {
+                PassengerOrderStatus.ACCEPTED, PassengerOrderStatus.DRIVER_COMING -> {
+                    audioHelper.announceActiveRideStatus(
+                        rideId = trip.id,
+                        status = "OFFER_ACCEPTED",
+                        farePkr = trip.agreedFare,
+                        pickupTitle = trip.pickupTitle,
+                        destTitle = trip.destinationTitle
+                    )
+                }
+                PassengerOrderStatus.DRIVER_ARRIVED -> {
+                    audioHelper.announceActiveRideStatus(
+                        rideId = trip.id,
+                        status = "DRIVER_ARRIVED",
+                        pickupTitle = trip.pickupTitle
+                    )
+                }
+                PassengerOrderStatus.IN_TRIP -> {
+                    audioHelper.announceActiveRideStatus(
+                        rideId = trip.id,
+                        status = "IN_TRIP",
+                        destTitle = trip.destinationTitle
+                    )
+                }
+                PassengerOrderStatus.COMPLETED -> {
+                    audioHelper.announceActiveRideStatus(
+                        rideId = trip.id,
+                        status = "COMPLETED",
+                        farePkr = trip.agreedFare
+                    )
+                }
+                else -> {}
+            }
+        }
+    }
 
     // Announce new requests with notification and audio chime/TTS when online
     LaunchedEffect(allRequests, isDriverOnline, isVoiceAlertsEnabled) {
@@ -336,6 +514,42 @@ fun DriverModeView(
 
     // Cancellation (Item 4)
     var showCancelTripDialog by remember { mutableStateOf(false) }
+
+    val hasDriverSubOverlay = showDriverReportIncident ||
+            showCancelTripDialog ||
+            showPinVerificationDialog ||
+            showSafetySosSheet ||
+            showPassengerRatingDialog ||
+            showTollAddDialog ||
+            showIncomeDetailsSheet ||
+            showBonusesSheet ||
+            showAddDailyGoalSheet ||
+            showTierBenefitsSheet ||
+            showChangeVehicleDialog ||
+            showTariffsSheet ||
+            showFilterSheet ||
+            selectedRequestForOffer != null ||
+            selectedDriverTab != "REQUESTS"
+
+    BackHandler(enabled = hasDriverSubOverlay) {
+        when {
+            showDriverReportIncident -> showDriverReportIncident = false
+            showCancelTripDialog -> showCancelTripDialog = false
+            showPinVerificationDialog -> showPinVerificationDialog = false
+            showSafetySosSheet -> showSafetySosSheet = false
+            showPassengerRatingDialog -> showPassengerRatingDialog = false
+            showTollAddDialog -> showTollAddDialog = false
+            showIncomeDetailsSheet -> showIncomeDetailsSheet = false
+            showBonusesSheet -> showBonusesSheet = false
+            showAddDailyGoalSheet -> showAddDailyGoalSheet = false
+            showTierBenefitsSheet -> showTierBenefitsSheet = false
+            showChangeVehicleDialog -> showChangeVehicleDialog = false
+            showTariffsSheet -> showTariffsSheet = false
+            showFilterSheet -> showFilterSheet = false
+            selectedRequestForOffer != null -> selectedRequestForOffer = null
+            selectedDriverTab != "REQUESTS" -> selectedDriverTab = "REQUESTS"
+        }
+    }
 
     // Navigation & Map State
     var driverGeoPoint by remember(initialUserLocation) {
@@ -484,9 +698,16 @@ fun DriverModeView(
         destinationModeText,
         driverGeoPoint,
         driverVehicleMake,
-        driverVehicleModel
+        driverVehicleModel,
+        isTariffMiniEnabled,
+        isTariffAcEnabled,
+        isTariffComfortEnabled,
+        isTariffCourierEnabled,
+        isCourierParcelEnabled,
+        hasCourierThermalBag
     ) {
-        val isDriverBike = driverVehicleMake.contains("Motorcycle", true) ||
+        val isDriverBike = selectedVehicleCategoryType.contains("Motorcycle", true) ||
+                driverVehicleMake.contains("Motorcycle", true) ||
                 driverVehicleMake.contains("Bike", true) ||
                 driverVehicleModel.contains("CD 70", true) ||
                 driverVehicleModel.contains("CG 125", true) ||
@@ -496,6 +717,17 @@ fun DriverModeView(
                 driverVehicleModel.contains("Motorcycle", true)
 
         allRequests.filter { req ->
+            val isRequestAc = req.hasAc || req.rideCategory.contains("AC", true) || req.rideCategory.contains("A/C", true)
+            val isRequestMini = req.vehicleType.contains("Mini", true) || req.rideCategory.contains("Mini", true)
+            val isRequestComfort = req.rideCategory.contains("Comfort", true)
+            val isRequestCourier = req.rideCategory.contains("Courier", true) || req.rideCategory.contains("Parcel", true)
+
+            // Check if driver tariff switch for this category is disabled
+            if (isRequestAc && !isTariffAcEnabled && !isRequestMini) return@filter false
+            if (isRequestMini && !isTariffMiniEnabled) return@filter false
+            if (isRequestComfort && !isTariffComfortEnabled) return@filter false
+            if (isRequestCourier && !isTariffCourierEnabled) return@filter false
+
             // 1. Vehicle category & AC requirements matching
             val isRequestBike = req.vehicleType.contains("Bike", true) ||
                     req.rideCategory.contains("Bike", true) ||
@@ -516,6 +748,8 @@ fun DriverModeView(
             // 2. Category filter selection from UI chips
             val matchCategory = when (selectedCategoryFilter) {
                 "All" -> true
+                "Share Ride" -> req.rideCategory.contains("Share", ignoreCase = true)
+                "Private Ride" -> req.rideCategory.contains("Private", ignoreCase = true) || req.rideCategory.contains("Book", ignoreCase = true) || req.rideCategory.equals("Car", ignoreCase = true)
                 "Ride A/C" -> req.hasAc || req.rideCategory.contains("AC", true) || req.rideCategory.contains("A/C", true)
                 "Mini" -> req.vehicleType.contains("Mini", true) || req.rideCategory.contains("Mini", true)
                 "Bike" -> isRequestBike
@@ -533,7 +767,7 @@ fun DriverModeView(
             val matchDistance = if (selectedMaxDistanceFilterKm == null) {
                 true
             } else if (driverGeoPoint.latitude != 0.0 && req.pickupLat != 0.0) {
-                distToPickupKm <= selectedMaxDistanceFilterKm!!
+                distToPickupKm <= (selectedMaxDistanceFilterKm ?: 100.0)
             } else {
                 true
             }
@@ -585,6 +819,8 @@ fun DriverModeView(
         }
     }
     var selectedCancelReason by remember { mutableStateOf("Passenger didn't show up") }
+    var showDriverNotificationCenterSheet by remember { mutableStateOf(false) }
+    val driverNotificationHistory by notifManager.notificationHistory.collectAsState()
 
     var lastKnownDriverTripStatus by remember { mutableStateOf<PassengerOrderStatus?>(null) }
     var lastKnownDriverTripId by remember { mutableStateOf<String?>(null) }
@@ -599,10 +835,57 @@ fun DriverModeView(
         }
     }
 
+    // Observe RideManager active trip reactive state model (active_trips/{tripId})
+    LaunchedEffect(Unit) {
+        com.example.data.remote.RideManager.activeTrip.collectLatest { managerTrip ->
+            if (managerTrip != null) {
+                if (managerTrip.status == PassengerOrderStatus.COMPLETED || managerTrip.status == PassengerOrderStatus.CANCELLED) {
+                    if (activeDriverTrip != null && (activeDriverTrip?.id == managerTrip.id || activeDriverTrip?.requestId == managerTrip.requestId)) {
+                        notifManager.dismissDriverActiveRideNotification()
+                        if (managerTrip.status == PassengerOrderStatus.COMPLETED && completedTripForRating == null) {
+                            completedTripForRating = managerTrip
+                        }
+                        activeDriverTrip = null
+                        driverRouteResult = null
+                        offerSentRequestId = null
+                        driverRecenterTrigger++
+                    }
+                } else if (managerTrip.status == PassengerOrderStatus.DRIVER_COMING || 
+                           managerTrip.status == PassengerOrderStatus.ACCEPTED || 
+                           managerTrip.status == PassengerOrderStatus.DRIVER_ARRIVED || 
+                           managerTrip.status == PassengerOrderStatus.IN_TRIP) {
+                    if (activeDriverTrip == null || activeDriverTrip?.id != managerTrip.id || activeDriverTrip?.status != managerTrip.status) {
+                        activeDriverTrip = managerTrip
+                        offerSentRequestId = managerTrip.requestId.ifBlank { managerTrip.id }
+                        driverRecenterTrigger++
+                    }
+                }
+            }
+        }
+    }
+
     // Real-time synchronization & restoration of Active Driver Trip from Firebase (single source of truth)
     LaunchedEffect(driverId, driverPhone) {
         repo.listenToDriverActiveTrip(driverId, driverPhone).collectLatest { remoteTrip ->
             if (remoteTrip != null) {
+                val activeId = remoteTrip.id.ifBlank { remoteTrip.requestId }
+                if (activeId.isNotBlank()) {
+                    com.example.data.remote.RideManager.observeActiveTrip(activeId)
+                }
+                val now = System.currentTimeMillis()
+                val isStale = (now - remoteTrip.createdAt) > (2 * 60 * 60 * 1000L) && remoteTrip.createdAt > 0
+                if (isStale) {
+                    // Stale / ghost ride from previous session - purge it and do not display
+                    scope.launch {
+                        repo.clearActiveDriverTrip(driverId)
+                    }
+                    notifManager.dismissDriverActiveRideNotification()
+                    activeDriverTrip = null
+                    driverRouteResult = null
+                    offerSentRequestId = null
+                    return@collectLatest
+                }
+
                 if (remoteTrip.status == PassengerOrderStatus.CANCELLED) {
                     if (activeDriverTrip != null && (activeDriverTrip?.id == remoteTrip.id || activeDriverTrip?.requestId == remoteTrip.requestId)) {
                         Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
@@ -631,6 +914,14 @@ fun DriverModeView(
                         offerSentRequestId = remoteTrip.requestId.ifBlank { remoteTrip.id }
                         driverRecenterTrigger++
                     }
+                }
+            } else {
+                // If database active trip is null, clear any local active trip state
+                if (activeDriverTrip != null) {
+                    notifManager.dismissDriverActiveRideNotification()
+                    activeDriverTrip = null
+                    driverRouteResult = null
+                    offerSentRequestId = null
                 }
             }
         }
@@ -805,6 +1096,7 @@ fun DriverModeView(
                     startAddress = "Current Location",
                     destinationAddress = trip.pickupTitle
                 )
+                driverRouteResult = pickupNavRoute ?: passengerRoute
                 currentNavInstruction = "Drive to Pickup: ${trip.pickupTitle}"
 
                 val points = pickupNavRoute?.points ?: listOf(GeoPoint(startLat, startLon), GeoPoint(targetLat, targetLon))
@@ -958,11 +1250,12 @@ fun DriverModeView(
     // Map interaction state to slide down bottom sheet when driver touches/drags map
     var isMapTouched by remember { mutableStateOf(false) }
     var isRequestsFeedExpanded by remember { mutableStateOf(false) }
+    val isDark = MaterialTheme.drigoColors.isDark
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF1E2026))
+            .background(MaterialTheme.colorScheme.background)
             .testTag("driver_mode_view")
     ) {
         // Fullscreen OSM Map with Driver Car Marker & Request Pins
@@ -970,26 +1263,31 @@ fun DriverModeView(
             modifier = Modifier.fillMaxSize(),
             currentLatitude = driverGeoPoint.latitude,
             currentLongitude = driverGeoPoint.longitude,
-            fromLocation = if (activeDriverTrip != null) AppLocation(
-                title = activeDriverTrip!!.pickupTitle,
-                subtitle = activeDriverTrip!!.pickupSubtitle,
-                latitude = if (activeDriverTrip!!.pickupLat != 0.0) activeDriverTrip!!.pickupLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151),
-                longitude = if (activeDriverTrip!!.pickupLon != 0.0) activeDriverTrip!!.pickupLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249)
-            ) else selectedRequestForOffer?.let {
-                AppLocation(title = it.pickupTitle, subtitle = it.pickupSubtitle, latitude = it.pickupLat, longitude = it.pickupLon)
+            fromLocation = activeDriverTrip?.let { trip ->
+                AppLocation(
+                    title = trip.pickupTitle,
+                    subtitle = trip.pickupSubtitle,
+                    latitude = if (trip.pickupLat != 0.0) trip.pickupLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151),
+                    longitude = if (trip.pickupLon != 0.0) trip.pickupLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249)
+                )
+            } ?: selectedRequestForOffer?.let { req ->
+                AppLocation(title = req.pickupTitle, subtitle = req.pickupSubtitle, latitude = req.pickupLat, longitude = req.pickupLon)
             },
-            toLocation = if (activeDriverTrip != null) AppLocation(
-                title = activeDriverTrip!!.destinationTitle,
-                subtitle = activeDriverTrip!!.destinationSubtitle,
-                latitude = if (activeDriverTrip!!.destinationLat != 0.0) activeDriverTrip!!.destinationLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151) + 0.02,
-                longitude = if (activeDriverTrip!!.destinationLon != 0.0) activeDriverTrip!!.destinationLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249) + 0.02
-            ) else selectedRequestForOffer?.let {
-                AppLocation(title = it.destinationTitle, subtitle = it.destinationSubtitle, latitude = it.destinationLat, longitude = it.destinationLon)
+            toLocation = activeDriverTrip?.let { trip ->
+                AppLocation(
+                    title = trip.destinationTitle,
+                    subtitle = trip.destinationSubtitle,
+                    latitude = if (trip.destinationLat != 0.0) trip.destinationLat else (driverGeoPoint.latitude.takeIf { it != 0.0 } ?: 34.0151) + 0.02,
+                    longitude = if (trip.destinationLon != 0.0) trip.destinationLon else (driverGeoPoint.longitude.takeIf { it != 0.0 } ?: 71.5249) + 0.02
+                )
+            } ?: selectedRequestForOffer?.let { req ->
+                AppLocation(title = req.destinationTitle, subtitle = req.destinationSubtitle, latitude = req.destinationLat, longitude = req.destinationLon)
             },
             routeResult = driverRouteResult,
             driverCarLocation = driverGeoPoint,
             driverCarBearing = driverBearing,
             driverCarTitle = "$driverName ($driverVehicleModel)",
+            driverCarFareText = activeDriverTrip?.let { "${it.agreedFare} Rs" } ?: selectedRequestForOffer?.let { "${it.estimatedFare} Rs" },
             passengerRequestsOnMap = if (isDriverOnline && activeDriverTrip == null) filteredRequests else emptyList(),
             onPassengerRequestMarkerClick = { req ->
                 selectedRequestForOffer = req
@@ -1009,8 +1307,8 @@ fun DriverModeView(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xF5101218),
-                            Color(0xD0101218),
+                            MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.95f else 0.98f),
+                            MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.80f else 0.85f),
                             Color.Transparent
                         )
                     )
@@ -1024,16 +1322,66 @@ fun DriverModeView(
                 val isCompact = availableWidth < 365.dp
                 val isVeryCompact = availableWidth < 330.dp
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (selectedRequestForOffer != null && activeDriverTrip == null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            onClick = { selectedRequestForOffer = null },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Ride request",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+
+                        Surface(
+                            onClick = { showTariffsSheet = true },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Settings",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     // Menu Drawer Button
                     Surface(
                         onClick = onOpenDrawer,
                         shape = CircleShape,
-                        color = Color(0xFF1E222D).copy(alpha = 0.95f),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
                         border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.6f)),
                         shadowElevation = 4.dp,
                         modifier = Modifier
@@ -1044,71 +1392,59 @@ fun DriverModeView(
                             Icon(
                                 imageVector = Icons.Default.Menu,
                                 contentDescription = "Menu",
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
                     }
 
-                    // Driver Online / Offline Pill Switch
+                    // Driver Online / Offline Pill Switch (Styling matching official inDrive / Drigo screenshot)
                     Surface(
                         onClick = handleToggleOnlineClick,
                         shape = RoundedCornerShape(100.dp),
-                        color = if (isDriverOnline) Color(0xFF0D381E) else Color(0xFF222630),
+                        color = if (isDark) Color(0xFF262A34) else MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(
-                            1.5.dp,
-                            if (isDriverOnline) Color(0xFF00E676) else Color(0xFF434959)
+                            1.dp,
+                            if (isDriverOnline) Color(0xFF00E676).copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
                         ),
-                        shadowElevation = 6.dp,
+                        shadowElevation = 4.dp,
                         modifier = Modifier
-                            .height(38.dp)
+                            .width(124.dp)
+                            .height(36.dp)
                             .testTag("driver_online_toggle_chip")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = if (isCompact) 10.dp else 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(3.dp),
+                            contentAlignment = if (isDriverOnline) Alignment.CenterEnd else Alignment.CenterStart
                         ) {
-                            if (isDriverOnline) {
-                                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                                val pulseAlpha by infiniteTransition.animateFloat(
-                                    initialValue = 0.35f,
-                                    targetValue = 1f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(800, easing = FastOutSlowInEasing),
-                                        repeatMode = RepeatMode.Reverse
-                                    ),
-                                    label = "pulseAlpha"
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(Color(0xFF00E676).copy(alpha = pulseAlpha), CircleShape)
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(Color(0xFF90A4AE), CircleShape)
-                                )
+                            Surface(
+                                shape = RoundedCornerShape(100.dp),
+                                color = if (isDriverOnline) Color(0xFF00E676) else Color(0xFFFF5C5C),
+                                modifier = Modifier
+                                    .width(66.dp)
+                                    .fillMaxHeight()
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = if (isDriverOnline) "Online" else "Offline",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.5.sp,
+                                        color = Color(0xFF13151B)
+                                    )
+                                }
                             }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isDriverOnline) "ONLINE" else "OFFLINE",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isDriverOnline) Color(0xFF00E676) else Color(0xFFCFD8DC),
-                                fontSize = 12.sp,
-                                letterSpacing = 0.5.sp
-                            )
                         }
                     }
 
-                    // Top Right Action Buttons: Voice Toggle + SOS + Wallet
+                    // Top Right Action Buttons: On Location-Off screen shows clean Settings Gear (matching screenshot)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(if (isVeryCompact) 3.dp else if (isCompact) 4.dp else 6.dp)
                     ) {
-                        // Voice Alert Toggle Button
+                        if (isDeviceLocationReady) {
+                            // Voice Alert Toggle Button
                         Surface(
                             onClick = {
                                 isVoiceAlertsEnabled = !isVoiceAlertsEnabled
@@ -1120,8 +1456,8 @@ fun DriverModeView(
                                 ).show()
                             },
                             shape = CircleShape,
-                            color = if (isVoiceAlertsEnabled) Color(0xFF2B203F) else Color(0xFF1E222D),
-                            border = BorderStroke(1.dp, if (isVoiceAlertsEnabled) DrigoBrandPurple else Color(0xFF353B4A)),
+                            color = if (isVoiceAlertsEnabled) DrigoBrandPurple.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, if (isVoiceAlertsEnabled) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant),
                             shadowElevation = 4.dp,
                             modifier = Modifier
                                 .size(38.dp)
@@ -1131,8 +1467,95 @@ fun DriverModeView(
                                 Icon(
                                     imageVector = if (isVoiceAlertsEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
                                     contentDescription = "Voice Alerts",
-                                    tint = if (isVoiceAlertsEnabled) DrigoBrandPurple else Color(0xFF78909C),
+                                    tint = if (isVoiceAlertsEnabled) DrigoBrandPurple else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+
+                        // Notification Center Bell Button with Badge
+                        Surface(
+                            onClick = { showDriverNotificationCenterSheet = true },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .testTag("driver_notification_center_btn")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = "Driver Notifications",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                if (driverNotificationHistory.isNotEmpty()) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(0xFF00E676),
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .align(Alignment.TopEnd)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = if (driverNotificationHistory.size > 9) "9+" else "${driverNotificationHistory.size}",
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color.Black
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Sunlight / High-Contrast Mode Quick Toggle
+                        Surface(
+                            onClick = {
+                                driverContrastTheme = when (driverContrastTheme) {
+                                    DriverContrastTheme.NORMAL -> DriverContrastTheme.HIGH_CONTRAST_DARK
+                                    DriverContrastTheme.HIGH_CONTRAST_DARK -> DriverContrastTheme.HIGH_CONTRAST_LIGHT
+                                    DriverContrastTheme.HIGH_CONTRAST_LIGHT -> DriverContrastTheme.NORMAL
+                                }
+                                val themeMsg = when (driverContrastTheme) {
+                                    DriverContrastTheme.NORMAL -> "Standard Display Mode"
+                                    DriverContrastTheme.HIGH_CONTRAST_DARK -> "Sunlight High-Contrast (Dark)"
+                                    DriverContrastTheme.HIGH_CONTRAST_LIGHT -> "Sunlight High-Contrast (Light)"
+                                }
+                                Toast.makeText(context, themeMsg, Toast.LENGTH_SHORT).show()
+                            },
+                            shape = CircleShape,
+                            color = when (driverContrastTheme) {
+                                DriverContrastTheme.HIGH_CONTRAST_LIGHT -> Color.White
+                                DriverContrastTheme.HIGH_CONTRAST_DARK -> Color(0xFF00E676)
+                                DriverContrastTheme.NORMAL -> MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
+                            },
+                            border = BorderStroke(
+                                1.5.dp,
+                                if (driverContrastTheme != DriverContrastTheme.NORMAL) Color(0xFF00E676) else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .testTag("driver_sunlight_mode_btn")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = when (driverContrastTheme) {
+                                        DriverContrastTheme.HIGH_CONTRAST_LIGHT -> Icons.Default.WbSunny
+                                        DriverContrastTheme.HIGH_CONTRAST_DARK -> Icons.Default.BrightnessMedium
+                                        DriverContrastTheme.NORMAL -> Icons.Outlined.WbSunny
+                                    },
+                                    contentDescription = "Sunlight High-Contrast Mode",
+                                    tint = when (driverContrastTheme) {
+                                        DriverContrastTheme.HIGH_CONTRAST_LIGHT -> Color.Black
+                                        DriverContrastTheme.HIGH_CONTRAST_DARK -> Color.Black
+                                        DriverContrastTheme.NORMAL -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -1162,7 +1585,7 @@ fun DriverModeView(
                         Surface(
                             onClick = onNavigateToWallet,
                             shape = RoundedCornerShape(100.dp),
-                            color = Color(0xFF14171F).copy(alpha = 0.96f),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                             border = BorderStroke(1.dp, Color(0xFF00E676).copy(alpha = 0.5f)),
                             shadowElevation = 6.dp,
                             modifier = Modifier
@@ -1184,9 +1607,39 @@ fun DriverModeView(
                                     text = if (isVeryCompact) "₨ $formattedWalletBalance" else "PKR $formattedWalletBalance",
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = if (isVeryCompact) 10.5.sp else 11.5.sp,
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     softWrap = false
+                                )
+                            }
+                        }
+                    }
+
+                    // Driver Tariff & Vehicle Eligibility Settings Gear (from screenshot)
+                        Surface(
+                            onClick = { showTariffsSheet = true },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            shadowElevation = 4.dp,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .testTag("driver_settings_gear_btn")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Driver Settings",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                                // Red notification dot badge (matches screenshot)
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .align(Alignment.TopEnd)
+                                        .padding(top = 1.dp, end = 1.dp)
+                                        .background(Color(0xFFFF5252), CircleShape)
                                 )
                             }
                         }
@@ -1196,11 +1649,11 @@ fun DriverModeView(
         }
 
         // Active Trip Turn-by-Turn Navigation Bar (Item 2)
-        if (activeDriverTrip != null) {
+        if (activeDriverTrip != null && !isActiveTripSheetExpanded) {
             val trip = activeDriverTrip!!
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF1E1E2E).copy(alpha = 0.96f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                 border = BorderStroke(1.5.dp, DrigoBrandPurple),
                 shadowElevation = 8.dp,
                 modifier = Modifier
@@ -1233,7 +1686,7 @@ fun DriverModeView(
                             text = currentNavInstruction,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1255,7 +1708,7 @@ fun DriverModeView(
                             launchExternalGpsNavigation(targetLat, targetLon, targetTitle)
                         },
                         shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF2C303E),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(1.dp, Color(0xFF4FC3F7)),
                         modifier = Modifier.padding(start = 6.dp)
                     ) {
@@ -1274,7 +1727,59 @@ fun DriverModeView(
                                 text = "Maps",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Share Trip / Route Button
+                    Surface(
+                        onClick = {
+                            val isHeadingToPickup = trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING
+                            val destTitle = if (isHeadingToPickup) trip.pickupTitle else trip.destinationTitle
+                            val targetLat = if (isHeadingToPickup) trip.pickupLat else trip.destinationLat
+                            val targetLon = if (isHeadingToPickup) trip.pickupLon else trip.destinationLon
+                            val shareText = "I am on an active Drigo trip!\n\n" +
+                                    "📍 Pickup: ${trip.pickupTitle}\n" +
+                                    "🏁 Destination: ${trip.destinationTitle}\n" +
+                                    "⏱️ Distance/ETA: $distanceRemainingText\n" +
+                                    "💳 Fare: PKR ${trip.agreedFare}\n" +
+                                    (if (targetLat != 0.0 && targetLon != 0.0) "🗺️ Route: https://maps.google.com/?q=$targetLat,$targetLon\n\n" else "\n") +
+                                    "Drigo Captain Live Route"
+
+                            try {
+                                val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Drigo Trip Status & Route")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                                }
+                                val shareIntent = android.content.Intent.createChooser(sendIntent, "Share Route & ETA via")
+                                context.startActivity(shareIntent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Unable to share ride info", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, DrigoBrandPurple),
+                        modifier = Modifier.padding(start = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share Route",
+                                tint = DrigoBrandPurple,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Share",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -1448,32 +1953,107 @@ fun DriverModeView(
 
             Surface(
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                color = Color(0xFF1E2026),
-                shadowElevation = 16.dp,
+                color = Color(0xFF181A20),
+                shadowElevation = 20.dp,
                 border = BorderStroke(1.dp, Color(0xFF2C303E)),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(
+                        if (isActiveTripSheetExpanded) Modifier.fillMaxHeight(0.82f)
+                        else Modifier.wrapContentHeight()
+                    )
                     .align(Alignment.BottomCenter)
+                    .animateContentSize()
                     .testTag("driver_active_trip_sheet")
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 14.dp)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
-                    // Top Drag handle
-                    Box(
+                    // Interactive Header Drag Pill & Expand/Collapse Toggle Header
+                    Row(
                         modifier = Modifier
-                            .width(40.dp)
-                            .height(4.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.25f))
-                            .align(Alignment.CenterHorizontally)
-                    )
+                            .fillMaxWidth()
+                            .clickable { isActiveTripSheetExpanded = !isActiveTripSheetExpanded }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left Status Badge
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = when (trip.status) {
+                                PassengerOrderStatus.DRIVER_ARRIVED -> Color(0xFFE65100).copy(alpha = 0.2f)
+                                PassengerOrderStatus.IN_TRIP -> DrigoBrandPurple.copy(alpha = 0.2f)
+                                else -> Color(0xFF00C853).copy(alpha = 0.2f)
+                            },
+                            border = BorderStroke(1.dp, when (trip.status) {
+                                PassengerOrderStatus.DRIVER_ARRIVED -> Color(0xFFFF9800)
+                                PassengerOrderStatus.IN_TRIP -> DrigoBrandPurple
+                                else -> Color(0xFF00C853)
+                            })
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = when (trip.status) {
+                                        PassengerOrderStatus.DRIVER_ARRIVED -> Color(0xFFFF9800)
+                                        PassengerOrderStatus.IN_TRIP -> DrigoBrandPurple
+                                        else -> Color(0xFF00C853)
+                                    },
+                                    modifier = Modifier.size(8.dp)
+                                ) {}
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = when (trip.status) {
+                                        PassengerOrderStatus.DRIVER_ARRIVED -> "ARRIVED AT PICKUP"
+                                        PassengerOrderStatus.IN_TRIP -> "RIDE IN PROGRESS"
+                                        else -> "EN ROUTE TO PICKUP"
+                                    },
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                        // Center Drag Pill
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.35f))
+                        )
 
-                    // Passenger Info Header
+                        // Right Expand / Collapse Button
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isActiveTripSheetExpanded) "Collapse" else "Details",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF90A4AE)
+                            )
+                            Icon(
+                                imageVector = if (isActiveTripSheetExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                contentDescription = if (isActiveTripSheetExpanded) "Collapse" else "Expand",
+                                tint = Color(0xFF90A4AE),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Main Passenger & Fare Header Row (Always Visible)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -1481,32 +2061,35 @@ fun DriverModeView(
                         Surface(
                             shape = CircleShape,
                             color = DrigoBrandPurple.copy(alpha = 0.2f),
-                            border = BorderStroke(1.5.dp, DrigoBrandPurple),
-                            modifier = Modifier.size(46.dp)
+                            border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.6f)),
+                            modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Person,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Surface(
-                                    shape = RoundedCornerShape(6.dp),
+                                    shape = RoundedCornerShape(4.dp),
                                     color = Color(0xFF2E7D32)
                                 ) {
                                     Text(
@@ -1514,212 +2097,500 @@ fun DriverModeView(
                                         color = Color.White,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                     )
                                 }
                             }
                             Text(
-                                text = "Fare: PKR $totalCashToCollect • ${trip.paymentMethod}",
-                                style = MaterialTheme.typography.bodySmall,
+                                text = "Fare: PKR $totalCashToCollect • ${trip.paymentMethod.ifBlank { "Cash" }}",
+                                fontSize = 11.sp,
                                 color = Color(0xFF00E676),
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
-                        // Call Passenger Button
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Quick Action Buttons Cluster
                         val passPhone = trip.passengerPhone.ifBlank { "+92 300 9876543" }
                         val passName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } }
                         val targetNavLat = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLat else trip.pickupLat
                         val targetNavLon = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLon else trip.pickupLon
                         val targetNavTitle = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationTitle else trip.pickupTitle
 
-                        IconButton(
-                            onClick = {
-                                launchExternalGpsNavigation(targetNavLat, targetNavLon, targetNavTitle)
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF0288D1))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Navigation,
-                                contentDescription = "Navigate GPS",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        IconButton(
-                            onClick = {
-                                try {
-                                    val cleanPhone = passPhone.replace(" ", "")
-                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {
-                                    Toast.makeText(context, "Calling $passName ($passPhone)", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2C303E))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Call,
-                                contentDescription = "Call Passenger",
-                                tint = Color(0xFF00E676),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        // In-app Chat Button
-                        IconButton(
-                            onClick = {
-                                onOpenChat(
-                                    trip.id,
-                                    passName,
-                                    "Passenger",
-                                    passPhone,
-                                    trip.pickupTitle,
-                                    trip.destinationTitle
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // GPS Navigation
+                            IconButton(
+                                onClick = {
+                                    launchExternalGpsNavigation(targetNavLat, targetNavLon, targetNavTitle)
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF0288D1))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Navigation,
+                                    contentDescription = "Navigate GPS",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(DrigoBrandPurple.copy(alpha = 0.3f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Chat,
-                                contentDescription = "Chat",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            }
+
+                            // Call
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val cleanPhone = passPhone.replace(" ", "")
+                                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Calling $passName ($passPhone)", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2C303E))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Call,
+                                    contentDescription = "Call Passenger",
+                                    tint = Color(0xFF00E676),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            // Chat
+                            IconButton(
+                                onClick = {
+                                    onOpenChat(
+                                        trip.id,
+                                        passName,
+                                        "Passenger",
+                                        passPhone,
+                                        trip.pickupTitle,
+                                        trip.destinationTitle
+                                    )
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(DrigoBrandPurple.copy(alpha = 0.35f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Chat,
+                                    contentDescription = "Chat",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            // Share Ride Status
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val shareMsg = "Drigo Ride Status Update:\n" +
+                                                "Passenger: $passName\n" +
+                                                "Pickup: ${trip.pickupTitle}\n" +
+                                                "Destination: ${trip.destinationTitle}\n" +
+                                                "Fare: PKR $totalCashToCollect\n" +
+                                                "Status: ${if (trip.status == PassengerOrderStatus.IN_TRIP) "Driving to Destination" else "Heading to Pickup"}"
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "Drigo Active Ride Status")
+                                            putExtra(Intent.EXTRA_TEXT, shareMsg)
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share Ride Details"))
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Unable to share ride details", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF37474F))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Share Ride",
+                                    tint = Color(0xFF4FC3F7),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
 
-                    // Live Wait Time Banner when Captain has arrived (Item 2)
-                    if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED) {
-                        Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Middle Area: Compact target focus card when collapsed, full scrollable view when expanded
+                    if (!isActiveTripSheetExpanded) {
+                        // Collapsed Active Target Focus Card (Clean, high information density, zero clutter)
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = if (waitTimeSeconds <= 300) Color(0xFF1B5E20).copy(alpha = 0.4f) else Color(0xFFE65100).copy(alpha = 0.4f),
-                            border = BorderStroke(1.dp, if (waitTimeSeconds <= 300) Color(0xFF4CAF50) else Color(0xFFFF9800)),
+                            color = Color(0xFF12141A),
+                            border = BorderStroke(1.dp, Color(0xFF262A36)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Timer,
-                                        contentDescription = null,
-                                        tint = if (waitTimeSeconds <= 300) Color(0xFF81C784) else Color(0xFFFFB74D),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        val min = waitTimeSeconds / 60
-                                        val sec = waitTimeSeconds % 60
-                                        Text(
-                                            text = "Waiting Time: ${String.format(java.util.Locale.US, "%02d:%02d", min, sec)}",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
-                                            color = Color.White
+                            if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED) {
+                                // Live Wait Time Banner
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Timer,
+                                            contentDescription = null,
+                                            tint = if (waitTimeSeconds <= 300) Color(0xFF81C784) else Color(0xFFFFB74D),
+                                            modifier = Modifier.size(18.dp)
                                         )
-                                        Text(
-                                            text = if (waitTimeSeconds <= 300) "Free waiting: ${(300 - waitTimeSeconds) / 60}m remaining" else "Paid wait fee (+PKR 5/min)",
-                                            fontSize = 11.sp,
-                                            color = if (waitTimeSeconds <= 300) Color(0xFFB0BEC5) else Color(0xFFFFB74D)
-                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            val min = waitTimeSeconds / 60
+                                            val sec = waitTimeSeconds % 60
+                                            Text(
+                                                text = "Waiting Time: ${String.format(java.util.Locale.US, "%02d:%02d", min, sec)}",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = if (waitTimeSeconds <= 300) "Free wait: ${(300 - waitTimeSeconds) / 60}m left" else "Paid wait (+PKR 5/min)",
+                                                fontSize = 10.sp,
+                                                color = if (waitTimeSeconds <= 300) Color(0xFFB0BEC5) else Color(0xFFFFB74D)
+                                            )
+                                        }
+                                    }
+                                    if (extraWaitFee > 0) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFFFF9800)
+                                        ) {
+                                            Text(
+                                                text = "+PKR $extraWaitFee",
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 11.sp,
+                                                color = Color.Black,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                 }
+                            } else {
+                                // Target Location Summary (Heading to Pickup vs Heading to Dropoff)
+                                val isHeadingToDropoff = trip.status == PassengerOrderStatus.IN_TRIP
+                                val targetTitle = if (isHeadingToDropoff) trip.destinationTitle.ifBlank { "Destination Location" } else trip.pickupTitle.ifBlank { "Pickup Location" }
+                                val targetSubtitle = if (isHeadingToDropoff) trip.destinationSubtitle else trip.pickupSubtitle
 
-                                if (extraWaitFee > 0) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFFFF9800)
-                                    ) {
+                                        shape = CircleShape,
+                                        color = if (isHeadingToDropoff) Color(0xFFE53935) else Color(0xFF00C853),
+                                        modifier = Modifier.size(10.dp)
+                                    ) {}
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "+PKR $extraWaitFee",
-                                            fontWeight = FontWeight.ExtraBold,
+                                            text = if (isHeadingToDropoff) "Drop-off: $targetTitle" else "Pickup: $targetTitle",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (targetSubtitle.isNotBlank()) {
+                                            Text(
+                                                text = targetSubtitle,
+                                                fontSize = 10.sp,
+                                                color = Color(0xFF90A4AE),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    if (distanceRemainingText.isNotBlank()) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = distanceRemainingText.substringBefore("•").trim(),
                                             fontSize = 11.sp,
-                                            color = Color.Black,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF4FC3F7)
                                         )
                                     }
                                 }
                             }
+                        }
+                    } else {
+                        // EXPANDED VIEW: Scrollable Comprehensive Details
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            // Trip Progress Stepper Bar
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF14161C),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Step 1: Accepted
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = Color(0xFF00C853),
+                                            modifier = Modifier.size(18.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(12.dp))
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Accepted", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+
+                                    Box(modifier = Modifier.weight(1f).height(2.dp).padding(horizontal = 6.dp).background(if (trip.status != PassengerOrderStatus.ACCEPTED && trip.status != PassengerOrderStatus.DRIVER_COMING) Color(0xFF00C853) else Color(0xFF37474F)))
+
+                                    // Step 2: Arrived
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED || trip.status == PassengerOrderStatus.IN_TRIP) Color(0xFF00C853) else Color(0xFF37474F),
+                                            modifier = Modifier.size(18.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED || trip.status == PassengerOrderStatus.IN_TRIP) {
+                                                    Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.Black, modifier = Modifier.size(12.dp))
+                                                } else {
+                                                    Text("2", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Arrived", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED) Color(0xFFFF9800) else Color.White)
+                                    }
+
+                                    Box(modifier = Modifier.weight(1f).height(2.dp).padding(horizontal = 6.dp).background(if (trip.status == PassengerOrderStatus.IN_TRIP) Color(0xFF00C853) else Color(0xFF37474F)))
+
+                                    // Step 3: Destination
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = if (trip.status == PassengerOrderStatus.IN_TRIP) DrigoBrandPurple else Color(0xFF37474F),
+                                            modifier = Modifier.size(18.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text("3", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("In Trip", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (trip.status == PassengerOrderStatus.IN_TRIP) DrigoBrandPurple else Color(0xFFB0BEC5))
+                                    }
+                                }
+                            }
+
+                            // Live Wait Time Banner when Captain has arrived
+                            if (trip.status == PassengerOrderStatus.DRIVER_ARRIVED) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (waitTimeSeconds <= 300) Color(0xFF1B5E20).copy(alpha = 0.4f) else Color(0xFFE65100).copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, if (waitTimeSeconds <= 300) Color(0xFF4CAF50) else Color(0xFFFF9800)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Timer,
+                                                contentDescription = null,
+                                                tint = if (waitTimeSeconds <= 300) Color(0xFF81C784) else Color(0xFFFFB74D),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Column {
+                                                val min = waitTimeSeconds / 60
+                                                val sec = waitTimeSeconds % 60
+                                                Text(
+                                                    text = "Waiting Time: ${String.format(java.util.Locale.US, "%02d:%02d", min, sec)}",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = Color.White
+                                                )
+                                                Text(
+                                                    text = if (waitTimeSeconds <= 300) "Free waiting: ${(300 - waitTimeSeconds) / 60}m remaining" else "Paid wait fee (+PKR 5/min)",
+                                                    fontSize = 11.sp,
+                                                    color = if (waitTimeSeconds <= 300) Color(0xFFB0BEC5) else Color(0xFFFFB74D)
+                                                )
+                                            }
+                                        }
+
+                                        if (extraWaitFee > 0) {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = Color(0xFFFF9800)
+                                            ) {
+                                                Text(
+                                                    text = "+PKR $extraWaitFee",
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontSize = 11.sp,
+                                                    color = Color.Black,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Route Summary & Details Card
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF14161C),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    val pickupLat = if (trip.pickupLat != 0.0) trip.pickupLat else 34.0151
+                                    val pickupLon = if (trip.pickupLon != 0.0) trip.pickupLon else 71.5249
+                                    val destLat = if (trip.destinationLat != 0.0) trip.destinationLat else 34.0351
+                                    val destLon = if (trip.destinationLon != 0.0) trip.destinationLon else 71.5449
+
+                                    Row(verticalAlignment = Alignment.Top) {
+                                        Surface(shape = CircleShape, color = Color(0xFF00C853), modifier = Modifier.padding(top = 3.dp).size(8.dp)) {}
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = trip.pickupTitle.ifBlank { "Pickup Location" },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (trip.pickupSubtitle.isNotBlank()) {
+                                                Text(
+                                                    text = trip.pickupSubtitle,
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF90A4AE),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Text(
+                                                text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", pickupLat, pickupLon),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFF81D4FA)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Row(verticalAlignment = Alignment.Top) {
+                                        Surface(shape = CircleShape, color = Color(0xFFE53935), modifier = Modifier.padding(top = 3.dp).size(8.dp)) {}
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = trip.destinationTitle.ifBlank { "Destination Location" },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White.copy(alpha = 0.9f),
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (trip.destinationSubtitle.isNotBlank()) {
+                                                Text(
+                                                    text = trip.destinationSubtitle,
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF90A4AE),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Text(
+                                                text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", destLat, destLon),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xFFFF8A80)
+                                            )
+                                        }
+                                    }
+
+                                    // Extra Route Details (Visible when expanded)
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    HorizontalDivider(color = Color(0xFF2C303E))
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text("Category", fontSize = 11.sp, color = Color(0xFF78909C))
+                                            Text(trip.rideCategory.ifBlank { "Ride Mini" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                        Column {
+                                            Text("Est. Distance", fontSize = 11.sp, color = Color(0xFF78909C))
+                                            Text("${if (trip.distanceKm > 0) String.format("%.1f", trip.distanceKm) else "8.5"} km", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                        }
+                                        Column {
+                                            Text("Payment", fontSize = 11.sp, color = Color(0xFF78909C))
+                                            Text(trip.paymentMethod.ifBlank { "💵 Cash" }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E676))
+                                        }
+                                    }
+
+                                    // Tolls / Surcharges Row
+                                    if (tollSurchargesPkr > 0) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Tolls & Surcharges added:",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF4FC3F7)
+                                            )
+                                            Text(
+                                                text = "+PKR $tollSurchargesPkr",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF4FC3F7)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Route Summary & Toll Surcharges Bar
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF14161C),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(shape = CircleShape, color = Color(0xFF00C853), modifier = Modifier.size(8.dp)) {}
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = trip.pickupTitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(shape = CircleShape, color = Color(0xFFE53935), modifier = Modifier.size(8.dp)) {}
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = trip.destinationTitle,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            // Tolls / Surcharges Row (Item 2)
-                            if (tollSurchargesPkr > 0) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Tolls & Surcharges added:",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF4FC3F7)
-                                    )
-                                    Text(
-                                        text = "+PKR $tollSurchargesPkr",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF4FC3F7)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Dynamic InDrive Action Step Button
+                    // Dynamic Action Step Buttons (Fixed at bottom - Oversized 58-60dp for Captain Road Safety)
                     when (trip.status) {
                         PassengerOrderStatus.ACCEPTED, PassengerOrderStatus.DRIVER_COMING -> {
                             Button(
@@ -1737,19 +2608,19 @@ fun DriverModeView(
                                         Toast.makeText(context, "Passenger notified: You have arrived!", Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(50.dp)
+                                    .height(58.dp)
                                     .testTag("driver_arrived_button")
                             ) {
-                                Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = Color.White)
+                                Icon(imageVector = Icons.Default.LocationOn, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "I HAVE ARRIVED AT PICKUP",
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 14.sp,
+                                    text = "ARRIVED AT PICKUP",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 17.sp,
                                     color = Color.White
                                 )
                             }
@@ -1761,15 +2632,15 @@ fun DriverModeView(
                             ) {
                                 OutlinedButton(
                                     onClick = { showPinVerificationDialog = true },
-                                    shape = RoundedCornerShape(14.dp),
-                                    border = BorderStroke(1.dp, DrigoBrandPurple),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.5.dp, DrigoBrandPurple),
                                     modifier = Modifier
-                                        .weight(0.32f)
-                                        .height(50.dp)
+                                        .weight(0.30f)
+                                        .height(58.dp)
                                 ) {
-                                    Icon(imageVector = Icons.Default.Shield, contentDescription = null, tint = DrigoBrandPurple, modifier = Modifier.size(16.dp))
+                                    Icon(imageVector = Icons.Default.Shield, contentDescription = null, tint = DrigoBrandPurple, modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("PIN", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DrigoBrandPurple)
+                                    Text("PIN", fontWeight = FontWeight.Black, fontSize = 14.sp, color = DrigoBrandPurple)
                                 }
 
                                 Button(
@@ -1787,19 +2658,19 @@ fun DriverModeView(
                                             Toast.makeText(context, "Ride Started! Head to destination.", Toast.LENGTH_SHORT).show()
                                         }
                                     },
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
                                     modifier = Modifier
-                                        .weight(0.68f)
-                                        .height(50.dp)
+                                        .weight(0.70f)
+                                        .height(58.dp)
                                         .testTag("driver_start_trip_button")
                                 ) {
-                                    Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = Color.White)
+                                    Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "START RIDE",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 18.sp,
                                         color = Color.White
                                     )
                                 }
@@ -1810,18 +2681,18 @@ fun DriverModeView(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                // Add Toll / Surcharge Button (Item 2)
+                                // Add Toll / Surcharge Button
                                 OutlinedButton(
                                     onClick = { showTollAddDialog = true },
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF4FC3F7)),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.5.dp, Color(0xFF4FC3F7)),
                                     modifier = Modifier
-                                        .weight(0.38f)
-                                        .height(50.dp)
+                                        .weight(0.34f)
+                                        .height(58.dp)
                                 ) {
                                     Text(
                                         text = "+ Toll/Extra",
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFF4FC3F7)
                                     )
@@ -1836,9 +2707,47 @@ fun DriverModeView(
                                         todayEarnings += totalCashToCollect
                                         completedTripsCount += 1
                                         completedTripForRating = updated
+                                        val calcDist = calculateDistanceKm(updated.pickupLat, updated.pickupLon, updated.destinationLat, updated.destinationLon).let { if (it > 0) String.format("%.1f", it).toDouble() else 8.5 }
+                                        val newHistoryEntry = DriverHistoryItem(
+                                            id = updated.id,
+                                            tripId = updated.id,
+                                            requestId = updated.requestId.ifBlank { updated.id },
+                                            driverId = driverId,
+                                            passengerId = updated.passengerId,
+                                            passengerName = updated.passengerName.ifBlank { "Passenger" },
+                                            passengerRating = 4.9,
+                                            pickupAddress = updated.pickupTitle,
+                                            pickupTitle = updated.pickupTitle,
+                                            pickupLatitude = if (updated.pickupLat != 0.0) updated.pickupLat else null,
+                                            pickupLongitude = if (updated.pickupLon != 0.0) updated.pickupLon else null,
+                                            destinationAddress = updated.destinationTitle,
+                                            destinationTitle = updated.destinationTitle,
+                                            destinationLatitude = if (updated.destinationLat != 0.0) updated.destinationLat else null,
+                                            destinationLongitude = if (updated.destinationLon != 0.0) updated.destinationLon else null,
+                                            farePkr = totalCashToCollect,
+                                            agreedFare = totalCashToCollect,
+                                            paymentMethod = updated.paymentMethod.ifBlank { "💵 Cash" },
+                                            dateFormatted = "Just now",
+                                            distanceKm = calcDist,
+                                            distance = calcDist,
+                                            durationMins = if (updated.durationMinutes > 0) updated.durationMinutes else 18,
+                                            duration = if (updated.durationMinutes > 0) updated.durationMinutes else 18,
+                                            status = "COMPLETED",
+                                            tripStatus = "COMPLETED",
+                                            category = updated.rideCategory.ifBlank { "Ride Mini" },
+                                            rideType = updated.rideCategory.ifBlank { "Ride Mini" },
+                                            vehicleType = if (updated.driverVehicleMake.isNotBlank()) "${updated.driverVehicleMake} ${updated.driverVehicleModel}".trim() else updated.rideCategory,
+                                            timestamp = System.currentTimeMillis(),
+                                            requestedAt = if (updated.createdAt > 0) updated.createdAt else null,
+                                            completedAt = System.currentTimeMillis()
+                                        )
                                         showPassengerRatingDialog = true
                                         audioHelper.playTripCompleteChime(totalCashToCollect, trip.id)
                                         scope.launch {
+                                            repo.saveDriverTripHistoryItem(driverId, newHistoryEntry)
+                                            if (driverPhone.isNotBlank() && driverPhone != driverId) {
+                                                repo.saveDriverTripHistoryItem(driverPhone, newHistoryEntry)
+                                            }
                                             repo.updateDriverTripStatus(
                                                 trip.id,
                                                 PassengerOrderStatus.COMPLETED,
@@ -1846,11 +2755,13 @@ fun DriverModeView(
                                                 passengerId = trip.passengerId,
                                                 driverId = driverId
                                             )
-                                            repo.creditDriverEarnings(
-                                                userId = walletUserId,
+                                            val payMethodStr = trip.paymentMethod.ifBlank { "Cash" }
+                                            repo.processRidePayment(
+                                                passengerId = trip.passengerId,
+                                                driverId = driverId,
                                                 tripId = trip.id,
                                                 amount = totalCashToCollect.toDouble(),
-                                                description = "Ride Payment: ${trip.pickupTitle.take(20)} → ${trip.destinationTitle.take(20)}"
+                                                paymentMethod = payMethodStr
                                             )
                                             repo.updateLiveDriverLocation(
                                                 LiveDriverLocation(
@@ -1868,17 +2779,17 @@ fun DriverModeView(
                                             )
                                         }
                                     },
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
                                     modifier = Modifier
-                                        .weight(0.62f)
-                                        .height(50.dp)
+                                        .weight(0.66f)
+                                        .height(58.dp)
                                         .testTag("driver_complete_trip_button")
                                 ) {
                                     Text(
                                         text = "COMPLETE RIDE",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 17.sp,
                                         color = Color.White
                                     )
                                 }
@@ -1887,20 +2798,128 @@ fun DriverModeView(
                         else -> {}
                     }
 
-                    // Cancel Trip Button (Item 4)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    TextButton(
-                        onClick = { showCancelTripDialog = true },
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    // Cancel Trip & Emergency Dismiss Actions
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Cancel Trip",
-                            color = Color(0xFFEF5350),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        TextButton(
+                            onClick = { showCancelTripDialog = true }
+                        ) {
+                            Text(
+                                text = "Cancel Trip",
+                                color = Color(0xFFEF5350),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        TextButton(
+                            onClick = {
+                                val tripToDismiss = activeDriverTrip
+                                scope.launch {
+                                    if (tripToDismiss != null) {
+                                        repo.updateDriverTripStatus(
+                                            tripToDismiss.id,
+                                            PassengerOrderStatus.COMPLETED,
+                                            requestId = tripToDismiss.requestId,
+                                            passengerId = tripToDismiss.passengerId,
+                                            driverId = driverId
+                                        )
+                                    }
+                                    repo.clearActiveDriverTrip(driverId)
+                                }
+                                notifManager.dismissDriverActiveRideNotification()
+                                activeDriverTrip = null
+                                driverRouteResult = null
+                                offerSentRequestId = null
+                                driverRecenterTrigger++
+                                Toast.makeText(context, "Ride dismissed and cleared", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Text(
+                                text = "Dismiss / End Ride",
+                                color = Color(0xFF9E9E9E),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
+            }
+        } else if (!isDeviceLocationReady && selectedDriverTab == "REQUESTS") {
+            // ================= DRIVER LOCATION OFF SCREEN (Matches official inDrive / Drigo screenshot) =================
+            DriverLocationOffScreen(
+                onGoToSettings = handleOpenLocationSettings,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 68.dp, bottom = 62.dp)
+            )
+        } else if (isDriverOnline && selectedRequestForOffer != null) {
+            // Route Inspection Map Floating Callout Badges
+            selectedRequestForOffer?.let { inspectReq ->
+            val distKmToPickup = if (driverGeoPoint.latitude != 0.0 && driverGeoPoint.longitude != 0.0 && inspectReq.pickupLat != 0.0) {
+                calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, inspectReq.pickupLat, inspectReq.pickupLon)
+            } else 0.8
+            val etaMinsToPickup = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 16.dp, top = 72.dp, end = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF1B5E20),
+                        border = BorderStroke(1.5.dp, Color(0xFF00E676)),
+                        shadowElevation = 6.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "$etaMinsToPickup min • %.1f km".format(java.util.Locale.US, distKmToPickup),
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF0D47A1),
+                        border = BorderStroke(1.5.dp, Color(0xFF2979FF)),
+                        shadowElevation = 6.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Navigation, contentDescription = null, tint = Color(0xFF2979FF), modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${inspectReq.durationMinutes} min • %.1f km".format(java.util.Locale.US, inspectReq.distanceKm),
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
             }
         } else if (isDriverOnline) {
             // ================= PASSENGER RIDE REQUESTS FEED (inDrive style) =================
@@ -1912,18 +2931,12 @@ fun DriverModeView(
             )
 
             Surface(
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                color = Color(0xFF181A20),
-                shadowElevation = 16.dp,
-                border = BorderStroke(1.dp, Color(0xFF2C303E)),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 8.dp,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .offset(y = sheetTranslationY)
-                    .then(
-                        if (isRequestsFeedExpanded) Modifier.fillMaxHeight(0.92f)
-                        else Modifier.fillMaxHeight(0.55f)
-                    )
-                    .align(Alignment.BottomCenter)
+                    .fillMaxSize()
+                    .padding(top = 64.dp, bottom = 62.dp)
                     .testTag("driver_requests_feed_panel")
             ) {
                 Column(
@@ -1946,7 +2959,7 @@ fun DriverModeView(
                                 .width(40.dp)
                                 .height(4.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.4f))
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                         )
                     }
 
@@ -1968,7 +2981,7 @@ fun DriverModeView(
                                 text = "Ride Requests Nearby",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1993,12 +3006,42 @@ fun DriverModeView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            // Smart Tariffs & Vehicle Eligibility Trigger (Image 13)
+                            Surface(
+                                onClick = { showTariffsSheet = true },
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.testTag("driver_tariffs_trigger")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsCar,
+                                        contentDescription = "Vehicle Tariffs",
+                                        tint = if (isDark) Color(0xFF29B6F6) else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Tariffs",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
                             // Filter Button Trigger
                             Surface(
                                 onClick = { showFilterSheet = true },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (selectedCategoryFilter != "All" || selectedMaxDistanceFilterKm != null || destinationModeActive) DrigoBrandPurple.copy(alpha = 0.3f) else Color(0xFF282B35),
-                                border = BorderStroke(1.dp, if (selectedCategoryFilter != "All" || selectedMaxDistanceFilterKm != null || destinationModeActive) DrigoBrandPurple else Color(0xFF3B4052))
+                                color = if (selectedCategoryFilter != "All" || selectedMaxDistanceFilterKm != null || destinationModeActive) DrigoBrandPurple.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (selectedCategoryFilter != "All" || selectedMaxDistanceFilterKm != null || destinationModeActive) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant)
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
@@ -2007,7 +3050,7 @@ fun DriverModeView(
                                     Icon(
                                         imageVector = Icons.Default.Tune,
                                         contentDescription = "Filter Rides",
-                                        tint = Color.White,
+                                        tint = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -2015,7 +3058,37 @@ fun DriverModeView(
                                         text = "Filters",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
+
+                            // View Mode Toggle (Card View vs Compact List View)
+                            Surface(
+                                onClick = { isCompactListView = !isCompactListView },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isCompactListView) DrigoBrandPurple.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (isCompactListView) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.testTag("driver_view_mode_toggle")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (isCompactListView) Icons.Default.FormatListBulleted else Icons.Default.ViewAgenda,
+                                        contentDescription = if (isCompactListView) "Switch to Card View" else "Switch to List View",
+                                        tint = if (isCompactListView) (if (isDark) Color(0xFFC6FF00) else DrigoBrandPurple) else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (isCompactListView) "List" else "Cards",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         softWrap = false
                                     )
@@ -2028,12 +3101,12 @@ fun DriverModeView(
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF282B35))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
                             ) {
                                 Icon(
                                     imageVector = if (isRequestsFeedExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
                                     contentDescription = if (isRequestsFeedExpanded) "Collapse Feed" else "Expand Fullscreen",
-                                    tint = Color.White,
+                                    tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -2048,6 +3121,94 @@ fun DriverModeView(
                             .fillMaxWidth()
                             .padding(vertical = 6.dp)
                     ) {
+                        // Quick Toggle Chip: Sunlight High-Contrast Mode
+                        item {
+                            FilterChip(
+                                selected = driverContrastTheme != DriverContrastTheme.NORMAL,
+                                onClick = {
+                                    driverContrastTheme = when (driverContrastTheme) {
+                                        DriverContrastTheme.NORMAL -> DriverContrastTheme.HIGH_CONTRAST_DARK
+                                        DriverContrastTheme.HIGH_CONTRAST_DARK -> DriverContrastTheme.HIGH_CONTRAST_LIGHT
+                                        DriverContrastTheme.HIGH_CONTRAST_LIGHT -> DriverContrastTheme.NORMAL
+                                    }
+                                    val themeMsg = when (driverContrastTheme) {
+                                        DriverContrastTheme.NORMAL -> "Standard Display Mode"
+                                        DriverContrastTheme.HIGH_CONTRAST_DARK -> "Sunlight High-Contrast (Dark)"
+                                        DriverContrastTheme.HIGH_CONTRAST_LIGHT -> "Sunlight High-Contrast (Light)"
+                                    }
+                                    Toast.makeText(context, themeMsg, Toast.LENGTH_SHORT).show()
+                                },
+                                label = {
+                                    Text(
+                                        text = when (driverContrastTheme) {
+                                            DriverContrastTheme.NORMAL -> "☀️ Sunlight Mode"
+                                            DriverContrastTheme.HIGH_CONTRAST_DARK -> "☀️ Sunlight (Dark)"
+                                            DriverContrastTheme.HIGH_CONTRAST_LIGHT -> "☀️ Sunlight (Light)"
+                                        },
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFF00E676),
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    labelColor = if (isDark) Color(0xFF00E676) else MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                        }
+
+                        // Quick Toggle Chip: Auto-Accept Mode
+                        item {
+                            FilterChip(
+                                selected = isAutoAcceptEnabled,
+                                onClick = {
+                                    isAutoAcceptEnabled = !isAutoAcceptEnabled
+                                    Toast.makeText(context, if (isAutoAcceptEnabled) "Auto-Accept Mode Enabled (PKR $autoAcceptMinFare+)" else "Auto-Accept Disabled", Toast.LENGTH_SHORT).show()
+                                },
+                                label = {
+                                    Text(
+                                        text = if (isAutoAcceptEnabled) "⚡ Auto-Accept (PKR $autoAcceptMinFare+)" else "⚡ Auto-Accept",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Color(0xFFFFB300),
+                                    selectedLabelColor = Color.Black,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    labelColor = if (isDark) Color(0xFFFFD54F) else MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                        }
+
+                        // Quick Toggle Chip: On My Way Home Mode
+                        item {
+                            FilterChip(
+                                selected = destinationModeActive,
+                                onClick = {
+                                    destinationModeActive = !destinationModeActive
+                                    if (destinationModeActive && destinationModeText.isBlank()) {
+                                        destinationModeText = "Rawalpindi"
+                                    }
+                                    Toast.makeText(context, if (destinationModeActive) "On My Way Home Mode Active ($destinationModeText)" else "On My Way Home Disabled", Toast.LENGTH_SHORT).show()
+                                },
+                                label = {
+                                    Text(
+                                        text = if (destinationModeActive) "🏠 Home: ${destinationModeText.ifBlank { "Active" }}" else "🏠 Home Mode",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = DrigoBrandPurple,
+                                    selectedLabelColor = Color.White,
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    labelColor = if (isDark) Color(0xFFCE93D8) else MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                        }
+
                         item {
                             FilterChip(
                                 selected = selectedCategoryFilter == "All",
@@ -2056,12 +3217,12 @@ fun DriverModeView(
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = DrigoBrandPurple,
                                     selectedLabelColor = Color.White,
-                                    containerColor = Color(0xFF222530),
-                                    labelColor = Color(0xFFB0BEC5)
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             )
                         }
-                        listOf("Ride A/C", "Mini", "Bike", "Courier", "City to city").forEach { cat ->
+                        listOf("Share Ride", "Private Ride", "Ride A/C", "Mini", "Bike", "Courier", "City to city").forEach { cat ->
                             item {
                                 FilterChip(
                                     selected = selectedCategoryFilter.equals(cat, ignoreCase = true),
@@ -2072,8 +3233,8 @@ fun DriverModeView(
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = DrigoBrandPurple,
                                         selectedLabelColor = Color.White,
-                                        containerColor = Color(0xFF222530),
-                                        labelColor = Color(0xFFB0BEC5)
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        labelColor = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 )
                             }
@@ -2111,20 +3272,20 @@ fun DriverModeView(
                                         text = "Searching for passenger requests...",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = "Real passenger ride requests created nearby will appear here in real time",
                                         fontSize = 12.sp,
-                                        color = Color(0xFF90A4AE),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Center
                                     )
                                 } else {
                                     Icon(
                                         imageVector = Icons.Default.SearchOff,
                                         contentDescription = null,
-                                        tint = Color(0xFF78909C),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(40.dp)
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -2132,13 +3293,13 @@ fun DriverModeView(
                                         text = "No requests match your active filters",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White.copy(alpha = 0.9f)
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = "Try clearing filters (${allRequests.size} active request${if (allRequests.size > 1) "s" else ""} in the area)",
                                         fontSize = 11.sp,
-                                        color = Color(0xFF78909C),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         textAlign = TextAlign.Center
                                     )
                                 }
@@ -2152,111 +3313,122 @@ fun DriverModeView(
                                 .fillMaxWidth()
                                 .weight(1f)
                         ) {
-                            items(filteredRequests, key = { it.id }) { req ->
-                                DriverRideRequestCard(
-                                    request = req,
-                                    isSelected = selectedRequestForOffer?.id == req.id,
-                                    isOfferSent = offerSentRequestId == req.id,
-                                    driverLat = driverGeoPoint.latitude,
-                                    driverLon = driverGeoPoint.longitude,
-                                    onSelect = { selectedRequestForOffer = req },
-                                    onAcceptOffer = {
-                                        scope.launch {
-                                            isSendingOffer = true
-                                            val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
-                                            val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+                            items(filteredRequests, key = { req -> req.id.ifBlank { "req_${req.hashCode()}" } }) { req ->
+                                if (isCompactListView) {
+                                    DriverCompactRideRequestItem(
+                                        request = req,
+                                        contrastTheme = driverContrastTheme,
+                                        isSelected = selectedRequestForOffer?.id == req.id,
+                                        isOfferSent = offerSentRequestId == req.id,
+                                        driverLat = driverGeoPoint.latitude,
+                                        driverLon = driverGeoPoint.longitude,
+                                        onSelect = { selectedRequestForOffer = req },
+                                        onAcceptOffer = {
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
 
-                                            val offer = DriverOffer(
-                                                requestId = req.id,
-                                                driverId = driverId,
-                                                driverName = driverName,
-                                                driverVehicleMake = driverVehicleMake,
-                                                driverVehicleModel = driverVehicleModel,
-                                                driverPlateNumber = driverVehicleNumber,
-                                                driverPhone = driverPhone,
-                                                offeredFare = req.estimatedFare,
-                                                etaMinutes = etaMins,
-                                                distanceKmAway = distKmToPickup,
-                                                driverLat = driverGeoPoint.latitude,
-                                                driverLon = driverGeoPoint.longitude
-                                            )
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = req.estimatedFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
 
-                                            val order = PassengerOrder(
-                                                id = req.id,
-                                                requestId = req.id,
-                                                passengerId = req.passengerId,
-                                                passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
-                                                passengerEmail = req.passengerEmail,
-                                                passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
-                                                pickupTitle = req.pickupTitle,
-                                                pickupSubtitle = req.pickupSubtitle,
-                                                pickupLat = req.pickupLat,
-                                                pickupLon = req.pickupLon,
-                                                destinationTitle = req.destinationTitle,
-                                                destinationSubtitle = req.destinationSubtitle,
-                                                destinationLat = req.destinationLat,
-                                                destinationLon = req.destinationLon,
-                                                distanceKm = req.distanceKm,
-                                                durationMinutes = req.durationMinutes,
-                                                rideCategory = req.rideCategory,
-                                                agreedFare = req.estimatedFare,
-                                                paymentMethod = req.paymentMethod,
-                                                driverName = driverName,
-                                                driverRating = 4.9,
-                                                driverTotalRides = 1420,
-                                                driverVehicleMake = driverVehicleMake,
-                                                driverVehicleModel = driverVehicleModel,
-                                                driverPlateNumber = driverVehicleNumber,
-                                                driverPhone = driverPhone,
-                                                assignedDriverId = driverId,
-                                                status = PassengerOrderStatus.DRIVER_COMING,
-                                                etaMinutes = etaMins
-                                            )
-                                            // Immediately show Active Ride view on driver screen
-                                            activeDriverTrip = order
-                                            offerSentRequestId = req.id
-                                            selectedRequestForOffer = null
-                                            tollSurchargesPkr = 0
-                                            driverRecenterTrigger++
-                                            Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
-
-                                            val result = repo.acceptRideRequest(req.id, offer, order)
-                                            isSendingOffer = false
-                                            if (!result.isSuccess || !result.getOrDefault(false)) {
-                                                activeDriverTrip = null
-                                                offerSentRequestId = null
+                                                val order = PassengerOrder(
+                                                    id = req.id,
+                                                    requestId = req.id,
+                                                    passengerId = req.passengerId,
+                                                    passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
+                                                    passengerEmail = req.passengerEmail,
+                                                    passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
+                                                    pickupTitle = req.pickupTitle,
+                                                    pickupSubtitle = req.pickupSubtitle,
+                                                    pickupLat = req.pickupLat,
+                                                    pickupLon = req.pickupLon,
+                                                    destinationTitle = req.destinationTitle,
+                                                    destinationSubtitle = req.destinationSubtitle,
+                                                    destinationLat = req.destinationLat,
+                                                    destinationLon = req.destinationLon,
+                                                    distanceKm = req.distanceKm,
+                                                    durationMinutes = req.durationMinutes,
+                                                    rideCategory = req.rideCategory,
+                                                    agreedFare = req.estimatedFare,
+                                                    paymentMethod = req.paymentMethod,
+                                                    driverName = driverName,
+                                                    driverRating = 4.9,
+                                                    driverTotalRides = 1420,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    assignedDriverId = driverId,
+                                                    status = PassengerOrderStatus.DRIVER_COMING,
+                                                    etaMinutes = etaMins
+                                                )
+                                                // Immediately show Active Ride view on driver screen
+                                                activeDriverTrip = order
+                                                offerSentRequestId = req.id
+                                                selectedRequestForOffer = null
+                                                tollSurchargesPkr = 0
                                                 driverRecenterTrigger++
-                                                Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
+
+                                                val result = repo.acceptRideRequest(req.id, offer, order)
+                                                isSendingOffer = false
+                                                if (!result.isSuccess || !result.getOrDefault(false)) {
+                                                    activeDriverTrip = null
+                                                    offerSentRequestId = null
+                                                    driverRecenterTrigger++
+                                                    Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
+                                                }
+                                            }
+                                        },
+                                        onCounterOffer = { counterFare ->
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = counterFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+                                                repo.sendDriverOffer(offer)
+                                                offerSentRequestId = req.id
+                                                isSendingOffer = false
+                                                Toast.makeText(context, "Counter-offer of PKR $counterFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
                                             }
                                         }
-                                    },
-                                    onCounterOffer = { counterFare ->
-                                        scope.launch {
-                                            isSendingOffer = true
-                                            val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
-                                            val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
-
-                                            val offer = DriverOffer(
-                                                requestId = req.id,
-                                                driverId = driverId,
-                                                driverName = driverName,
-                                                driverVehicleMake = driverVehicleMake,
-                                                driverVehicleModel = driverVehicleModel,
-                                                driverPlateNumber = driverVehicleNumber,
-                                                driverPhone = driverPhone,
-                                                offeredFare = counterFare,
-                                                etaMinutes = etaMins,
-                                                distanceKmAway = distKmToPickup,
-                                                driverLat = driverGeoPoint.latitude,
-                                                driverLon = driverGeoPoint.longitude
-                                            )
-                                            repo.sendDriverOffer(offer)
-                                            offerSentRequestId = req.id
-                                            isSendingOffer = false
-                                            Toast.makeText(context, "Counter-offer of PKR $counterFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                )
+                                    )
+                                } else {
+                                    PassengerRequestItemCard(
+                                        request = req,
+                                        driverLat = driverGeoPoint.latitude,
+                                        driverLon = driverGeoPoint.longitude,
+                                        contrastTheme = driverContrastTheme,
+                                        onSelect = { selectedRequestForOffer = req }
+                                    )
+                                }
                             }
                         }
                     }
@@ -2337,49 +3509,171 @@ fun DriverModeView(
         }
 
         // Floating Recenter Location FAB for Driver
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(
-                    end = 16.dp,
-                    bottom = if (activeDriverTrip != null) 340.dp else if (isDriverOnline) (if (isRequestsFeedExpanded) 90.dp else 470.dp) else 230.dp
-                ),
-            contentAlignment = Alignment.BottomEnd
-        ) {
-            Surface(
-                onClick = {
-                    scope.launch {
-                        try {
-                            val loc = locationHelper.getCurrentLocation()
-                            if (loc != null) {
-                                driverGeoPoint = GeoPoint(loc.latitude, loc.longitude)
-                                if (loc.bearing != 0f) driverBearing = loc.bearing
-                                if (loc.speedKmh > 0f) currentSpeedKmh = loc.speedKmh
-                            }
-                        } catch (_: Exception) {}
-                        driverRecenterTrigger++
-                    }
-                },
-                shape = CircleShape,
-                color = Color(0xFF1E2026).copy(alpha = 0.96f),
-                border = BorderStroke(1.dp, Color(0xFF2C303B)),
-                shadowElevation = 6.dp,
+        if (!isActiveTripSheetExpanded && isDeviceLocationReady) {
+            Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .testTag("driver_recenter_location_btn")
+                    .fillMaxSize()
+                    .padding(
+                        end = 16.dp,
+                        bottom = if (activeDriverTrip != null) 295.dp else if (isDriverOnline) (if (isRequestsFeedExpanded) 90.dp else 470.dp) else 230.dp
+                    ),
+                contentAlignment = Alignment.BottomEnd
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.NearMe,
-                        contentDescription = "Recenter to My Location",
-                        tint = Color(0xFF00E676),
-                        modifier = Modifier.size(22.dp)
-                    )
+                Surface(
+                    onClick = {
+                        scope.launch {
+                            try {
+                                val loc = locationHelper.getCurrentLocation()
+                                if (loc != null) {
+                                    driverGeoPoint = GeoPoint(loc.latitude, loc.longitude)
+                                    if (loc.bearing != 0f) driverBearing = loc.bearing
+                                    if (loc.speedKmh > 0f) currentSpeedKmh = loc.speedKmh
+                                }
+                            } catch (_: Exception) {}
+                            driverRecenterTrigger++
+                        }
+                    },
+                    shape = CircleShape,
+                    color = Color(0xFF1E2026).copy(alpha = 0.96f),
+                    border = BorderStroke(1.dp, Color(0xFF2C303B)),
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("driver_recenter_location_btn")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.NearMe,
+                            contentDescription = "Recenter to My Location",
+                            tint = Color(0xFF00E676),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
         }
 
+        // Bottom Navigation Bar (Image 2: Ride Requests vs Performance Tabs)
+        if (activeDriverTrip == null) {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shadowElevation = 12.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Ride Requests Tab
+                    Surface(
+                        onClick = { selectedDriverTab = "REQUESTS" },
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("driver_nav_requests_tab")
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FormatListBulleted,
+                                contentDescription = "Ride requests",
+                                tint = if (selectedDriverTab == "REQUESTS") DrigoBrandPurple else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "Ride requests",
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedDriverTab == "REQUESTS") FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (selectedDriverTab == "REQUESTS") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Performance Tab
+                    Surface(
+                        onClick = { selectedDriverTab = "PERFORMANCE" },
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("driver_nav_performance_tab")
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.GridView,
+                                contentDescription = "Performance",
+                                tint = if (selectedDriverTab == "PERFORMANCE") DrigoBrandPurple else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "Performance",
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedDriverTab == "PERFORMANCE") FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (selectedDriverTab == "PERFORMANCE") MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Driver Performance Screen Overlay (Image 2)
+        if (selectedDriverTab == "PERFORMANCE" && activeDriverTrip == null) {
+            DriverPerformanceScreen(
+                driverName = driverName,
+                driverRating = driverPerformanceRating,
+                driverRidesThisWeek = driverRidesThisWeek,
+                todayIncomePkr = todayIncomePkr,
+                dailyGoalPkr = dailyGoalPkr,
+                walletBalancePkr = walletBalancePkr,
+                activeBonusesCount = activeBonusesCount,
+                onSeeBenefitsClick = { showTierBenefitsSheet = true },
+                onIncomeClick = { showIncomeDetailsSheet = true },
+                onAddGoalClick = { showAddDailyGoalSheet = true },
+                onTopUpClick = onNavigateToWallet,
+                onBonusesClick = { showBonusesSheet = true },
+                onOpenDrawer = onOpenDrawer,
+                onBackClick = { selectedDriverTab = "REQUESTS" },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Driver Trip History Screen Overlay
+        if (selectedDriverTab == "HISTORY" && activeDriverTrip == null) {
+            DriverTripHistoryScreen(
+                driverName = driverName,
+                completedTrips = activeDriverTripHistoryList,
+                onOpenDrawer = onOpenDrawer,
+                onBackClick = { selectedDriverTab = "REQUESTS" },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
         // ================= DIALOGS & BOTTOM SHEETS =================
+
+        // Driver Notification Center Modal Sheet
+        if (showDriverNotificationCenterSheet) {
+            NotificationCenterSheet(
+                notifications = driverNotificationHistory,
+                onDismiss = { showDriverNotificationCenterSheet = false },
+                onClearAll = { notifManager.clearNotificationHistory() }
+            )
+        }
 
         // 1. Toll & Surcharges Dialog (Item 2)
         if (showTollAddDialog) {
@@ -2463,11 +3757,597 @@ fun DriverModeView(
             )
         }
 
+        // 1.5. Ride Request Details Bottom Sheet (matching reference image)
+        selectedRequestForOffer?.let { req ->
+            var expandedBidding by remember(req.id) { mutableStateOf(false) }
+            var customBidText by remember(req.id) { mutableStateOf("") }
+            val sheetFocusManager = LocalFocusManager.current
+
+            ModalBottomSheet(
+                onDismissRequest = { selectedRequestForOffer = null },
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrimColor = Color.Black.copy(alpha = 0.6f),
+                dragHandle = {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 12.dp)
+                            .width(40.dp)
+                            .height(4.dp)
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                    )
+                }
+            ) {
+                val distAwayKm = if (driverGeoPoint.latitude != 0.0 && driverGeoPoint.longitude != 0.0 && req.pickupLat != 0.0) {
+                    calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon)
+                } else 0.9
+
+                val etaMins = ((distAwayKm / 25.0) * 60.0).toInt().coerceIn(2, 25)
+                val formattedFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(req.estimatedFare)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    // Profile + Info Main Section
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Left Column: Profile Avatar + Name + Rating + Min Away
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.width(70.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = DrigoBrandPurple,
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = req.passengerName.trim().take(1).uppercase().ifBlank { "J" },
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 24.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = req.passengerName.ifBlank { "jawad" },
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFC107),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Text(
+                                    text = String.format(java.util.Locale.US, "%.2f", if (req.passengerRating > 0.0) req.passengerRating else 4.73),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+
+                            Text(
+                                text = "(44)",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = "$etaMins min.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // Right Column: Fare + Routes + Category Pill
+                        Column(modifier = Modifier.weight(1f)) {
+                            // Top Row: Distance & Fare & Fair Price Badge
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = String.format(java.util.Locale.US, "~%.1f km", req.distanceKm),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = "PKR$formattedFare",
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+
+                                // Fair price Pill
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isDark) Color(0xFF1E1428) else MaterialTheme.colorScheme.secondaryContainer,
+                                    border = BorderStroke(1.dp, if (isDark) Color(0xFFCE93D8).copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.TrendingUp,
+                                            contentDescription = null,
+                                            tint = if (isDark) Color(0xFFE040FB) else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Text(
+                                            text = "Fair price",
+                                            color = if (isDark) Color(0xFFCE93D8) else MaterialTheme.colorScheme.onSecondaryContainer,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Route Timeline Details (A & B)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                // A & B Indicator Icons with a connecting line
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(top = 4.dp, end = 12.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .background(Color(0xFF2979FF), CircleShape)
+                                    ) {
+                                        Text("A", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .width(1.5.dp)
+                                            .height(30.dp)
+                                            .background(MaterialTheme.colorScheme.outlineVariant)
+                                    )
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .background(Color(0xFF00E676), CircleShape)
+                                    ) {
+                                        Text("B", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                                    }
+                                }
+
+                                // Destination and Pickup Text
+                                Column(modifier = Modifier.weight(1f)) {
+                                    // Pickup A Address + Coordinates
+                                    Text(
+                                        text = req.pickupTitle,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (req.pickupSubtitle.isNotBlank()) {
+                                        Text(
+                                            text = req.pickupSubtitle,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", req.pickupLat, req.pickupLon),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isDark) Color(0xFF81D4FA) else MaterialTheme.colorScheme.primary
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Destination B Address + Coordinates
+                                    Text(
+                                        text = req.destinationTitle,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (req.destinationSubtitle.isNotBlank()) {
+                                        Text(
+                                            text = req.destinationSubtitle,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = String.format(java.util.Locale.US, "📍 Lat: %.5f, Lon: %.5f", req.destinationLat, req.destinationLon),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isDark) Color(0xFFFF8A80) else MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Mini/Ride Category pill
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.align(Alignment.Start)
+                            ) {
+                                Text(
+                                    text = req.rideCategory.ifBlank { "Mini" },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Bidding controls (if expandedBidding is true)
+                    AnimatedVisibility(
+                        visible = expandedBidding,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(if (isDark) Color(0xFF1E2026) else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Select or Enter Counter-Offer (PKR):",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val base = req.estimatedFare
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(base + 50, base + 100, base + 150).forEach { fare ->
+                                    val formattedCounterFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(fare)
+                                    Surface(
+                                        onClick = {
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = fare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+                                                repo.sendDriverOffer(offer)
+                                                offerSentRequestId = req.id
+                                                isSendingOffer = false
+                                                selectedRequestForOffer = null
+                                                Toast.makeText(context, "Counter-offer of PKR $fare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                            }
+                                            expandedBidding = false
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = DrigoBrandPurple.copy(alpha = if (isDark) 0.3f else 0.12f),
+                                        border = BorderStroke(1.dp, DrigoBrandPurple),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "+${fare - base}",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "PKR $formattedCounterFare",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = customBidText,
+                                    onValueChange = { customBidText = it },
+                                    placeholder = { Text("Custom Bid", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), fontSize = 13.sp) },
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number,
+                                        imeAction = ImeAction.Send
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onSend = {
+                                            val customFare = customBidText.toIntOrNull()
+                                            if (customFare != null && customFare > 0) {
+                                                scope.launch {
+                                                    isSendingOffer = true
+                                                    val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                    val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                    val offer = DriverOffer(
+                                                        requestId = req.id,
+                                                        driverId = driverId,
+                                                        driverName = driverName,
+                                                        driverVehicleMake = driverVehicleMake,
+                                                        driverVehicleModel = driverVehicleModel,
+                                                        driverPlateNumber = driverVehicleNumber,
+                                                        driverPhone = driverPhone,
+                                                        offeredFare = customFare,
+                                                        etaMinutes = etaMins,
+                                                        distanceKmAway = distKmToPickup,
+                                                        driverLat = driverGeoPoint.latitude,
+                                                        driverLon = driverGeoPoint.longitude
+                                                    )
+                                                    repo.sendDriverOffer(offer)
+                                                    offerSentRequestId = req.id
+                                                    isSendingOffer = false
+                                                    selectedRequestForOffer = null
+                                                    Toast.makeText(context, "Counter-offer of PKR $customFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                                }
+                                                expandedBidding = false
+                                                customBidText = ""
+                                                sheetFocusManager.clearFocus()
+                                            }
+                                        }
+                                    ),
+                                    modifier = Modifier.weight(1f),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = DrigoBrandPurple,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                Button(
+                                    onClick = {
+                                        val customFare = customBidText.toIntOrNull()
+                                        if (customFare != null && customFare > 0) {
+                                            scope.launch {
+                                                isSendingOffer = true
+                                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                                val offer = DriverOffer(
+                                                    requestId = req.id,
+                                                    driverId = driverId,
+                                                    driverName = driverName,
+                                                    driverVehicleMake = driverVehicleMake,
+                                                    driverVehicleModel = driverVehicleModel,
+                                                    driverPlateNumber = driverVehicleNumber,
+                                                    driverPhone = driverPhone,
+                                                    offeredFare = customFare,
+                                                    etaMinutes = etaMins,
+                                                    distanceKmAway = distKmToPickup,
+                                                    driverLat = driverGeoPoint.latitude,
+                                                    driverLon = driverGeoPoint.longitude
+                                                )
+                                                repo.sendDriverOffer(offer)
+                                                offerSentRequestId = req.id
+                                                isSendingOffer = false
+                                                selectedRequestForOffer = null
+                                                Toast.makeText(context, "Counter-offer of PKR $customFare sent to ${req.passengerName}!", Toast.LENGTH_SHORT).show()
+                                            }
+                                            expandedBidding = false
+                                            customBidText = ""
+                                            sheetFocusManager.clearFocus()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                                    modifier = Modifier.height(48.dp)
+                                ) {
+                                    Text("Send", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Buttons Area:
+                    // 1. Accept Button (high-contrast Lime Green with Dark text)
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isSendingOffer = true
+                                val distKmToPickup = calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon).coerceAtLeast(0.5)
+                                val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
+
+                                val offer = DriverOffer(
+                                    requestId = req.id,
+                                    driverId = driverId,
+                                    driverName = driverName,
+                                    driverVehicleMake = driverVehicleMake,
+                                    driverVehicleModel = driverVehicleModel,
+                                    driverPlateNumber = driverVehicleNumber,
+                                    driverPhone = driverPhone,
+                                    offeredFare = req.estimatedFare,
+                                    etaMinutes = etaMins,
+                                    distanceKmAway = distKmToPickup,
+                                    driverLat = driverGeoPoint.latitude,
+                                    driverLon = driverGeoPoint.longitude
+                                )
+
+                                val order = PassengerOrder(
+                                    id = req.id,
+                                    requestId = req.id,
+                                    passengerId = req.passengerId,
+                                    passengerName = req.passengerName.ifBlank { req.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
+                                    passengerEmail = req.passengerEmail,
+                                    passengerPhone = req.passengerPhone.ifBlank { "+92 300 9876543" },
+                                    pickupTitle = req.pickupTitle,
+                                    pickupSubtitle = req.pickupSubtitle,
+                                    pickupLat = req.pickupLat,
+                                    pickupLon = req.pickupLon,
+                                    destinationTitle = req.destinationTitle,
+                                    destinationSubtitle = req.destinationSubtitle,
+                                    destinationLat = req.destinationLat,
+                                    destinationLon = req.destinationLon,
+                                    distanceKm = req.distanceKm,
+                                    durationMinutes = req.durationMinutes,
+                                    rideCategory = req.rideCategory,
+                                    agreedFare = req.estimatedFare,
+                                    paymentMethod = req.paymentMethod,
+                                    driverName = driverName,
+                                    driverRating = 4.9,
+                                    driverTotalRides = 1420,
+                                    driverVehicleMake = driverVehicleMake,
+                                    driverVehicleModel = driverVehicleModel,
+                                    driverPlateNumber = driverVehicleNumber,
+                                    driverPhone = driverPhone,
+                                    assignedDriverId = driverId,
+                                    status = PassengerOrderStatus.DRIVER_COMING,
+                                    etaMinutes = etaMins
+                                )
+                                // Immediately show Active Ride view on driver screen
+                                activeDriverTrip = order
+                                offerSentRequestId = req.id
+                                selectedRequestForOffer = null
+                                tollSurchargesPkr = 0
+                                driverRecenterTrigger++
+                                Toast.makeText(context, "Ride accepted! Navigating to pickup...", Toast.LENGTH_SHORT).show()
+
+                                val result = repo.acceptRideRequest(req.id, offer, order)
+                                isSendingOffer = false
+                                if (!result.isSuccess || !result.getOrDefault(false)) {
+                                    activeDriverTrip = null
+                                    offerSentRequestId = null
+                                    driverRecenterTrigger++
+                                    Toast.makeText(context, "Ride request was already accepted by another driver or is no longer available.", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFCCFF00)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Text(
+                            text = "Accept for PKR$formattedFare",
+                            color = Color(0xFF13151D),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 2. Offer Your Fare Button
+                    Button(
+                        onClick = { expandedBidding = !expandedBidding },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color(0xFF222634) else MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Text(
+                            text = if (expandedBidding) "Cancel bidding" else "Offer your fare",
+                            color = if (isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 3. Close Button
+                    Button(
+                        onClick = { selectedRequestForOffer = null },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color(0xFF1E2026) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        Text(
+                            text = "Close",
+                            color = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+            }
+        }
+
         // 2. Filter & "On My Way Home" Preferences Sheet (Item 3 & Item 5)
         if (showFilterSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showFilterSheet = false },
-                containerColor = Color(0xFF1E2026),
+                containerColor = MaterialTheme.colorScheme.surface,
                 scrimColor = Color.Black.copy(alpha = 0.6f)
             ) {
                 Column(
@@ -2479,15 +4359,15 @@ fun DriverModeView(
                         text = "Ride Preferences & Audio Settings",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Auto-Accept Mode (Item 3)
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = if (isAutoAcceptEnabled) DrigoBrandPurple.copy(alpha = 0.2f) else Color(0xFF282B36),
-                        border = BorderStroke(1.dp, if (isAutoAcceptEnabled) DrigoBrandPurple else Color(0xFF3E4354)),
+                        color = if (isAutoAcceptEnabled) DrigoBrandPurple.copy(alpha = 0.2f) else if (isDark) Color(0xFF282B36) else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, if (isAutoAcceptEnabled) DrigoBrandPurple else if (isDark) Color(0xFF3E4354) else MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -2500,9 +4380,9 @@ fun DriverModeView(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(imageVector = Icons.Default.Bolt, contentDescription = null, tint = Color(0xFFFFD54F), modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Auto-Accept Rides", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                        Text("Auto-Accept Rides", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                                     }
-                                    Text("Automatically bid on rides that match your fare & distance limits", fontSize = 10.sp, color = Color(0xFF90A4AE))
+                                    Text("Automatically bid on rides that match your fare & distance limits", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Switch(
                                     checked = isAutoAcceptEnabled,
@@ -2527,10 +4407,10 @@ fun DriverModeView(
                                             Surface(
                                                 onClick = { autoAcceptMinFare = fare },
                                                 shape = RoundedCornerShape(6.dp),
-                                                color = if (autoAcceptMinFare == fare) DrigoBrandPurple else Color(0xFF1E2028),
-                                                border = BorderStroke(1.dp, if (autoAcceptMinFare == fare) DrigoBrandPurple else Color(0xFF4A4E60))
+                                                color = if (autoAcceptMinFare == fare) DrigoBrandPurple else if (isDark) Color(0xFF1E2028) else MaterialTheme.colorScheme.surface,
+                                                border = BorderStroke(1.dp, if (autoAcceptMinFare == fare) DrigoBrandPurple else if (isDark) Color(0xFF4A4E60) else MaterialTheme.colorScheme.outlineVariant)
                                             ) {
-                                                Text("PKR $fare+", fontSize = 10.sp, color = Color.White, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                                                Text("PKR $fare+", fontSize = 10.sp, color = if (autoAcceptMinFare == fare || isDark) Color.White else MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
                                             }
                                         }
                                     }
@@ -2546,7 +4426,7 @@ fun DriverModeView(
                         text = "Maximum Pickup Distance",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFB0BEC5)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
@@ -2558,13 +4438,13 @@ fun DriverModeView(
                             Surface(
                                 onClick = { selectedMaxDistanceFilterKm = dist },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (selectedMaxDistanceFilterKm == dist) DrigoBrandPurple else Color(0xFF2A2D3A),
-                                border = BorderStroke(1.dp, if (selectedMaxDistanceFilterKm == dist) DrigoBrandPurple else Color(0xFF3E4354)),
+                                color = if (selectedMaxDistanceFilterKm == dist) DrigoBrandPurple else if (isDark) Color(0xFF2A2D3A) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (selectedMaxDistanceFilterKm == dist) DrigoBrandPurple else if (isDark) Color(0xFF3E4354) else MaterialTheme.colorScheme.outlineVariant),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(
                                     text = label,
-                                    color = Color.White,
+                                    color = if (selectedMaxDistanceFilterKm == dist || isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center,
@@ -2587,12 +4467,12 @@ fun DriverModeView(
                                 text = "On My Way Home Mode",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Only receive rides heading toward your destination",
                                 fontSize = 10.sp,
-                                color = Color(0xFF90A4AE)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Switch(
@@ -2616,12 +4496,63 @@ fun DriverModeView(
                             keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = DrigoBrandPurple,
-                                unfocusedBorderColor = Color.Gray,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        // Quick Presets for Destination Mode
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("Rawalpindi", "Blue Area", "F-10 Markaz", "I-8 Markaz").forEach { loc ->
+                                Surface(
+                                    onClick = { destinationModeText = loc },
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (destinationModeText.contains(loc, true)) DrigoBrandPurple.copy(alpha = 0.3f) else if (isDark) Color(0xFF282B36) else MaterialTheme.colorScheme.surfaceVariant,
+                                    border = BorderStroke(1.dp, if (destinationModeText.contains(loc, true)) DrigoBrandPurple else if (isDark) Color(0xFF3E4354) else MaterialTheme.colorScheme.outlineVariant)
+                                ) {
+                                    Text("📍 $loc", fontSize = 10.sp, color = if (destinationModeText.contains(loc, true) || isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Payment Method Filter
+                    Text(
+                        text = "Payment Method Filter",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("All" to "All Methods", "Cash" to "💵 Cash Only", "Digital" to "💳 Digital Wallet").forEach { (method, label) ->
+                            Surface(
+                                onClick = { selectedPaymentFilter = method },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (selectedPaymentFilter == method) DrigoBrandPurple else if (isDark) Color(0xFF2A2D3A) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (selectedPaymentFilter == method) DrigoBrandPurple else if (isDark) Color(0xFF3E4354) else MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (selectedPaymentFilter == method || isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(vertical = 7.dp)
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -2631,7 +4562,7 @@ fun DriverModeView(
                         text = "Voice Announcements Language",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFB0BEC5)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
@@ -2645,13 +4576,13 @@ fun DriverModeView(
                                 audioHelper.setVoiceLanguage("EN")
                             },
                             shape = RoundedCornerShape(10.dp),
-                            color = if (voiceLanguageChoice == "EN") DrigoBrandPurple else Color(0xFF2A2D3A),
-                            border = BorderStroke(1.dp, if (voiceLanguageChoice == "EN") DrigoBrandPurple else Color(0xFF3E4354)),
+                            color = if (voiceLanguageChoice == "EN") DrigoBrandPurple else if (isDark) Color(0xFF2A2D3A) else MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, if (voiceLanguageChoice == "EN") DrigoBrandPurple else if (isDark) Color(0xFF3E4354) else MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
                                 text = "English TTS",
-                                color = Color.White,
+                                color = if (voiceLanguageChoice == "EN" || isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center,
@@ -2664,13 +4595,13 @@ fun DriverModeView(
                                 audioHelper.setVoiceLanguage("UR")
                             },
                             shape = RoundedCornerShape(10.dp),
-                            color = if (voiceLanguageChoice == "UR") DrigoBrandPurple else Color(0xFF2A2D3A),
-                            border = BorderStroke(1.dp, if (voiceLanguageChoice == "UR") DrigoBrandPurple else Color(0xFF3E4354)),
+                            color = if (voiceLanguageChoice == "UR") DrigoBrandPurple else if (isDark) Color(0xFF2A2D3A) else MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, if (voiceLanguageChoice == "UR") DrigoBrandPurple else if (isDark) Color(0xFF3E4354) else MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
                                 text = "Urdu / Roman TTS",
-                                color = Color.White,
+                                color = if (voiceLanguageChoice == "UR" || isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center,
@@ -2683,9 +4614,9 @@ fun DriverModeView(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF333746))
+                                .background(if (isDark) Color(0xFF333746) else MaterialTheme.colorScheme.surfaceVariant)
                         ) {
-                            Icon(imageVector = Icons.Default.VolumeUp, contentDescription = "Test Audio", tint = Color.White, modifier = Modifier.size(18.dp))
+                            Icon(imageVector = Icons.Default.VolumeUp, contentDescription = "Test Audio", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                         }
                     }
 
@@ -2710,7 +4641,7 @@ fun DriverModeView(
         if (showSafetySosSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showSafetySosSheet = false },
-                containerColor = Color(0xFF181A20),
+                containerColor = MaterialTheme.colorScheme.surface,
                 scrimColor = Color.Black.copy(alpha = 0.7f)
             ) {
                 Column(
@@ -2726,8 +4657,8 @@ fun DriverModeView(
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Text("Drigo Captain Safety Center", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                            Text("24/7 Driver Protection & Emergency Assistance", fontSize = 11.sp, color = Color(0xFFEF9A9A))
+                            Text("Drigo Captain Safety Center", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
+                            Text("24/7 Driver Protection & Emergency Assistance", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
                         }
                     }
 
@@ -2772,7 +4703,7 @@ fun DriverModeView(
                             }
                         },
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF2C303E),
+                        color = if (isDark) Color(0xFF2C303E) else MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(1.dp, Color(0xFFEF5350)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -2783,8 +4714,8 @@ fun DriverModeView(
                             Icon(imageVector = Icons.Default.MedicalServices, contentDescription = null, tint = Color(0xFFEF5350), modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Call Rescue 1122 (Ambulance / Fire)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
-                                Text("Emergency medical support", fontSize = 11.sp, color = Color(0xFFB0BEC5))
+                                Text("Call Rescue 1122 (Ambulance / Fire)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                Text("Emergency medical support", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Icon(imageVector = Icons.Default.Call, contentDescription = null, tint = Color(0xFFEF5350))
                         }
@@ -2807,7 +4738,7 @@ fun DriverModeView(
                             }
                         },
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF2C303E),
+                        color = if (isDark) Color(0xFF2C303E) else MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(1.dp, Color(0xFF25D366)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -2818,8 +4749,8 @@ fun DriverModeView(
                             Icon(imageVector = Icons.Default.ShareLocation, contentDescription = null, tint = Color(0xFF25D366), modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Share Live Location with Family", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
-                                Text("Send real-time map link via WhatsApp / SMS", fontSize = 11.sp, color = Color(0xFFB0BEC5))
+                                Text("Share Live Location with Family", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                Text("Send real-time map link via WhatsApp / SMS", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -2836,7 +4767,7 @@ fun DriverModeView(
                             }
                         },
                         shape = RoundedCornerShape(14.dp),
-                        color = if (isEmergencySirenActive) Color(0xFFFF1744) else Color(0xFF2C303E),
+                        color = if (isEmergencySirenActive) Color(0xFFFF1744) else if (isDark) Color(0xFF2C303E) else MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(1.dp, Color(0xFFFF5252)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -2847,8 +4778,8 @@ fun DriverModeView(
                             Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = if (isEmergencySirenActive) Color.White else Color(0xFFFF5252), modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(if (isEmergencySirenActive) "Panic Siren Active (Loud Alarm)" else "Trigger Panic Siren Alarm", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
-                                Text("Emits loud alert siren & haptic pulses for immediate protection", fontSize = 11.sp, color = Color(0xFFB0BEC5))
+                                Text(if (isEmergencySirenActive) "Panic Siren Active (Loud Alarm)" else "Trigger Panic Siren Alarm", fontWeight = FontWeight.Bold, color = if (isEmergencySirenActive) Color.White else MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                Text("Emits loud alert siren & haptic pulses for immediate protection", fontSize = 11.sp, color = if (isEmergencySirenActive) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -2858,8 +4789,8 @@ fun DriverModeView(
                     // Live Audio Trip Recording Switch (Item 4)
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF222530),
-                        border = BorderStroke(1.dp, Color(0xFF373B4D)),
+                        color = if (isDark) Color(0xFF222530) else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, if (isDark) Color(0xFF373B4D) else MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -2871,8 +4802,8 @@ fun DriverModeView(
                                 Icon(imageVector = Icons.Default.Mic, contentDescription = null, tint = if (isAudioRecordingActive) Color(0xFF00E676) else Color.Gray, modifier = Modifier.size(20.dp))
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
-                                    Text("Encrypted Audio Safety Recording", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
-                                    Text("Encrypted locally for safety compliance", fontSize = 10.sp, color = Color(0xFF90A4AE))
+                                    Text("Encrypted Audio Safety Recording", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+                                    Text("Encrypted locally for safety compliance", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                             Switch(
@@ -2896,9 +4827,9 @@ fun DriverModeView(
             val trip = activeDriverTrip!!
             AlertDialog(
                 onDismissRequest = { showPinVerificationDialog = false },
-                containerColor = Color(0xFF1E2026),
-                titleContentColor = Color.White,
-                textContentColor = Color.White,
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                textContentColor = MaterialTheme.colorScheme.onSurface,
                 icon = {
                     Surface(
                         shape = CircleShape,
@@ -2918,7 +4849,7 @@ fun DriverModeView(
                         Text(
                             "Ask the passenger for their safety PIN to confirm correct rider boarding.",
                             fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.8f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(14.dp))
@@ -2930,9 +4861,9 @@ fun DriverModeView(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = DrigoBrandPurple,
-                                unfocusedBorderColor = Color.Gray,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                             ),
                             textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 6.sp),
                             modifier = Modifier.width(180.dp)
@@ -2982,7 +4913,7 @@ fun DriverModeView(
                             }
                         }
                     ) {
-                        Text("Skip PIN", color = Color.Gray)
+                        Text("Skip PIN", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             )
@@ -3006,14 +4937,21 @@ fun DriverModeView(
                 farePkr = trip.agreedFare,
                 onDismiss = {
                     showPassengerRatingDialog = false
+                    context.getSharedPreferences("drigo_ratings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("rated_or_skipped_${trip.id}", true).putBoolean("rated_or_skipped_${trip.requestId}", true).apply()
                     completedTripForRating = null
                 },
                 onRatingSubmitted = {
                     showPassengerRatingDialog = false
+                    context.getSharedPreferences("drigo_ratings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("rated_or_skipped_${trip.id}", true).putBoolean("rated_or_skipped_${trip.requestId}", true).apply()
                     completedTripForRating = null
                     Toast.makeText(context, "Passenger rating submitted (+10 Captain Points)", Toast.LENGTH_SHORT).show()
                 },
                 onOpenSafetyReport = {
+                    showPassengerRatingDialog = false
+                    context.getSharedPreferences("drigo_ratings", android.content.Context.MODE_PRIVATE)
+                        .edit().putBoolean("rated_or_skipped_${trip.id}", true).putBoolean("rated_or_skipped_${trip.requestId}", true).apply()
                     driverReportTargetTrip = trip
                     showDriverReportIncident = true
                 }
@@ -3053,7 +4991,8 @@ fun DriverModeView(
                 "Passenger requested cancellation",
                 "Incorrect pickup address",
                 "Excessive passengers / luggage issue",
-                "Vehicle emergency or mechanical issue"
+                "Vehicle emergency or mechanical issue",
+                "Ghost / stale ride from previous session"
             )
             AlertDialog(
                 onDismissRequest = { showCancelTripDialog = false },
@@ -3092,7 +5031,45 @@ fun DriverModeView(
                             val tripToCancel = activeDriverTrip
                             if (tripToCancel != null) {
                                 notifManager.dismissDriverActiveRideNotification()
+                                val cancelledHistoryEntry = DriverHistoryItem(
+                                    id = tripToCancel.id,
+                                    tripId = tripToCancel.id,
+                                    requestId = tripToCancel.requestId.ifBlank { tripToCancel.id },
+                                    driverId = driverId,
+                                    passengerId = tripToCancel.passengerId,
+                                    passengerName = tripToCancel.passengerName.ifBlank { "Passenger" },
+                                    passengerRating = 4.9,
+                                    pickupAddress = tripToCancel.pickupTitle,
+                                    pickupTitle = tripToCancel.pickupTitle,
+                                    pickupLatitude = if (tripToCancel.pickupLat != 0.0) tripToCancel.pickupLat else null,
+                                    pickupLongitude = if (tripToCancel.pickupLon != 0.0) tripToCancel.pickupLon else null,
+                                    destinationAddress = tripToCancel.destinationTitle,
+                                    destinationTitle = tripToCancel.destinationTitle,
+                                    destinationLatitude = if (tripToCancel.destinationLat != 0.0) tripToCancel.destinationLat else null,
+                                    destinationLongitude = if (tripToCancel.destinationLon != 0.0) tripToCancel.destinationLon else null,
+                                    farePkr = tripToCancel.agreedFare,
+                                    agreedFare = tripToCancel.agreedFare,
+                                    paymentMethod = tripToCancel.paymentMethod.ifBlank { "💵 Cash" },
+                                    dateFormatted = "Cancelled",
+                                    distanceKm = if (tripToCancel.distanceKm > 0) tripToCancel.distanceKm else 5.0,
+                                    distance = if (tripToCancel.distanceKm > 0) tripToCancel.distanceKm else 5.0,
+                                    durationMins = if (tripToCancel.durationMinutes > 0) tripToCancel.durationMinutes else 15,
+                                    duration = if (tripToCancel.durationMinutes > 0) tripToCancel.durationMinutes else 15,
+                                    status = "CANCELLED",
+                                    tripStatus = "CANCELLED",
+                                    category = tripToCancel.rideCategory.ifBlank { "Ride Mini" },
+                                    rideType = tripToCancel.rideCategory.ifBlank { "Ride Mini" },
+                                    vehicleType = if (tripToCancel.driverVehicleMake.isNotBlank()) "${tripToCancel.driverVehicleMake} ${tripToCancel.driverVehicleModel}".trim() else tripToCancel.rideCategory,
+                                    timestamp = System.currentTimeMillis(),
+                                    requestedAt = if (tripToCancel.createdAt > 0) tripToCancel.createdAt else null,
+                                    cancelledAt = System.currentTimeMillis(),
+                                    cancellationReason = selectedCancelReason
+                                )
                                 scope.launch {
+                                    repo.saveDriverTripHistoryItem(driverId, cancelledHistoryEntry)
+                                    if (driverPhone.isNotBlank() && driverPhone != driverId) {
+                                        repo.saveDriverTripHistoryItem(driverPhone, cancelledHistoryEntry)
+                                    }
                                     repo.updateDriverTripStatus(
                                         tripToCancel.id,
                                         PassengerOrderStatus.CANCELLED,
@@ -3100,6 +5077,7 @@ fun DriverModeView(
                                         passengerId = tripToCancel.passengerId,
                                         driverId = driverId
                                     )
+                                    repo.clearActiveDriverTrip(driverId)
                                 }
                             }
                             activeDriverTrip = null
@@ -3120,549 +5098,735 @@ fun DriverModeView(
                 }
             )
         }
-    }
-}
 
-@Composable
-fun DriverRideRequestCard(
-    request: RideRequest,
-    isSelected: Boolean,
-    isOfferSent: Boolean,
-    driverLat: Double = 0.0,
-    driverLon: Double = 0.0,
-    onSelect: () -> Unit,
-    onAcceptOffer: () -> Unit,
-    onCounterOffer: (Int) -> Unit
-) {
-    var expandedBidding by remember { mutableStateOf(false) }
-    var customBidText by remember { mutableStateOf("") }
-    val focusManager = LocalFocusManager.current
-
-    val categoryIcon = when (request.rideCategory.lowercase()) {
-        "bike" -> Icons.Default.TwoWheeler
-        "mini" -> Icons.Default.DirectionsCar
-        "ride a/c" -> Icons.Default.AcUnit
-        "courier" -> Icons.Default.LocalShipping
-        "city to city" -> Icons.Default.AltRoute
-        else -> Icons.Default.LocalTaxi
-    }
-
-    val distAwayKm = if (driverLat != 0.0 && driverLon != 0.0 && request.pickupLat != 0.0) {
-        calculateDistanceKm(driverLat, driverLon, request.pickupLat, request.pickupLon)
-    } else 0.0
-
-    val formattedFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(request.estimatedFare)
-
-    Surface(
-        onClick = onSelect,
-        shape = RoundedCornerShape(20.dp),
-        color = if (isSelected) Color(0xFF222634) else Color(0xFF191B24),
-        border = BorderStroke(
-            if (isSelected) 2.dp else 1.dp,
-            if (isSelected) DrigoBrandPurple else Color(0xFF2D3244)
-        ),
-        shadowElevation = if (isSelected) 8.dp else 2.dp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("driver_ride_card_${request.id}")
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            // Header Row: Passenger Profile & Rating + Offered Fare Container
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        // 6. Tier Benefits Bottom Sheet (Image 2 - "See benefits")
+        if (showTierBenefitsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showTierBenefitsSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrimColor = Color.Black.copy(alpha = 0.7f)
             ) {
-                // Passenger Avatar & Rating
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = DrigoBrandPurple.copy(alpha = 0.25f),
-                        border = BorderStroke(1.5.dp, DrigoBrandPurple),
-                        modifier = Modifier.size(42.dp)
-                    ) {
-                        if (request.passengerPhotoUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = request.passengerPhotoUrl,
-                                contentDescription = "Passenger Photo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                            )
-                        } else {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = request.passengerName.trim().take(1).uppercase().ifBlank { "P" },
-                                    color = Color.White,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 16.sp
-                                )
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f, fill = false)) {
-                        Text(
-                            text = request.passengerName.ifBlank { "Passenger" },
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color(0xFF2B2510),
-                                border = BorderStroke(0.5.dp, Color(0xFFFFC107).copy(alpha = 0.4f))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Star,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFFC107),
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        text = String.format(java.util.Locale.US, "%.1f", if (request.passengerRating > 0.0) request.passengerRating else 4.9),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFFFC107)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "• ${request.paymentMethod.ifBlank { "Cash" }}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFFB0BEC5)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Proposed Fare Container
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF092913),
-                    border = BorderStroke(1.5.dp, Color(0xFF00E676))
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        horizontalAlignment = Alignment.End
-                    ) {
-                        Text(
-                            text = "OFFERED FARE",
-                            fontSize = 8.5.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF00E676).copy(alpha = 0.85f),
-                            letterSpacing = 0.5.sp
-                        )
-                        Text(
-                            text = "PKR $formattedFare",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFF00E676)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Sub-Bar: Category Pill + Distance Away + Trip Distance & Duration
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = DrigoBrandPurple.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.4f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = categoryIcon,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = request.rideCategory,
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (request.hasAc) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF004D40),
-                            border = BorderStroke(1.dp, Color(0xFF00BFA5))
-                        ) {
-                            Text(
-                                text = "AC",
-                                color = Color(0xFF00BFA5),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (distAwayKm > 0.0) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF1E293B)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.NearMe,
-                                    contentDescription = null,
-                                    tint = Color(0xFF38BDF8),
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = "${String.format(java.util.Locale.US, "%.1f", distAwayKm)} km away",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF38BDF8)
-                                )
-                            }
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF262B38)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${String.format(java.util.Locale.US, "%.1f", request.distanceKm)} km • ${request.durationMinutes} min",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFE0E0E0)
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Connected Timeline Route Box
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF13151D),
-                border = BorderStroke(1.dp, Color(0xFF25293A)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
                 ) {
-                    // Left Timeline Graphics
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(top = 2.dp, end = 10.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFF00E676),
-                            modifier = Modifier.size(9.dp)
-                        ) {}
-                        Box(
-                            modifier = Modifier
-                                .width(2.dp)
-                                .height(22.dp)
-                                .background(Color(0xFF37474F))
-                        )
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFFFF5252),
-                            modifier = Modifier.size(9.dp)
-                        ) {}
-                    }
+                    Text(
+                        text = "Captain Tier Benefits & Perks",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Complete weekly trips and maintain high ratings to unlock higher tiers with maximum earnings.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                    // Right Titles & Subtitles
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = request.pickupTitle.ifBlank { "Pickup Location" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (request.pickupSubtitle.isNotBlank()) {
-                            Text(
-                                text = request.pickupSubtitle,
-                                fontSize = 10.sp,
-                                color = Color(0xFF90A4AE),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                    Spacer(modifier = Modifier.height(18.dp))
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                    val tiers = listOf(
+                        Triple("Basic ◆", "0–14 rides/week • 4.50+ Rating", listOf("Standard dispatch priority", "Standard platform fee")),
+                        Triple("Bronze ◆", "15–29 rides/week • 4.60+ Rating", listOf("5% Commission Cashback", "Priority ride request alerts", "Bronze badge on driver profile")),
+                        Triple("Silver ◆", "30–49 rides/week • 4.70+ Rating", listOf("10% Commission Cashback", "Priority dispatch for high-fare rides", "1 Free Cancellation protection per week")),
+                        Triple("Platinum ◆", "50+ rides/week • 4.80+ Rating", listOf("15% Commission Cashback", "Top priority dispatch engine", "3 Free Cancellations protection per week", "24/7 Dedicated Priority Hotline"))
+                    )
 
-                        Text(
-                            text = request.destinationTitle.ifBlank { "Destination Location" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White.copy(alpha = 0.9f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (request.destinationSubtitle.isNotBlank()) {
-                            Text(
-                                text = request.destinationSubtitle,
-                                fontSize = 10.sp,
-                                color = Color(0xFF90A4AE),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Action Buttons / Bidding State
-            if (isOfferSent) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF00C853).copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, Color(0xFF00C853)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Color(0xFF00C853),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Offer Sent • Awaiting Passenger Acceptance",
-                            fontSize = 12.sp,
-                            color = Color(0xFF00C853),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Primary Accept CTA
-                    Button(
-                        onClick = onAcceptOffer,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 10.dp),
-                        modifier = Modifier
-                            .weight(1.2f)
-                            .heightIn(min = 46.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Accept PKR $formattedFare",
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 13.sp,
-                                color = Color.White,
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    // Counter Offer Button
-                    OutlinedButton(
-                        onClick = { expandedBidding = !expandedBidding },
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.2.dp, DrigoBrandPurple),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = if (expandedBidding) DrigoBrandPurple.copy(alpha = 0.2f) else Color.Transparent
-                        ),
-                        modifier = Modifier
-                            .weight(0.8f)
-                            .heightIn(min = 46.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.TrendingUp,
-                                contentDescription = null,
-                                tint = DrigoBrandPurple,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (expandedBidding) "Close" else "Raise",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-
-                // Expanded Bidding Controls
-                AnimatedVisibility(
-                    visible = expandedBidding,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    Column(modifier = Modifier.padding(top = 12.dp)) {
-                        Text(
-                            text = "Select or Enter Counter-Offer (PKR):",
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        val base = request.estimatedFare
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            listOf(base + 50, base + 100, base + 150).forEach { fare ->
-                                val formattedCounterFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(fare)
-                                Surface(
-                                    onClick = {
-                                        onCounterOffer(fare)
-                                        expandedBidding = false
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = DrigoBrandPurple.copy(alpha = 0.3f),
-                                    border = BorderStroke(1.dp, DrigoBrandPurple),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.padding(vertical = 8.dp)
+                    LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
+                        items(tiers) { (tierTitle, desc, perks) ->
+                            val isCurrentTier = driverRidesThisWeek >= when (tierTitle.substringBefore(" ")) {
+                                "Platinum" -> 50
+                                "Silver" -> 30
+                                "Bronze" -> 15
+                                else -> 0
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isCurrentTier) (if (isDark) Color(0xFF1B3245) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (isCurrentTier) (if (isDark) Color(0xFF29B6F6) else MaterialTheme.colorScheme.primary) else MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = "+${fare - base}",
-                                            fontSize = 10.sp,
-                                            color = DrigoBrandPurple.copy(alpha = 0.9f),
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = "PKR $formattedCounterFare",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 11.5.sp
-                                        )
+                                        Text(text = tierTitle, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        if (isCurrentTier) {
+                                            Surface(
+                                                shape = RoundedCornerShape(20.dp),
+                                                color = Color(0xFF0288D1)
+                                            ) {
+                                                Text(
+                                                    text = "ACTIVE TIER",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Color.White,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = desc, fontSize = 11.5.sp, color = if (isDark) Color(0xFF81D4FA) else MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    perks.forEach { perk ->
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(text = perk, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                                        }
                                     }
                                 }
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Custom Bid Input
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = customBidText,
-                                onValueChange = { if (it.all { char -> char.isDigit() }) customBidText = it },
-                                placeholder = { Text("Custom PKR", color = Color.Gray, fontSize = 12.sp) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = DrigoBrandPurple,
-                                    unfocusedBorderColor = Color(0xFF37474F),
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White
-                                ),
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            Button(
-                                onClick = {
-                                    val customFare = customBidText.toIntOrNull()
-                                    if (customFare != null && customFare > 0) {
-                                        onCounterOffer(customFare)
-                                        expandedBidding = false
-                                        customBidText = ""
-                                        focusManager.clearFocus()
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
-                                modifier = Modifier.height(48.dp)
-                            ) {
-                                Text("Send", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-                        }
                     }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = { showTierBenefitsSheet = false },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Text("Got It", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
+
+        // 7. Add Daily Goal Dialog
+        if (showAddDailyGoalSheet) {
+            var customGoalText by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { showAddDailyGoalSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                textContentColor = MaterialTheme.colorScheme.onSurface,
+                title = { Text("Set Daily Income Goal", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text("Select your daily target income to stay motivated:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(2000, 3500, 5000, 8000).forEach { preset ->
+                                Surface(
+                                    onClick = {
+                                        dailyGoalPkr = preset
+                                        showAddDailyGoalSheet = false
+                                        Toast.makeText(context, "Daily goal set to PKR $preset", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (dailyGoalPkr == preset) Color(0xFF0288D1) else MaterialTheme.colorScheme.surfaceVariant,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = "${preset / 1000}k",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (dailyGoalPkr == preset) Color.White else MaterialTheme.colorScheme.onSurface,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(vertical = 10.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = customGoalText,
+                            onValueChange = { if (it.all { c -> c.isDigit() }) customGoalText = it },
+                            label = { Text("Custom Amount (PKR)", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF0288D1),
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val customVal = customGoalText.toIntOrNull()
+                            if (customVal != null && customVal > 0) {
+                                dailyGoalPkr = customVal
+                                Toast.makeText(context, "Daily goal set to PKR $customVal", Toast.LENGTH_SHORT).show()
+                            }
+                            showAddDailyGoalSheet = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1))
+                    ) {
+                        Text("Save Goal", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddDailyGoalSheet = false }) {
+                        Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            )
+        }
+
+        // 8. Captain Bonuses & Surge Incentives Sheet
+        if (showBonusesSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showBonusesSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text("Active Captain Bonuses & Quests", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Complete quests to earn extra cash bonuses on top of ride fares.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val bonuses = listOf(
+                        Triple("Peak Hour Surge Quest", "Complete 3 rides between 5:00 PM – 9:00 PM", "+PKR 400 Extra"),
+                        Triple("Weekend Streak Bonus", "Complete 15 rides Friday to Sunday", "+PKR 1,200 Extra"),
+                        Triple("High Acceptance Reward", "Maintain 90%+ acceptance rate today", "+PKR 300 Extra")
+                    )
+
+                    bonuses.forEach { (title, subtitle, reward) ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 5.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = title, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                    Text(text = subtitle, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Surface(shape = RoundedCornerShape(8.dp), color = Color(0xFF2E7D32)) {
+                                    Text(text = reward, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(onClick = { showBonusesSheet = false }, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("Close", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // 9. Today's Income Details Breakdown
+        if (showIncomeDetailsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showIncomeDetailsSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Text("Today's Earnings Breakdown", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text("Detailed view of all rides, tips, and bonuses earned today.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    val items = listOf(
+                        "Trip Fares Earned" to "PKR $todayIncomePkr",
+                        "Passenger Cash Tips" to "PKR 0",
+                        "Quest & Surge Bonuses" to "PKR 0",
+                        "Platform Fee Deducted" to "-PKR 0",
+                        "Net Earnings Today" to "PKR $todayIncomePkr"
+                    )
+
+                    items.forEach { (label, value) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = label, fontSize = 14.sp, color = if (label.startsWith("Net")) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (label.startsWith("Net")) FontWeight.Bold else FontWeight.Normal)
+                            Text(text = value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = if (label.startsWith("Net")) Color(0xFF00E676) else MaterialTheme.colorScheme.onSurface)
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(onClick = { showIncomeDetailsSheet = false }, shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                        Text("Close", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // 10. Smart Vehicle Tariff & Eligibility Sheet (Image 13)
+        if (showTariffsSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showTariffsSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                scrimColor = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Vehicle Tariffs & Category Eligibility",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Manage active ride categories and courier switches.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Active Registered Vehicle Header Card (Image 13)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFF0288D1).copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, Color(0xFF0288D1)),
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.DirectionsCar,
+                                            contentDescription = null,
+                                            tint = Color(0xFF29B6F6),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(text = selectedVehicleModelName, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (isDark) Color(0xFF283244) else MaterialTheme.colorScheme.surface,
+                                            modifier = Modifier.padding(end = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = selectedVehiclePlateNumber,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isDark) Color(0xFFFFD54F) else MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Text(text = "• $selectedVehicleCategoryType", fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+
+                            Button(
+                                onClick = { showChangeVehicleDialog = true },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("change_vehicle_button")
+                            ) {
+                                Text("Change vehicle", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val isAcLocked = selectedVehicleCategoryType.contains("Non-AC") ||
+                            selectedVehicleCategoryType.contains("Motorcycle") ||
+                            selectedVehicleCategoryType.contains("Auto")
+                    val isComfortLocked = !selectedVehicleCategoryType.contains("Sedan")
+
+                    LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
+                        item {
+                            Text("Ride Categories & Tariffs", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (isDark) Color(0xFF81D4FA) else MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        // Ride Mini
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Ride Mini", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                        Text("Standard budget rides • Base PKR 35/km", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Switch(
+                                        checked = isTariffMiniEnabled,
+                                        onCheckedChange = { isTariffMiniEnabled = it },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Ride A/C (Locked for Suzuki Mehran / Non-AC)
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isAcLocked) (if (isDark) Color(0xFF221A1A) else Color(0xFFFFEBEE)) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (isAcLocked) (if (isDark) Color(0xFF4A2828) else Color(0xFFFFCDD2)) else MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Ride A/C", fontWeight = FontWeight.Bold, color = if (isAcLocked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                            if (isAcLocked) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(shape = RoundedCornerShape(4.dp), color = Color(0xFFD32F2F).copy(alpha = 0.2f)) {
+                                                    Text("🚫 Locked: No A/C", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF5350), modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = if (isAcLocked) "Not available for $selectedVehicleModelName (No A/C factory unit)" else "Air-conditioned rides • Base PKR 55/km",
+                                            fontSize = 11.sp,
+                                            color = if (isAcLocked) Color(0xFFEF5350) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = if (isAcLocked) false else isTariffAcEnabled,
+                                        onCheckedChange = { if (!isAcLocked) isTariffAcEnabled = it },
+                                        enabled = !isAcLocked,
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Ride Comfort (Locked for Hatchbacks/Bikes)
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isComfortLocked) (if (isDark) Color(0xFF221A1A) else Color(0xFFFFEBEE)) else MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, if (isComfortLocked) (if (isDark) Color(0xFF4A2828) else Color(0xFF2A3142)) else MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Ride Comfort", fontWeight = FontWeight.Bold, color = if (isComfortLocked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                            if (isComfortLocked) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(shape = RoundedCornerShape(4.dp), color = Color(0xFFD32F2F).copy(alpha = 0.2f)) {
+                                                    Text("🚫 Requires Sedan", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF5350), modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = if (isComfortLocked) "Requires Executive/Premium Sedan model" else "Spacious premium sedan rides • Base PKR 75/km",
+                                            fontSize = 11.sp,
+                                            color = if (isComfortLocked) Color(0xFFEF5350) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Switch(
+                                        checked = if (isComfortLocked) false else isTariffComfortEnabled,
+                                        onCheckedChange = { if (!isComfortLocked) isTariffComfortEnabled = it },
+                                        enabled = !isComfortLocked,
+                                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                    )
+                                }
+                            }
+                        }
+
+                        // Courier & Delivery
+                        item {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("Courier & Sub-Category Controls (Image 13)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (isDark) Color(0xFF81D4FA) else MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Courier / Delivery Orders", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                                            Text("Accept package, food & item deliveries", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Switch(
+                                            checked = isTariffCourierEnabled,
+                                            onCheckedChange = { isTariffCourierEnabled = it },
+                                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                        )
+                                    }
+
+                                    if (isTariffCourierEnabled) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                        Spacer(modifier = Modifier.height(10.dp))
+
+                                        // Sub-toggle: Parcel Delivery
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                             horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("📄 Documents & Small Parcels", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            Switch(
+                                                checked = isCourierParcelEnabled,
+                                                onCheckedChange = { isCourierParcelEnabled = it },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                            )
+                                        }
+
+                                        // Sub-toggle: Thermal Bag (Food)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("🎒 Insulated Thermal Bag Available", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                                                Text("Required for hot food & perishables", fontSize = 10.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                            Switch(
+                                                checked = hasCourierThermalBag,
+                                                onCheckedChange = { hasCourierThermalBag = it },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                            )
+                                        }
+
+                                        // Sub-toggle: Heavy Cargo
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("📦 Heavy Cargo / Large Boxes", fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurface)
+                                            Switch(
+                                                checked = isCourierHeavyCargoEnabled,
+                                                onCheckedChange = { isCourierHeavyCargoEnabled = it },
+                                                colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0288D1))
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tariff Strategy Multiplier
+                        item {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("Base Rate Multiplier", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (isDark) Color(0xFF81D4FA) else MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(1.0f to "1.0x Standard", 1.1f to "1.1x (+10%)", 1.2f to "1.2x (+20%)").forEach { (mult, label) ->
+                                    Surface(
+                                        onClick = { selectedTariffMultiplier = mult },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (selectedTariffMultiplier == mult) Color(0xFF0288D1) else MaterialTheme.colorScheme.surfaceVariant,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (selectedTariffMultiplier == mult) Color.White else MaterialTheme.colorScheme.onSurface,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            showTariffsSheet = false
+                            Toast.makeText(context, "Tariff & Vehicle eligibility settings saved!", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Text("Save Tariff Preferences", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+
+        // 11. Change Vehicle Dialog (Image 13)
+        if (showChangeVehicleDialog) {
+            val vehiclesList = listOf(
+                Triple("Suzuki Mehran (2018)", "LEA-18-4921", "Hatchback (Non-AC)"),
+                Triple("Toyota Corolla (2021)", "ICT-21-9820", "Sedan (AC)"),
+                Triple("Honda Civic (2022)", "ISB-22-1102", "Executive Sedan (AC)"),
+                Triple("Honda CG125 (2022)", "RIW-22-3049", "Motorcycle (Bike)"),
+                Triple("Sazgar Auto (2020)", "RWP-20-7711", "Auto Rickshaw")
+            )
+
+            AlertDialog(
+                onDismissRequest = { showChangeVehicleDialog = false },
+                containerColor = Color(0xFF181C26),
+                titleContentColor = Color.White,
+                textContentColor = Color.White,
+                title = { Text("Select Driver Vehicle", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text("Category eligibility locks adapt dynamically to your active vehicle:", fontSize = 12.5.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        LazyColumn(modifier = Modifier.heightIn(max = 280.dp)) {
+                            items(vehiclesList) { (model, plate, type) ->
+                                val isSelected = selectedVehicleModelName == model
+                                Surface(
+                                    onClick = {
+                                        selectedVehicleModelName = model
+                                        selectedVehiclePlateNumber = plate
+                                        selectedVehicleCategoryType = type
+
+                                        // Auto update tariff eligibility locks
+                                        if (type.contains("Non-AC") || type.contains("Motorcycle") || type.contains("Auto")) {
+                                            isTariffAcEnabled = false
+                                        } else {
+                                            isTariffAcEnabled = true
+                                        }
+
+                                        if (type.contains("Sedan")) {
+                                            isTariffComfortEnabled = true
+                                        } else {
+                                            isTariffComfortEnabled = false
+                                        }
+
+                                        showChangeVehicleDialog = false
+                                        Toast.makeText(context, "Active vehicle set to $model", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) Color(0xFF0288D1).copy(alpha = 0.2f) else Color(0xFF222836),
+                                    border = BorderStroke(1.dp, if (isSelected) Color(0xFF0288D1) else Color(0xFF333D52)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(text = model, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.5.sp)
+                                            Text(text = "$plate • $type", fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                        if (isSelected) {
+                                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF0288D1), modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showChangeVehicleDialog = false }) {
+                        Text("Close", color = Color(0xFF81D4FA))
+                    }
+                }
+            )
+        }
     }
 }
+}
+

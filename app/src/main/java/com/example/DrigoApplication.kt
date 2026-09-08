@@ -9,8 +9,14 @@ import org.osmdroid.config.Configuration
 
 class DrigoApplication : Application() {
 
+    companion object {
+        lateinit var instance: DrigoApplication
+            private set
+    }
+
     override fun onCreate() {
         super.onCreate()
+        instance = this
         try {
             // 1. Initialize OsmDroid Configuration
             Configuration.getInstance().apply {

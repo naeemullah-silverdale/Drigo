@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.example.data.model.DriverDocumentItem
+import com.example.data.model.DriverVehicle
 import com.example.data.model.DriverVerification
 import com.example.data.remote.DriverDocumentStorageManager
 import com.example.data.remote.FirebaseRepository
@@ -85,6 +87,15 @@ fun DriverRegistrationScreen(
                 DriverRegStep.PROFILE_AND_IDENTITY
             }
         )
+    }
+
+    BackHandler {
+        when (currentStep) {
+            DriverRegStep.PROFILE_AND_IDENTITY -> onBackToPassenger()
+            DriverRegStep.VEHICLE_DETAILS -> currentStep = DriverRegStep.PROFILE_AND_IDENTITY
+            DriverRegStep.DRIVING_LICENSE -> currentStep = DriverRegStep.VEHICLE_DETAILS
+            DriverRegStep.CONFIRMATION_PENDING -> onBackToPassenger()
+        }
     }
 
     // Step 1: Profile & Identity
@@ -410,6 +421,34 @@ fun DriverRegistrationScreen(
                                     if (vehicleCompany.isBlank()) vehicleCompany = "Toyota"
                                     if (vehicleModel.isBlank()) vehicleModel = "Corolla"
                                     if (vehicleNumber.isBlank()) vehicleNumber = "LEA-4521"
+
+                                    // Persist vehicle details into dedicated 'vehicle' table in Firebase
+                                    val currentDriverId = user?.uid ?: "driver_guest"
+                                    val vehicleId = "veh_${currentDriverId.trim().replace("-", "")}"
+                                    val driverVehicle = DriverVehicle(
+                                        vehicleId = vehicleId,
+                                        driverId = currentDriverId,
+                                        driverName = user?.displayName.orEmpty().ifBlank { "Driver" },
+                                        driverPhone = user?.phoneNumber.orEmpty(),
+                                        company = vehicleCompany,
+                                        model = vehicleModel,
+                                        plateNumber = vehicleNumber,
+                                        category = "Car",
+                                        frontPhotoUrl = vehicleFrontDoc?.fileUrl.orEmpty(),
+                                        backPhotoUrl = vehicleBackDoc?.fileUrl.orEmpty(),
+                                        sidePhotoUrl = vehicleSideDoc?.fileUrl.orEmpty(),
+                                        registrationDocUrl = vehicleRegDoc?.fileUrl.orEmpty(),
+                                        verificationStatus = "PENDING",
+                                        createdAt = System.currentTimeMillis(),
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                    scope.launch {
+                                        try {
+                                            val repo = FirebaseRepository.getInstance(context)
+                                            repo.saveVehicle(driverVehicle)
+                                        } catch (_: Exception) {}
+                                    }
+
                                     currentStep = DriverRegStep.DRIVING_LICENSE
                                 }
                             )
@@ -506,6 +545,31 @@ fun DriverRegistrationScreen(
                                                 try {
                                                     val repo = FirebaseRepository.getInstance(context)
                                                     val res = repo.saveDriverVerification(verification)
+
+                                                    // Explicitly ensure vehicle record is persisted into dedicated 'vehicle' table
+                                                    val cleanDriverId = (user?.uid ?: verification.uid).trim().replace("-", "")
+                                                    val vehicleId = "veh_$cleanDriverId"
+                                                    val finalVehicle = DriverVehicle(
+                                                        vehicleId = vehicleId,
+                                                        driverId = user?.uid ?: verification.uid,
+                                                        driverName = verification.name,
+                                                        driverPhone = verification.phone,
+                                                        company = verification.vehicleCompany,
+                                                        model = verification.vehicleModel,
+                                                        plateNumber = verification.vehicleNumber,
+                                                        category = verification.vehicleCategory.ifBlank { "Car" },
+                                                        frontPhotoUrl = verification.vehicleFrontUri.ifBlank { verification.vehiclePictureUri },
+                                                        backPhotoUrl = verification.vehicleBackUri,
+                                                        sidePhotoUrl = verification.vehicleSideUri,
+                                                        registrationDocUrl = verification.vehicleRegistrationDocUri.ifBlank {
+                                                            verification.vehicleCardDocFrontUri.ifBlank { verification.vehicleCardDocBackUri }
+                                                        },
+                                                        verificationStatus = "PENDING",
+                                                        createdAt = verification.submittedAt,
+                                                        updatedAt = System.currentTimeMillis()
+                                                    )
+                                                    repo.saveVehicle(finalVehicle)
+
                                                     isSubmitting = false
                                                     if (res.isSuccess) {
                                                         verificationState = verification

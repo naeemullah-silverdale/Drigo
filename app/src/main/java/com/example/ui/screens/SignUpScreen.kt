@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -151,16 +152,15 @@ fun SignUpScreen(
 
             Surface(
                 shape = RoundedCornerShape(20.dp),
-                color = DrigoBrandPurple,
-                shadowElevation = 6.dp,
-                modifier = Modifier.size(64.dp)
+                color = Color.Transparent,
+                shadowElevation = 0.dp,
+                modifier = Modifier.size(68.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "Drigo",
-                        tint = Color.White,
-                        modifier = Modifier.size(34.dp)
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_drigo_logo),
+                        contentDescription = "Drigo Logo",
+                        modifier = Modifier.size(68.dp)
                     )
                 }
             }

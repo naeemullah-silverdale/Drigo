@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -105,7 +106,7 @@ fun MyOrdersScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFF14161B),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -113,13 +114,22 @@ fun MyOrdersScreen(
                         text = "My Orders",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 20.sp
                     )
                 },
+                navigationIcon = {
+                    IconButton(onClick = onRequestNewRide) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to Map",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF14161B),
-                    titleContentColor = Color.White
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 actions = {
                     if (activeOrders.isNotEmpty()) {
@@ -159,10 +169,10 @@ fun MyOrdersScreen(
                 Surface(
                     onClick = { selectedFilterTab = 0 },
                     shape = RoundedCornerShape(12.dp),
-                    color = if (selectedFilterTab == 0) Color(0xFF232732) else Color(0xFF1A1C23),
+                    color = if (selectedFilterTab == 0) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
                     border = BorderStroke(
                         1.dp,
-                        if (selectedFilterTab == 0) InDriveLimeGreen else Color(0xFF2C303B)
+                        if (selectedFilterTab == 0) InDriveLimeGreen else MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.weight(1f).height(42.dp)
                 ) {
@@ -174,7 +184,7 @@ fun MyOrdersScreen(
                         Text(
                             text = "Active Orders",
                             fontWeight = if (selectedFilterTab == 0) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selectedFilterTab == 0) Color.White else Color(0xFFA0A6B5),
+                            color = if (selectedFilterTab == 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 14.sp
                         )
                         if (activeOrders.isNotEmpty()) {
@@ -201,10 +211,10 @@ fun MyOrdersScreen(
                 Surface(
                     onClick = { selectedFilterTab = 1 },
                     shape = RoundedCornerShape(12.dp),
-                    color = if (selectedFilterTab == 1) Color(0xFF232732) else Color(0xFF1A1C23),
+                    color = if (selectedFilterTab == 1) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
                     border = BorderStroke(
                         1.dp,
-                        if (selectedFilterTab == 1) InDriveLimeGreen else Color(0xFF2C303B)
+                        if (selectedFilterTab == 1) InDriveLimeGreen else MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.weight(1f).height(42.dp)
                 ) {
@@ -216,20 +226,20 @@ fun MyOrdersScreen(
                             Text(
                                 text = "Past Trips",
                                 fontWeight = if (selectedFilterTab == 1) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selectedFilterTab == 1) Color.White else Color(0xFFA0A6B5),
+                                color = if (selectedFilterTab == 1) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 14.sp
                             )
                             if (pastOrders.isNotEmpty()) {
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
                                     shape = CircleShape,
-                                    color = Color(0xFF383D4E),
+                                    color = MaterialTheme.colorScheme.outlineVariant,
                                     modifier = Modifier.size(18.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Text(
                                             text = "${pastOrders.size}",
-                                            color = Color.White,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -259,8 +269,8 @@ fun MyOrdersScreen(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = Color(0xFF1E212B),
-                            border = BorderStroke(1.dp, Color(0xFF2C303B)),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier.size(88.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -277,7 +287,7 @@ fun MyOrdersScreen(
                             text = if (selectedFilterTab == 0) "No Active Orders" else "No Trip History",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 18.sp
                         )
 
@@ -287,7 +297,7 @@ fun MyOrdersScreen(
                             else
                                 "Your completed or past trips in the Drigo network will be saved here.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFA0A6B5),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(horizontal = 20.dp)
@@ -425,9 +435,9 @@ fun AcceptedOrderCard(
 
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = Color(0xFF1E212B),
-        border = BorderStroke(1.dp, Color(0xFF2E3342)),
-        shadowElevation = 8.dp,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = 4.dp,
         modifier = modifier
             .fillMaxWidth()
             .testTag("order_card_${order.id}")
@@ -477,7 +487,7 @@ fun AcceptedOrderCard(
                     Text(
                         text = "📅 ${order.scheduledTimeText}",
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFFA0A6B5),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 12.sp
                     )
@@ -495,8 +505,8 @@ fun AcceptedOrderCard(
             // 2. Driver Info Row
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF161820),
-                border = BorderStroke(1.dp, Color(0xFF282C38)),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -508,7 +518,7 @@ fun AcceptedOrderCard(
                     // Driver Avatar
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFF2E3342),
+                        color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.5.dp, InDriveLimeGreen),
                         modifier = Modifier.size(46.dp)
                     ) {
@@ -516,7 +526,7 @@ fun AcceptedOrderCard(
                             Icon(
                                 imageVector = Icons.Default.Person,
                                 contentDescription = "Driver Avatar",
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(26.dp)
                             )
                         }
@@ -531,13 +541,13 @@ fun AcceptedOrderCard(
                                 text = order.driverName,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 15.sp
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
-                                color = Color(0xFF2D323F)
+                                color = MaterialTheme.colorScheme.surface
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -552,7 +562,7 @@ fun AcceptedOrderCard(
                                     Spacer(modifier = Modifier.width(2.dp))
                                     Text(
                                         text = "${order.driverRating}",
-                                        color = Color.White,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -565,7 +575,7 @@ fun AcceptedOrderCard(
                         Text(
                             text = "${order.driverVehicleColor} ${order.driverVehicleMake} ${order.driverVehicleModel}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFA0A6B5),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
                     }
@@ -573,12 +583,12 @@ fun AcceptedOrderCard(
                     // Plate Number Tag
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF252834),
-                        border = BorderStroke(1.dp, Color(0xFF3B4050))
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Text(
                             text = order.driverPlateNumber,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 11.sp,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -606,7 +616,7 @@ fun AcceptedOrderCard(
                         text = order.pickupTitle.ifBlank { "Pickup Location" },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -625,7 +635,7 @@ fun AcceptedOrderCard(
                         text = order.destinationTitle.ifBlank { "Destination Location" },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -645,7 +655,7 @@ fun AcceptedOrderCard(
                     Text(
                         text = order.rideCategory,
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFFA0A6B5),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                     if (order.comments.isNotBlank()) {
@@ -664,12 +674,12 @@ fun AcceptedOrderCard(
                     text = "PKR ${"%,d".format(order.agreedFare)}",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 18.sp
                 )
             }
 
-            HorizontalDivider(color = Color(0xFF282C38), thickness = 1.dp)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
 
             // 5. Action Buttons Grid
             Row(
@@ -706,9 +716,9 @@ fun AcceptedOrderCard(
                 OutlinedButton(
                     onClick = onOpenChat,
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color.White
+                        contentColor = MaterialTheme.colorScheme.onSurface
                     ),
-                    border = BorderStroke(1.dp, Color(0xFF383D4E)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f).height(44.dp)
                 ) {
@@ -722,7 +732,8 @@ fun AcceptedOrderCard(
                     Text(
                         text = "Chat",
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
@@ -730,8 +741,8 @@ fun AcceptedOrderCard(
                 Surface(
                     onClick = onCallDriver,
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF252936),
-                    border = BorderStroke(1.dp, Color(0xFF383D4E)),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.size(44.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -745,20 +756,22 @@ fun AcceptedOrderCard(
                 }
 
                 // Cancel Order
-                Surface(
-                    onClick = onCancelOrder,
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF252936),
-                    border = BorderStroke(1.dp, Color(0xFF383D4E)),
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Cancel Ride",
-                            tint = Color(0xFFE57373),
-                            modifier = Modifier.size(18.dp)
-                        )
+                if (order.status != PassengerOrderStatus.COMPLETED && order.status != PassengerOrderStatus.IN_TRIP) {
+                    Surface(
+                        onClick = onCancelOrder,
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cancel Ride",
+                                tint = Color(0xFFE57373),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -798,8 +811,9 @@ fun PastTripCard(
 
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = Color(0xFF1B1D24),
-        border = BorderStroke(1.dp, Color(0xFF292C37)),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shadowElevation = 2.dp,
         modifier = modifier
             .fillMaxWidth()
             .testTag("past_order_card_${order.id}")
@@ -819,7 +833,7 @@ fun PastTripCard(
                 Text(
                     text = dateString,
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF8E95A5),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
                 )
 
@@ -854,7 +868,7 @@ fun PastTripCard(
                         text = order.pickupTitle.ifBlank { "Pickup Location" },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -872,7 +886,7 @@ fun PastTripCard(
                         text = order.destinationTitle.ifBlank { "Destination Location" },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -890,14 +904,14 @@ fun PastTripCard(
                     Icon(
                         imageVector = Icons.Default.Person,
                         contentDescription = null,
-                        tint = Color(0xFFA0A6B5),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = order.driverName.ifBlank { "Driver Captain" },
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFA0A6B5),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                     if (order.driverPlateNumber.isNotBlank()) {
@@ -905,7 +919,7 @@ fun PastTripCard(
                         Text(
                             text = "• ${order.driverPlateNumber}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF6B7280),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             fontSize = 11.sp
                         )
                     }
@@ -915,12 +929,12 @@ fun PastTripCard(
                     text = "PKR ${"%,d".format(order.agreedFare)}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 16.sp
                 )
             }
 
-            HorizontalDivider(color = Color(0xFF262933), thickness = 1.dp)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
 
             // Bottom Action Row: Report Button, Rate Ride / Rated Badge, Rebook Button
             Row(
@@ -950,8 +964,8 @@ fun PastTripCard(
                         if (hasRated) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFF252A36),
-                                border = BorderStroke(1.dp, Color(0xFF3B4356)),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 modifier = Modifier.height(36.dp)
                             ) {
                                 Row(
@@ -969,7 +983,7 @@ fun PastTripCard(
                                         text = "Rated",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = Color(0xFFA0A6B5)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -1004,7 +1018,7 @@ fun PastTripCard(
                     Button(
                         onClick = onRebookTrip,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF272B38),
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
                             contentColor = InDriveLimeGreen
                         ),
                         border = BorderStroke(1.dp, InDriveLimeGreen.copy(alpha = 0.5f)),
@@ -1044,8 +1058,8 @@ fun InDrivePassengerBottomNav(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = Color(0xFF14161B),
-        border = BorderStroke(1.dp, Color(0xFF222632)),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
@@ -1070,7 +1084,7 @@ fun InDrivePassengerBottomNav(
                     .testTag("nav_tab_ride")
             ) {
                 InDriveSquigglyRoadIcon(
-                    tint = if (isRideSelected) Color.White else Color(0xFF7A8194),
+                    tint = if (isRideSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.height(3.dp))
@@ -1078,7 +1092,7 @@ fun InDrivePassengerBottomNav(
                     text = "Ride",
                     fontWeight = if (isRideSelected) FontWeight.Bold else FontWeight.Medium,
                     fontSize = 11.sp,
-                    color = if (isRideSelected) Color.White else Color(0xFF7A8194)
+                    color = if (isRideSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -1094,7 +1108,7 @@ fun InDrivePassengerBottomNav(
             ) {
                 Box(contentAlignment = Alignment.TopEnd) {
                     InDriveMyOrdersIcon(
-                        tint = if (isOrdersSelected) Color.White else Color(0xFF7A8194),
+                        tint = if (isOrdersSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
                     if (activeOrdersCount > 0) {
@@ -1112,7 +1126,7 @@ fun InDrivePassengerBottomNav(
                     text = "My orders",
                     fontWeight = if (isOrdersSelected) FontWeight.Bold else FontWeight.Medium,
                     fontSize = 11.sp,
-                    color = if (isOrdersSelected) Color.White else Color(0xFF7A8194)
+                    color = if (isOrdersSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

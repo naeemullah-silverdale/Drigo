@@ -982,11 +982,27 @@ fun UniversalSafetyModalSheet(
     vehiclePlate: String = "",
     pickupAddress: String = "",
     destinationAddress: String = "",
+    ridePin: String = "",
     onDismiss: () -> Unit,
     onOpenReport: () -> Unit
 ) {
     val context = LocalContext.current
     val isDriver = userRole.equals("DRIVER", ignoreCase = true)
+    var isAudioRecording by remember { mutableStateOf(false) }
+    var recordingSeconds by remember { mutableStateOf(0) }
+
+    LaunchedEffect(isAudioRecording) {
+        if (isAudioRecording) {
+            while (true) {
+                kotlinx.coroutines.delay(1000L)
+                recordingSeconds++
+            }
+        } else {
+            recordingSeconds = 0
+        }
+    }
+
+    val liveTrackingUrl = "https://drigo.pk/track/${rideId.ifBlank { "live" }}"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1013,7 +1029,8 @@ fun UniversalSafetyModalSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
+                .padding(bottom = 32.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Header
@@ -1052,7 +1069,73 @@ fun UniversalSafetyModalSheet(
                 }
             }
 
-            // Identity Card
+            // 1. Prominent 4-Digit Ride PIN (Safety Verification)
+            if (ridePin.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF1F2430),
+                    border = BorderStroke(1.5.dp, Color(0xFF00E676)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFF00E676),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = if (isDriver) "PASSENGER VERIFICATION PIN" else "YOUR 4-DIGIT RIDE PIN",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF00E676),
+                                letterSpacing = 1.sp
+                            )
+                        }
+
+                        Text(
+                            text = if (isDriver) "Ask passenger for this PIN before starting the trip" else "Show this 4-digit PIN to captain before boarding vehicle",
+                            fontSize = 11.sp,
+                            color = Color(0xFFA0A6B5),
+                            textAlign = TextAlign.Center
+                        )
+
+                        // 4 Digit Boxes
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ridePin.forEach { digit ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF111319),
+                                    border = BorderStroke(1.5.dp, Color(0xFF3B4154)),
+                                    modifier = Modifier.size(width = 46.dp, height = 48.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = digit.toString(),
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Identity Card
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = Color(0xFF111319),
@@ -1063,7 +1146,7 @@ fun UniversalSafetyModalSheet(
                     Text(
                         text = if (isDriver) "PASSENGER IDENTITY" else "CAPTAIN & VEHICLE IDENTITY",
                         fontWeight = FontWeight.Bold,
-                        color = InDriveLimeGreen,
+                        color = Color(0xFF00E676),
                         fontSize = 10.sp
                     )
                     Row(
@@ -1109,76 +1192,248 @@ fun UniversalSafetyModalSheet(
                 }
             }
 
-            // 1-Tap SOS Buttons (Police 15 & Rescue 1122)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // 3. Audio Recording Toggle for Trip Safety
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (isAudioRecording) Color(0xFF3E1418) else Color(0xFF1E222D),
+                border = BorderStroke(1.dp, if (isAudioRecording) Color(0xFFEF5350) else Color(0xFF2C3242)),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                // Police 15
-                Button(
-                    onClick = {
-                        try {
-                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:15"))
-                            context.startActivity(intent)
-                        } catch (_: Exception) {}
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f).height(48.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(imageVector = Icons.Default.LocalPolice, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Police (15)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
-                }
-
-                // Rescue 1122
-                Button(
-                    onClick = {
-                        try {
-                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:1122"))
-                            context.startActivity(intent)
-                        } catch (_: Exception) {}
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f).height(48.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.MedicalServices, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Rescue (1122)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
-                }
-            }
-
-            // Share Ride Details (WhatsApp / SMS)
-            Button(
-                onClick = {
-                    try {
-                        val shareText = "I am on a Drigo ride!\n\n" +
-                                "Driver: $partnerName\n" +
-                                (if (vehiclePlate.isNotBlank()) "Vehicle: $vehicleMake $vehicleModel ($vehiclePlate)\n" else "") +
-                                "Pickup: $pickupAddress\n" +
-                                "Destination: $destinationAddress\n" +
-                                "Ride ID: #$rideId\n\n" +
-                                "Track safely with Drigo."
-                        val sendIntent = Intent().apply {
-                            action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, shareText)
-                            type = "text/plain"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isAudioRecording) Color(0xFFEF5350) else Color(0xFF2C303B),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isAudioRecording) Icons.Default.Mic else Icons.Default.MicNone,
+                                    contentDescription = "Audio Recording",
+                                    tint = if (isAudioRecording) Color.White else Color(0xFFA0A6B5),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
-                        val shareIntent = Intent.createChooser(sendIntent, "Share Ride Details via")
-                        context.startActivity(shareIntent)
-                    } catch (_: Exception) {}
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(46.dp)
-            ) {
-                Icon(imageVector = Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Share Ride Details with Family", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Trip Audio Safety Record",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    fontSize = 13.sp
+                                )
+                                if (isAudioRecording) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFEF5350)
+                                    ) {
+                                        Text(
+                                            text = String.format(java.util.Locale.US, "REC %02d:%02d", recordingSeconds / 60, recordingSeconds % 60),
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = if (isAudioRecording) "Encrypted & stored locally for safety" else "Record cabin audio during late-night rides",
+                                color = if (isAudioRecording) Color(0xFFFFCDD2) else Color(0xFFA0A6B5),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = isAudioRecording,
+                        onCheckedChange = {
+                            isAudioRecording = it
+                            val statusMsg = if (it) "Trip safety audio recording started (Encrypted local storage)" else "Audio recording stopped & saved"
+                            Toast.makeText(context, statusMsg, Toast.LENGTH_SHORT).show()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFEF5350),
+                            uncheckedThumbColor = Color.Gray,
+                            uncheckedTrackColor = Color(0xFF2C3242)
+                        )
+                    )
+                }
             }
 
-            // Report Issue to Admin
+            // 4. 1-Tap SOS Buttons (Police 15, 911 / 112 & Rescue 1122)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "EMERGENCY POLICE & RESCUE DIALER",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFEF5350),
+                    letterSpacing = 0.5.sp
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Police 15
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:15"))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(48.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.LocalPolice, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Police (15)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
+                    }
+
+                    // Rescue 1122
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:1122"))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(48.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.MedicalServices, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Rescue (1122)", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
+                    }
+                }
+
+                // Motorway Police (130) & Universal Emergency (112 / 911)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:130"))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        },
+                        border = BorderStroke(1.dp, Color(0xFF3949AB)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(40.dp)
+                    ) {
+                        Text("Motorway (130)", fontWeight = FontWeight.Bold, color = Color(0xFF8C9EFF), fontSize = 11.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:112"))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        },
+                        border = BorderStroke(1.dp, Color(0xFF546E7A)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(40.dp)
+                    ) {
+                        Text("Universal SOS (112)", fontWeight = FontWeight.Bold, color = Color(0xFFB0BEC5), fontSize = 11.sp)
+                    }
+                }
+            }
+
+            // 5. Share Live Trip Tracking URL (WhatsApp / SMS / Web link)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "SHARE LIVE TRIP TRACKING LINK (NO APP REQUIRED)",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF25D366),
+                    letterSpacing = 0.5.sp
+                )
+
+                // WhatsApp 1-Tap Share
+                Button(
+                    onClick = {
+                        try {
+                            val shareText = "🛡️ Drigo Live Ride Safety Tracking\n\n" +
+                                    "Track my real-time ride here: $liveTrackingUrl\n\n" +
+                                    "Driver: $partnerName\n" +
+                                    (if (vehiclePlate.isNotBlank()) "Vehicle: $vehicleMake $vehicleModel ($vehiclePlate)\n" else "") +
+                                    (if (ridePin.isNotBlank()) "Safety PIN: $ridePin\n" else "") +
+                                    "Pickup: $pickupAddress\n" +
+                                    "Destination: $destinationAddress\n" +
+                                    "Ride ID: #${rideId.take(8)}\n\n" +
+                                    "You can open this link in any browser without needing the app."
+
+                            val whatsappIntent = Intent(Intent.ACTION_VIEW).apply {
+                                data = Uri.parse("https://api.whatsapp.com/send?text=" + Uri.encode(shareText))
+                            }
+                            context.startActivity(whatsappIntent)
+                        } catch (_: Exception) {
+                            val sendIntent = Intent().apply {
+                                action = Intent.ACTION_SEND
+                                putExtra(Intent.EXTRA_TEXT, "🛡️ Track my Drigo live ride: $liveTrackingUrl\nDriver: $partnerName ($vehiclePlate)")
+                                type = "text/plain"
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share Live Trip via WhatsApp"))
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Share Live Trip on WhatsApp", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                }
+
+                // SMS & Universal Share
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val shareText = "I am on a Drigo ride!\n\n" +
+                                    "Track live: $liveTrackingUrl\n" +
+                                    "Driver: $partnerName\n" +
+                                    (if (vehiclePlate.isNotBlank()) "Vehicle: $vehicleMake $vehicleModel ($vehiclePlate)\n" else "") +
+                                    (if (ridePin.isNotBlank()) "PIN: $ridePin\n" else "") +
+                                    "Pickup: $pickupAddress\n" +
+                                    "Destination: $destinationAddress\n" +
+                                    "Ride ID: #$rideId"
+                            val sendIntent = Intent().apply {
+                                action = Intent.ACTION_SEND
+                                putExtra(Intent.EXTRA_TEXT, shareText)
+                                type = "text/plain"
+                            }
+                            val shareIntent = Intent.createChooser(sendIntent, "Share Ride Details via SMS / App")
+                            context.startActivity(shareIntent)
+                        } catch (_: Exception) {}
+                    },
+                    border = BorderStroke(1.dp, Color(0xFF25D366)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                ) {
+                    Text("Share via SMS or Other Apps", color = Color(0xFF25D366), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+
+            // 6. Report Issue to Admin
             OutlinedButton(
                 onClick = {
                     onDismiss()

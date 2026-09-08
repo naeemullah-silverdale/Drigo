@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.DrigoBrandPurple
+import com.example.ui.theme.drigoColors
 
 @Composable
 fun RideCategoryBentoCards(
@@ -49,8 +50,11 @@ fun RideCategoryBentoCards(
             selectedCategory == "Private AC" || selectedCategory == "Ride A/C" ||
             (selectedCategory == null)
 
-    val cardBg = Color(0xFF282A33)
-    val cardBorderDefault = Color(0xFF353945)
+    val isDark = MaterialTheme.drigoColors.isDark
+    val cardBg = if (isDark) Color(0xFF282A33) else MaterialTheme.colorScheme.surfaceVariant
+    val cardSelectedBg = if (isDark) Color(0xFF2E313D) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+    val cardBorderDefault = if (isDark) Color(0xFF353945) else MaterialTheme.colorScheme.outlineVariant
+    val textColor = MaterialTheme.colorScheme.onSurface
 
     Row(
         modifier = modifier
@@ -69,7 +73,7 @@ fun RideCategoryBentoCards(
             Surface(
                 onClick = onShareRideClick,
                 shape = RoundedCornerShape(14.dp),
-                color = if (isShareSelected) Color(0xFF2E313D) else cardBg,
+                color = if (isShareSelected) cardSelectedBg else cardBg,
                 border = BorderStroke(
                     if (isShareSelected) 1.8.dp else 1.dp,
                     if (isShareSelected) DrigoBrandPurple else cardBorderDefault
@@ -84,7 +88,7 @@ fun RideCategoryBentoCards(
                         text = "Share your ride",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = textColor,
                         fontSize = 13.sp,
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -104,7 +108,7 @@ fun RideCategoryBentoCards(
             Surface(
                 onClick = onSendParcelClick,
                 shape = RoundedCornerShape(14.dp),
-                color = if (isParcelSelected) Color(0xFF2E313D) else cardBg,
+                color = if (isParcelSelected) cardSelectedBg else cardBg,
                 border = BorderStroke(
                     if (isParcelSelected) 1.8.dp else 1.dp,
                     if (isParcelSelected) DrigoBrandPurple else cardBorderDefault
@@ -119,7 +123,7 @@ fun RideCategoryBentoCards(
                         text = "Send a parcel",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = textColor,
                         fontSize = 13.sp,
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -140,7 +144,7 @@ fun RideCategoryBentoCards(
         Surface(
             onClick = onRequestCarClick,
             shape = RoundedCornerShape(14.dp),
-            color = if (isCarSelected) Color(0xFF2E313D) else cardBg,
+            color = if (isCarSelected) cardSelectedBg else cardBg,
             border = BorderStroke(
                 if (isCarSelected) 1.8.dp else 1.dp,
                 if (isCarSelected) DrigoBrandPurple else cardBorderDefault
@@ -155,7 +159,7 @@ fun RideCategoryBentoCards(
                     text = "Request a car",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = textColor,
                     fontSize = 14.sp,
                     modifier = Modifier
                         .align(Alignment.TopStart)

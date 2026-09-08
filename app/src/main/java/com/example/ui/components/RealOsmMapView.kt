@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -105,6 +106,7 @@ fun RealOsmMapView(
     driverCarLocation: GeoPoint? = null,
     driverCarBearing: Float? = null,
     driverCarTitle: String? = null,
+    driverCarFareText: String? = null,
     passengerRequestsOnMap: List<com.example.data.model.RideRequest> = emptyList(),
     onPassengerRequestMarkerClick: ((com.example.data.model.RideRequest) -> Unit)? = null,
     nearbyDriverMarkers: List<NearbyDriverMarkerData> = emptyList(),
@@ -289,16 +291,29 @@ fun RealOsmMapView(
     }
 
     // 2.5. Manage Live Driver Car Marker on Map
-    LaunchedEffect(driverCarLocation, driverCarBearing) {
+    LaunchedEffect(driverCarLocation, driverCarBearing, driverCarTitle, driverCarFareText) {
         mapViewRef?.let { map ->
             if (driverCarLocation != null) {
                 // Ensure generic location dot does not overlap driver car marker
                 locationMarker?.let { map.overlays.remove(it) }
                 locationMarker = null
 
-                val carDrawable = cachedDriverCarMarkerDrawable ?: createDriverCarMarkerDrawable(context).also {
-                    cachedDriverCarMarkerDrawable = it
+                val carDrawable = if (!driverCarFareText.isNullOrBlank()) {
+                    createDriverWithFareBadgeDrawable(
+                        context = context,
+                        fareText = driverCarFareText,
+                        isPrimary = true,
+                        bearing = driverCarBearing ?: 0f,
+                        customCarColor = android.graphics.Color.parseColor("#E53935") // Red Car like image
+                    )
+                } else {
+                    createDriverCarMarkerDrawable(
+                        context = context,
+                        bearing = driverCarBearing ?: 0f,
+                        customCarColor = android.graphics.Color.parseColor("#E53935")
+                    )
                 }
+
                 if (driverCarMarker == null) {
                     val m = Marker(map).apply {
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -307,11 +322,17 @@ fun RealOsmMapView(
                     }
                     map.overlays.add(m)
                     driverCarMarker = m
+                } else {
+                    driverCarMarker?.icon = carDrawable
                 }
                 driverCarMarker?.position = driverCarLocation
                 driverCarMarker?.title = driverCarTitle ?: "Driver Vehicle"
-                driverCarBearing?.let { b ->
-                    driverCarMarker?.rotation = -b
+                if (driverCarFareText.isNullOrBlank()) {
+                    driverCarBearing?.let { b ->
+                        driverCarMarker?.rotation = -b
+                    }
+                } else {
+                    driverCarMarker?.rotation = 0f
                 }
                 map.invalidate()
             } else {
@@ -357,16 +378,23 @@ fun RealOsmMapView(
             nearbyDriverMapMarkers.forEach { map.overlays.remove(it) }
             val newMarkers = mutableListOf<Marker>()
 
-            nearbyDriverMarkers.forEach { driver ->
+            nearbyDriverMarkers.forEachIndexed { idx, driver ->
                 if (driver.latitude != 0.0 && driver.longitude != 0.0) {
                     val m = Marker(map).apply {
                         position = GeoPoint(driver.latitude, driver.longitude)
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        
+                        val carColor = when (idx % 2) {
+                            0 -> android.graphics.Color.parseColor("#E53935") // Red car like image
+                            else -> android.graphics.Color.parseColor("#9CDB43") // Lime green car like image
+                        }
+
                         icon = createDriverWithFareBadgeDrawable(
                             context = context,
                             fareText = driver.fareText,
                             isPrimary = driver.isPrimaryOption,
-                            bearing = driver.bearing
+                            bearing = driver.bearing,
+                            customCarColor = carColor
                         )
                         title = "${driver.driverName.ifBlank { "Nearby Captain" }} - ${driver.fareText}"
                         infoWindow = null
@@ -518,6 +546,19 @@ fun RealOsmMapView(
         }
     }
 
+    val isAppDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val darkFilter = remember(isAppDark) {
+        if (isAppDark) {
+            val matrix = android.graphics.ColorMatrix(floatArrayOf(
+                -0.78f,  0.00f,  0.00f, 0.00f, 215f,
+                 0.00f, -0.78f,  0.00f, 0.00f, 215f,
+                 0.00f,  0.00f, -0.78f, 0.00f, 215f,
+                 0.00f,  0.00f,  0.00f, 1.00f,   0f
+            ))
+            android.graphics.ColorMatrixColorFilter(matrix)
+        } else null
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -532,6 +573,7 @@ fun RealOsmMapView(
                     setMultiTouchControls(true)
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                     isTilesScaledToDpi = true
+                    overlayManager.tilesOverlay.setColorFilter(darkFilter)
 
                     controller.setZoom(18.0)
                     val initialPoint = GeoPoint(activeLat, activeLng)
@@ -632,7 +674,11 @@ fun RealOsmMapView(
                     mapViewRef = this
                 }
             },
-            update = { _ ->
+            update = { mapView ->
+                // Dynamically sync dark mode filter on tile layer
+                mapView.overlayManager?.tilesOverlay?.setColorFilter(darkFilter)
+                mapView.invalidate()
+
                 // Update User's GPS Location Marker
                 val pt = GeoPoint(activeLat, activeLng)
                 if (locationMarker?.position?.latitude != activeLat || locationMarker?.position?.longitude != activeLng) {
@@ -662,7 +708,7 @@ fun RealOsmMapView(
         ) {
             Surface(
                 shape = RoundedCornerShape(100.dp),
-                color = Color(0xFF1E2026).copy(alpha = 0.96f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                 border = BorderStroke(
                     1.5.dp,
                     if (mapSelectionMode == MapSelectionMode.PICKUP) Color(0xFF4CAF50) else Color(0xFFE53935)
@@ -684,7 +730,7 @@ fun RealOsmMapView(
                         text = if (mapSelectionMode == MapSelectionMode.PICKUP) "Tap on map to set Pickup (From)" else "Tap on map to set Destination (To)",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     TextButton(
@@ -692,7 +738,7 @@ fun RealOsmMapView(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         modifier = Modifier.height(26.dp)
                     ) {
-                        Text("Cancel", color = Color(0xFFB0B3BC), fontSize = 12.sp)
+                        Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
             }
@@ -703,7 +749,8 @@ fun RealOsmMapView(
             Surface(
                 onClick = { showLayerMenu = !showLayerMenu },
                 shape = CircleShape,
-                color = Color(0xFF1E2024).copy(alpha = 0.92f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 shadowElevation = 6.dp,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -714,7 +761,7 @@ fun RealOsmMapView(
                     Icon(
                         imageVector = Icons.Default.Layers,
                         contentDescription = "Map Style & Street View",
-                        tint = if (showLayerMenu) DrigoBrandPurple else Color.White,
+                        tint = if (showLayerMenu) DrigoBrandPurple else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -731,7 +778,8 @@ fun RealOsmMapView(
             ) {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF1E2024).copy(alpha = 0.96f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     shadowElevation = 10.dp,
                     modifier = Modifier.width(200.dp)
                 ) {
@@ -745,7 +793,7 @@ fun RealOsmMapView(
                                 text = "Map Style",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             IconButton(
                                 onClick = { showLayerMenu = false },
@@ -754,7 +802,7 @@ fun RealOsmMapView(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Close",
-                                    tint = Color.White.copy(alpha = 0.7f),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -852,7 +900,7 @@ private fun CenterPickupLocationPinWithCallout(
             Surface(
                 onClick = onWhereFromClick,
                 shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF1E2024).copy(alpha = 0.96f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                 shadowElevation = if (isInteracting) 10.dp else 6.dp,
                 border = BorderStroke(1.5.dp, Color(0xFF4CAF50)),
                 modifier = Modifier
@@ -876,7 +924,7 @@ private fun CenterPickupLocationPinWithCallout(
                         Text(
                             text = "Pickup Location",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF81C784),
+                            color = Color(0xFF2E7D32),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -886,7 +934,7 @@ private fun CenterPickupLocationPinWithCallout(
                         text = if (isInteracting) "Selecting pickup spot..." else pickupAddress.ifBlank { "Tap to set pickup" },
                         style = MaterialTheme.typography.bodySmall.copy(lineHeight = 14.sp),
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 12.sp,
                         maxLines = 2,
                         textAlign = TextAlign.Center,
@@ -944,8 +992,8 @@ private fun MapLayerOptionItem(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(10.dp),
-        color = if (isSelected) DrigoBrandPurple.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.06f),
-        border = if (isSelected) BorderStroke(1.5.dp, DrigoBrandPurple) else null,
+        color = if (isSelected) DrigoBrandPurple.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+        border = if (isSelected) BorderStroke(1.5.dp, DrigoBrandPurple) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -953,13 +1001,13 @@ private fun MapLayerOptionItem(
                 text = title,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.9f)
+                color = if (isSelected) DrigoBrandPurple else MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 fontSize = 10.sp,
-                color = Color.White.copy(alpha = 0.6f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -1169,100 +1217,128 @@ private fun createPickupMarkerDrawable(context: Context): BitmapDrawable {
 }
 
 /**
- * Creates an inDrive-style modern stylized Top-Down / Isometric Vehicle Car Marker
- * with distinct body, roof, windshield, headlights, wheels, and glowing shadow
+ * Helper function to draw a sleek, realistic Top-Down vehicle on Canvas
+ * with windshields, wheels, roof metallic shine, headlights, and tail lights
  */
-private fun createDriverCarMarkerDrawable(context: Context): BitmapDrawable {
+private fun drawTopDownCar(
+    canvas: Canvas,
+    carCx: Float,
+    carCy: Float,
+    density: Float,
+    carColor: Int
+) {
+    val carW = 18f * density
+    val carH = 32f * density
+    val left = carCx - (carW / 2f)
+    val top = carCy - (carH / 2f)
+    val right = carCx + (carW / 2f)
+    val bottom = carCy + (carH / 2f)
+
+    // 1. Soft Shadow under Car
+    val carShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(70, 0, 0, 0)
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(android.graphics.RectF(left + 1f * density, top + 2f * density, right + 1f * density, bottom + 2f * density), 7f * density, 7f * density, carShadowPaint)
+
+    // 2. Wheels (4 black rounded rectangles)
+    val wheelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#121417")
+        style = Paint.Style.FILL
+    }
+    val wheelW = 3.5f * density
+    val wheelH = 6.5f * density
+    // Front wheels
+    canvas.drawRoundRect(android.graphics.RectF(left - 1.8f * density, top + 4f * density, left + 1.8f * density, top + 4f * density + wheelH), 1.5f * density, 1.5f * density, wheelPaint)
+    canvas.drawRoundRect(android.graphics.RectF(right - 1.8f * density, top + 4f * density, right + 1.8f * density, top + 4f * density + wheelH), 1.5f * density, 1.5f * density, wheelPaint)
+    // Rear wheels
+    canvas.drawRoundRect(android.graphics.RectF(left - 1.8f * density, bottom - 4f * density - wheelH, left + 1.8f * density, bottom - 4f * density), 1.5f * density, 1.5f * density, wheelPaint)
+    canvas.drawRoundRect(android.graphics.RectF(right - 1.8f * density, bottom - 4f * density - wheelH, right + 1.8f * density, bottom - 4f * density), 1.5f * density, 1.5f * density, wheelPaint)
+
+    // 3. Main Body
+    val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = carColor
+        style = Paint.Style.FILL
+    }
+    val bodyRect = android.graphics.RectF(left, top, right, bottom)
+    canvas.drawRoundRect(bodyRect, 7f * density, 7f * density, bodyPaint)
+
+    // Body Outline/Shading
+    val bodyOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(80, 0, 0, 0)
+        style = Paint.Style.STROKE
+        strokeWidth = 1f * density
+    }
+    canvas.drawRoundRect(bodyRect, 7f * density, 7f * density, bodyOutlinePaint)
+
+    // 4. Front Windshield (Dark curved glass)
+    val windshieldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#1B222A")
+        style = Paint.Style.FILL
+    }
+    val windshieldRect = android.graphics.RectF(left + 2.5f * density, top + 6.5f * density, right - 2.5f * density, top + 13f * density)
+    canvas.drawRoundRect(windshieldRect, 2.5f * density, 2.5f * density, windshieldPaint)
+
+    // 5. Rear Glass
+    val rearGlassRect = android.graphics.RectF(left + 2.8f * density, bottom - 10f * density, right - 2.8f * density, bottom - 5.5f * density)
+    canvas.drawRoundRect(rearGlassRect, 2f * density, 2f * density, windshieldPaint)
+
+    // 6. Car Roof Highlight Panel
+    val roofPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(160, 255, 255, 255)
+        style = Paint.Style.FILL
+    }
+    val roofRect = android.graphics.RectF(left + 3f * density, top + 13.5f * density, right - 3f * density, bottom - 10.5f * density)
+    canvas.drawRoundRect(roofRect, 2f * density, 2f * density, roofPaint)
+
+    // 7. Headlights (Bright Yellow Beams at Front)
+    val headlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#FFD600")
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(left + 3f * density, top + 2f * density, 1.5f * density, headlightPaint)
+    canvas.drawCircle(right - 3f * density, top + 2f * density, 1.5f * density, headlightPaint)
+
+    // 8. Taillights (Red LED strips at Rear)
+    val taillightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.parseColor("#FF1744")
+        style = Paint.Style.FILL
+    }
+    canvas.drawRoundRect(android.graphics.RectF(left + 1.5f * density, bottom - 2f * density, left + 5f * density, bottom), 1f * density, 1f * density, taillightPaint)
+    canvas.drawRoundRect(android.graphics.RectF(right - 5f * density, bottom - 2f * density, right - 1.5f * density, bottom), 1f * density, 1f * density, taillightPaint)
+}
+
+/**
+ * Creates an inDrive-style modern stylized Top-Down Vehicle Car Marker
+ */
+private fun createDriverCarMarkerDrawable(
+    context: Context,
+    bearing: Float = 0f,
+    customCarColor: Int? = null
+): BitmapDrawable {
     val density = context.resources.displayMetrics.density
-    val widthPx = (44 * density).toInt().coerceAtLeast(1)
-    val heightPx = (44 * density).toInt().coerceAtLeast(1)
+    val widthPx = (56 * density).toInt().coerceAtLeast(1)
+    val heightPx = (56 * density).toInt().coerceAtLeast(1)
     val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
     val cx = widthPx / 2f
     val cy = heightPx / 2f
 
-    // Radar pulse / glow behind car
-    val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(55, 158, 0, 89) // Brand Purple Glow
-        style = Paint.Style.FILL
-    }
-    canvas.drawCircle(cx, cy, 20f * density, pulsePaint)
-
-    // Outer soft circular background
+    // Soft halo pulse background
     val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(235, 255, 255, 255)
+        color = android.graphics.Color.argb(40, 229, 57, 53)
         style = Paint.Style.FILL
     }
-    canvas.drawCircle(cx, cy, 15.5f * density, haloPaint)
+    canvas.drawCircle(cx, cy, 24f * density, haloPaint)
 
-    // Border ring on halo
-    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#9E0059")
-        style = Paint.Style.STROKE
-        strokeWidth = 2f * density
-    }
-    canvas.drawCircle(cx, cy, 15.5f * density, ringPaint)
+    canvas.save()
+    canvas.rotate(bearing, cx, cy)
 
-    // Top-down Car Body (Pointing UP towards 12 o'clock so rotation aligns with bearing)
-    val carW = 12f * density
-    val carH = 22f * density
-    val left = cx - (carW / 2f)
-    val top = cy - (carH / 2f)
-    val right = cx + (carW / 2f)
-    val bottom = cy + (carH / 2f)
+    val color = customCarColor ?: android.graphics.Color.parseColor("#E53935")
+    drawTopDownCar(canvas, cx, cy, density, color)
 
-    // Wheels (4 black rounded rectangles on sides)
-    val wheelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#212121")
-        style = Paint.Style.FILL
-    }
-    val wheelW = 2.5f * density
-    val wheelH = 4.5f * density
-    // Front-left
-    canvas.drawRoundRect(android.graphics.RectF(left - 1.2f * density, top + 2.5f * density, left + 1.3f * density, top + 2.5f * density + wheelH), 1f * density, 1f * density, wheelPaint)
-    // Front-right
-    canvas.drawRoundRect(android.graphics.RectF(right - 1.3f * density, top + 2.5f * density, right + 1.2f * density, top + 2.5f * density + wheelH), 1f * density, 1f * density, wheelPaint)
-    // Rear-left
-    canvas.drawRoundRect(android.graphics.RectF(left - 1.2f * density, bottom - 2.5f * density - wheelH, left + 1.3f * density, bottom - 2.5f * density), 1f * density, 1f * density, wheelPaint)
-    // Rear-right
-    canvas.drawRoundRect(android.graphics.RectF(right - 1.3f * density, bottom - 2.5f * density - wheelH, right + 1.2f * density, bottom - 2.5f * density), 1f * density, 1f * density, wheelPaint)
-
-    // Main Car Body (Magenta / Brand Purple or Crisp Dark Metal)
-    val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#9E0059")
-        style = Paint.Style.FILL
-    }
-    val carBodyRect = android.graphics.RectF(left, top, right, bottom)
-    canvas.drawRoundRect(carBodyRect, 4f * density, 4f * density, bodyPaint)
-
-    // Front Windshield (curved dark glass at top)
-    val windshieldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#1A237E")
-        style = Paint.Style.FILL
-    }
-    val windshieldRect = android.graphics.RectF(left + 2f * density, top + 4f * density, right - 2f * density, top + 8.5f * density)
-    canvas.drawRoundRect(windshieldRect, 1.5f * density, 1.5f * density, windshieldPaint)
-
-    // Rear Windshield
-    val rearGlassRect = android.graphics.RectF(left + 2f * density, bottom - 6.5f * density, right - 2f * density, bottom - 3.5f * density)
-    canvas.drawRoundRect(rearGlassRect, 1.2f * density, 1.2f * density, windshieldPaint)
-
-    // Car Roof (White / Silver highlight)
-    val roofPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
-        style = Paint.Style.FILL
-    }
-    val roofRect = android.graphics.RectF(left + 2.5f * density, top + 9f * density, right - 2.5f * density, bottom - 7f * density)
-    canvas.drawRoundRect(roofRect, 1.5f * density, 1.5f * density, roofPaint)
-
-    // Headlights (Twin bright amber / yellow beams)
-    val headlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#FFD600")
-        style = Paint.Style.FILL
-    }
-    canvas.drawCircle(left + 2.2f * density, top + 1f * density, 1.2f * density, headlightPaint)
-    canvas.drawCircle(right - 2.2f * density, top + 1f * density, 1.2f * density, headlightPaint)
+    canvas.restore()
 
     return BitmapDrawable(context.resources, bitmap)
 }
@@ -1350,63 +1426,69 @@ private fun createPassengerRequestPinDrawable(context: Context, farePkr: Int): B
 /**
  * Creates a custom Map Marker Drawable for Nearby Available Drivers with Attached Fare Badge.
  * Styled directly after the reference image: top-down car icon with a rounded pill badge attached
- * showing fare prices (e.g. "380 Rs" in lime green pill, "400 Rs" in dark charcoal pill).
+ * showing fare prices (e.g. "380 Rs" in lime green pill, "310 Rs" in red pill).
  */
 private fun createDriverWithFareBadgeDrawable(
     context: Context,
     fareText: String,
     isPrimary: Boolean,
-    bearing: Float
+    bearing: Float,
+    customCarColor: Int? = null
 ): BitmapDrawable {
     val density = context.resources.displayMetrics.density
-    val widthPx = (110 * density).toInt().coerceAtLeast(1)
-    val heightPx = (80 * density).toInt().coerceAtLeast(1)
+    val widthPx = (120 * density).toInt().coerceAtLeast(1)
+    val heightPx = (90 * density).toInt().coerceAtLeast(1)
     val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
     // Center point of the car graphic
-    val carCx = 38f * density
-    val carCy = 48f * density
+    val carCx = 42f * density
+    val carCy = 52f * density
 
     // Clean text measure for pill badge
     val displayText = fareText.ifBlank { "380 Rs" }
     val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
-        textSize = 12f * density
+        textSize = 13f * density
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
         textAlign = Paint.Align.CENTER
     }
 
     val textWidth = textPaint.measureText(displayText)
-    val pillH = 22f * density
-    val pillW = (textWidth + 18f * density).coerceAtLeast(50f * density)
+    val pillH = 24f * density
+    val pillW = (textWidth + 22f * density).coerceAtLeast(54f * density)
 
-    val pillLeft = carCx + 8f * density
-    val pillTop = carCy - 34f * density
+    val pillLeft = carCx + 10f * density
+    val pillTop = carCy - 38f * density
     val pillRight = pillLeft + pillW
     val pillBottom = pillTop + pillH
 
     val pillRect = android.graphics.RectF(pillLeft, pillTop, pillRight, pillBottom)
 
+    val baseCarColor = customCarColor ?: if (isPrimary) {
+        android.graphics.Color.parseColor("#E53935") // Red like image
+    } else {
+        android.graphics.Color.parseColor("#9CDB43") // Lime Green like image
+    }
+
     // 1. Soft Shadow under Pill Badge
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(90, 0, 0, 0)
+        color = android.graphics.Color.argb(80, 0, 0, 0)
         style = Paint.Style.FILL
     }
-    val shadowRect = android.graphics.RectF(pillLeft + 1.5f * density, pillTop + 2.5f * density, pillRight + 1.5f * density, pillBottom + 2.5f * density)
+    val shadowRect = android.graphics.RectF(pillLeft + 2f * density, pillTop + 3f * density, pillRight + 2f * density, pillBottom + 3f * density)
     canvas.drawRoundRect(shadowRect, pillH / 2f, pillH / 2f, shadowPaint)
 
-    // 2. Pill Background (Primary = Lime Green like #9CDB43 / #A2E048, Secondary = Dark Charcoal #282C37)
-    val pillBgColor = if (isPrimary) android.graphics.Color.parseColor("#9CDB43") else android.graphics.Color.parseColor("#282C37")
+    // 2. Pill Background (Primary Red/Green or Custom)
     val pillBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pillBgColor
+        color = baseCarColor
         style = Paint.Style.FILL
     }
     canvas.drawRoundRect(pillRect, pillH / 2f, pillH / 2f, pillBgPaint)
 
     // 3. Pill Border
     val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = if (isPrimary) android.graphics.Color.parseColor("#82C42C") else android.graphics.Color.parseColor("#424A5C")
+        color = android.graphics.Color.argb(120, 255, 255, 255)
         style = Paint.Style.STROKE
         strokeWidth = 1.2f * density
     }
@@ -1418,11 +1500,11 @@ private fun createDriverWithFareBadgeDrawable(
     val textY = pillTop + (pillH / 2f) - ((fontMetrics.descent + fontMetrics.ascent) / 2f)
     canvas.drawText(displayText, textX, textY, textPaint)
 
-    // 5. Connecting stem to car
+    // 5. Connecting stem line to car
     val stemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = pillBgColor
+        color = baseCarColor
         style = Paint.Style.STROKE
-        strokeWidth = 2.2f * density
+        strokeWidth = 2.5f * density
     }
     canvas.drawLine(carCx + 4f * density, carCy - 12f * density, pillLeft + 4f * density, pillBottom - 2f * density, stemPaint)
 
@@ -1430,78 +1512,7 @@ private fun createDriverWithFareBadgeDrawable(
     canvas.save()
     canvas.rotate(bearing, carCx, carCy)
 
-    val carW = 15f * density
-    val carH = 28f * density
-    val left = carCx - (carW / 2f)
-    val top = carCy - (carH / 2f)
-    val right = carCx + (carW / 2f)
-    val bottom = carCy + (carH / 2f)
-
-    // Wheels
-    val wheelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#121417")
-        style = Paint.Style.FILL
-    }
-    val wheelW = 3f * density
-    val wheelH = 5.5f * density
-    canvas.drawRoundRect(android.graphics.RectF(left - 1.5f * density, top + 3.5f * density, left + 1.5f * density, top + 3.5f * density + wheelH), 1.2f * density, 1.2f * density, wheelPaint)
-    canvas.drawRoundRect(android.graphics.RectF(right - 1.5f * density, top + 3.5f * density, right + 1.5f * density, top + 3.5f * density + wheelH), 1.2f * density, 1.2f * density, wheelPaint)
-    canvas.drawRoundRect(android.graphics.RectF(left - 1.5f * density, bottom - 3.5f * density - wheelH, left + 1.5f * density, bottom - 3.5f * density), 1.2f * density, 1.2f * density, wheelPaint)
-    canvas.drawRoundRect(android.graphics.RectF(right - 1.5f * density, bottom - 3.5f * density - wheelH, right + 1.5f * density, bottom - 3.5f * density), 1.2f * density, 1.2f * density, wheelPaint)
-
-    // Car Body
-    val bodyColor = if (isPrimary) android.graphics.Color.parseColor("#9CDB43") else android.graphics.Color.parseColor("#383E4C")
-    val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = bodyColor
-        style = Paint.Style.FILL
-    }
-    val bodyRect = android.graphics.RectF(left, top, right, bottom)
-    canvas.drawRoundRect(bodyRect, 6f * density, 6f * density, bodyPaint)
-
-    // Body Outline
-    val bodyOutlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(100, 0, 0, 0)
-        style = Paint.Style.STROKE
-        strokeWidth = 1f * density
-    }
-    canvas.drawRoundRect(bodyRect, 6f * density, 6f * density, bodyOutlinePaint)
-
-    // Front Windshield
-    val windshieldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#1B222A")
-        style = Paint.Style.FILL
-    }
-    val windshieldRect = android.graphics.RectF(left + 2f * density, top + 5.5f * density, right - 2f * density, top + 11f * density)
-    canvas.drawRoundRect(windshieldRect, 2f * density, 2f * density, windshieldPaint)
-
-    // Rear Glass
-    val rearGlassRect = android.graphics.RectF(left + 2.2f * density, bottom - 8.5f * density, right - 2.2f * density, bottom - 4.5f * density)
-    canvas.drawRoundRect(rearGlassRect, 1.5f * density, 1.5f * density, windshieldPaint)
-
-    // Car Roof
-    val roofColor = if (isPrimary) android.graphics.Color.parseColor("#C8E6C9") else android.graphics.Color.parseColor("#606B7D")
-    val roofPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = roofColor
-        style = Paint.Style.FILL
-    }
-    val roofRect = android.graphics.RectF(left + 2.5f * density, top + 11.5f * density, right - 2.5f * density, bottom - 9f * density)
-    canvas.drawRoundRect(roofRect, 2f * density, 2f * density, roofPaint)
-
-    // Headlights (Front - Bright Amber/White)
-    val headlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#FFF176")
-        style = Paint.Style.FILL
-    }
-    canvas.drawCircle(left + 2.5f * density, top + 1.8f * density, 1.3f * density, headlightPaint)
-    canvas.drawCircle(right - 2.5f * density, top + 1.8f * density, 1.3f * density, headlightPaint)
-
-    // Taillights (Rear - Red)
-    val taillightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#FF2A2A")
-        style = Paint.Style.FILL
-    }
-    canvas.drawRoundRect(android.graphics.RectF(left + 1.2f * density, bottom - 1.8f * density, left + 4.5f * density, bottom), 1f * density, 1f * density, taillightPaint)
-    canvas.drawRoundRect(android.graphics.RectF(right - 4.5f * density, bottom - 1.8f * density, right - 1.2f * density, bottom), 1f * density, 1f * density, taillightPaint)
+    drawTopDownCar(canvas, carCx, carCy, density, baseCarColor)
 
     canvas.restore()
 

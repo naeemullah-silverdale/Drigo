@@ -311,12 +311,60 @@ data class PassengerOrder(
     val scheduledTimeText: String? = null,
     val passengerCount: Int = 1,
     val comments: String = "",
+    val ridePin: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val completedAt: Long = 0L,
     val cancelledAt: Long = 0L
 ) {
     val driverId: String get() = assignedDriverId
+    val verificationPin: String get() = if (ridePin.isNotBlank()) ridePin else ((id.hashCode().let { if (it == Int.MIN_VALUE) 0 else kotlin.math.abs(it) } % 9000) + 1000).toString()
 }
+
+data class DriverHistoryItem(
+    val id: String = "",
+    val tripId: String = id,
+    val requestId: String = "",
+    val driverId: String = "",
+    val passengerId: String = "",
+    val passengerName: String = "",
+    val passengerRating: Double = 5.0,
+    val pickupAddress: String = "",
+    val pickupTitle: String = "",
+    val pickupLatitude: Double? = null,
+    val pickupLongitude: Double? = null,
+    val destinationAddress: String = "",
+    val destinationTitle: String = "",
+    val destinationLatitude: Double? = null,
+    val destinationLongitude: Double? = null,
+    val farePkr: Int = 0,
+    val agreedFare: Int? = null,
+    val offeredFare: Int? = null,
+    val counterOffer: Int? = null,
+    val paymentMethod: String = "Cash",
+    val dateFormatted: String = "",
+    val distanceKm: Double = 0.0,
+    val distance: Double? = null,
+    val durationMins: Int = 0,
+    val duration: Int? = null,
+    val status: String = "COMPLETED",
+    val tripStatus: String = status,
+    val category: String = "Ride A/C",
+    val rideType: String = "",
+    val vehicleType: String = "",
+    val baseFarePkr: Int = (farePkr * 0.35).toInt(),
+    val distanceFarePkr: Int = (farePkr * 0.50).toInt(),
+    val tollPkr: Int = 0,
+    val platformFeePkr: Int = (farePkr * 0.10).toInt(),
+    val netEarningsPkr: Int = (farePkr * 0.90).toInt(),
+    val timestamp: Long = System.currentTimeMillis(),
+    val requestedAt: Long? = null,
+    val acceptedAt: Long? = null,
+    val arrivedAt: Long? = null,
+    val startedAt: Long? = null,
+    val completedAt: Long? = null,
+    val cancelledAt: Long? = null,
+    val cancellationReason: String? = null
+)
 
 data class DriverOffer(
     val id: String = UUID.randomUUID().toString(),
@@ -438,7 +486,7 @@ fun parseDriverAccountStatus(
     if (acc == "SUSPENDED" || st == "SUSPENDED") return DriverAccountStatus.SUSPENDED
     if (acc == "FLAGGED" || st == "FLAGGED") return DriverAccountStatus.FLAGGED
     if (acc == "ON_TRIP" || st == "ON_TRIP" || st == "IN_TRIP") return DriverAccountStatus.ON_TRIP
-    if (acc == "ONLINE" || st == "ONLINE" || (isOnline && verificationStatus == DriverVerificationStatus.APPROVED)) return DriverAccountStatus.ONLINE
+    if (acc == "ONLINE" || st == "ONLINE" || isOnline) return DriverAccountStatus.ONLINE
     if (acc == "ACTIVE" || st == "ACTIVE" || st == "APPROVED") {
         return if (verificationStatus == DriverVerificationStatus.APPROVED) {
             if (isOnline) DriverAccountStatus.ONLINE else DriverAccountStatus.ACTIVE
@@ -548,6 +596,27 @@ data class DriverVerification(
     val verificationStatus: String = "PENDING", // PENDING, APPROVED, REJECTED
     val isVerified: Boolean = false,
     val isOnline: Boolean = false
+)
+
+/**
+ * Dedicated data model for driver vehicle details stored under 'vehicle/{vehicleId}'.
+ */
+data class DriverVehicle(
+    val vehicleId: String = "",
+    val driverId: String = "",
+    val driverName: String = "",
+    val driverPhone: String = "",
+    val company: String = "",
+    val model: String = "",
+    val plateNumber: String = "",
+    val category: String = "",
+    val frontPhotoUrl: String = "",
+    val backPhotoUrl: String = "",
+    val sidePhotoUrl: String = "",
+    val registrationDocUrl: String = "",
+    val verificationStatus: String = "PENDING", // "PENDING", "APPROVED", "REJECTED"
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 enum class ReportCategory(val label: String) {

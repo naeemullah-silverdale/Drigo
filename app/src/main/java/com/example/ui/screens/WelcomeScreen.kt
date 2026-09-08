@@ -3,11 +3,10 @@ package com.example.ui.screens
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,10 +17,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.theme.DrigoBrandPurple
 import kotlinx.coroutines.delay
 
@@ -70,17 +71,16 @@ fun WelcomeScreen(
             // Icon in clean translucent white container
             Surface(
                 shape = RoundedCornerShape(28.dp),
-                color = Color.White.copy(alpha = 0.2f),
+                color = Color.White.copy(alpha = 0.15f),
                 modifier = Modifier
                     .size(96.dp)
                     .testTag("drigo_logo_icon")
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "Drigo Icon",
-                        tint = Color.White,
-                        modifier = Modifier.size(54.dp)
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_drigo_logo),
+                        contentDescription = "Drigo App Logo",
+                        modifier = Modifier.size(80.dp)
                     )
                 }
             }

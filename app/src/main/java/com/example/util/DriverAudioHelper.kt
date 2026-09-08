@@ -91,7 +91,8 @@ class DriverAudioHelper private constructor(private val context: Context) : Text
         customMessage: String? = null,
         farePkr: Int? = null,
         pickupTitle: String? = null,
-        destTitle: String? = null
+        destTitle: String? = null,
+        distanceKm: Double? = null
     ) {
         if (rideId.isBlank()) return
 
@@ -118,10 +119,27 @@ class DriverAudioHelper private constructor(private val context: Context) : Text
                 val cleanPickup = pickupTitle?.substringBefore(",")?.take(22) ?: "pickup"
                 val cleanDest = destTitle?.substringBefore(",")?.take(22) ?: "destination"
                 val fare = farePkr ?: 0
+                val distStr = if (distanceKm != null && distanceKm > 0.1) {
+                    if (distanceKm < 1.0) "${(distanceKm * 1000).toInt()} meters"
+                    else "${String.format(Locale.US, "%.1f", distanceKm)} kilometers"
+                } else null
+
                 if (voiceLanguage == "UR") {
-                    "Nayi ride request. $cleanPickup say $cleanDest. Kiraya $fare rupay."
+                    if (distStr != null) "Nayi ride request $distStr door, $fare rupay."
+                    else "Nayi ride request. $cleanPickup say $cleanDest. Kiraya $fare rupay."
                 } else {
-                    "New ride request received. From $cleanPickup to $cleanDest. Fare $fare rupees."
+                    if (distStr != null) "New request $distStr away, PKR $fare."
+                    else "New ride request received. From $cleanPickup to $cleanDest. Fare $fare rupees."
+                }
+            }
+            "OFFER_ACCEPTED", "BID_ACCEPTED" -> {
+                val fare = farePkr ?: 0
+                if (voiceLanguage == "UR") {
+                    if (fare > 0) "Sawari ne $fare rupay ki offer qabool kar li hai. Pickup ki taraf rawana hon."
+                    else "Sawari ne aap ki offer qabool kar li hai."
+                } else {
+                    if (fare > 0) "Passenger accepted your bid of PKR $fare. Proceed to pickup."
+                    else "Passenger accepted your bid. Proceed to pickup point."
                 }
             }
             "ACCEPTED", "HEADING_TO_PICKUP", "CONFIRMED" -> {
@@ -153,19 +171,25 @@ class DriverAudioHelper private constructor(private val context: Context) : Text
             else -> customMessage ?: normalizedStatus
         }
 
-        // Sound chime / vibration feedback
+        // Sound distinct tone / vibration feedback for each state
         when (normalizedStatus) {
             "REQUESTED", "NEW_REQUEST" -> {
-                try { toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 250) } catch (_: Exception) {}
-                vibrateShort()
+                playNewRequestTone()
+            }
+            "OFFER_ACCEPTED", "BID_ACCEPTED" -> {
+                playOfferAcceptedTone()
+            }
+            "ACCEPTED", "HEADING_TO_PICKUP", "CONFIRMED" -> {
+                playOfferAcceptedTone()
             }
             "ARRIVED", "DRIVER_ARRIVED" -> {
-                try { toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 350) } catch (_: Exception) {}
-                vibrateShort()
+                playArrivalTone()
+            }
+            "IN_TRANSIT", "IN_TRIP" -> {
+                playTripStartTone()
             }
             "COMPLETED" -> {
-                try { toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 400) } catch (_: Exception) {}
-                vibrateShort()
+                playTripCompleteTone()
             }
             "CANCELLED" -> {
                 vibrateShort()
@@ -195,34 +219,105 @@ class DriverAudioHelper private constructor(private val context: Context) : Text
         lastAnnouncedStatus = null
     }
 
-    fun playNewRequestAlert(pickupTitle: String, destinationTitle: String, farePkr: Int, requestId: String = "") {
+    fun playNewRequestAlert(
+        pickupTitle: String,
+        destinationTitle: String,
+        farePkr: Int,
+        distanceKm: Double? = null,
+        requestId: String = ""
+    ) {
         if (requestId.isNotBlank()) {
             announceActiveRideStatus(
                 rideId = requestId,
                 status = "REQUESTED",
                 farePkr = farePkr,
                 pickupTitle = pickupTitle,
-                destTitle = destinationTitle
+                destTitle = destinationTitle,
+                distanceKm = distanceKm
             )
             return
         }
 
         if (!isVoiceEnabled) return
-        try {
-            toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 250)
-        } catch (_: Exception) {}
-        vibrateShort()
+        playNewRequestTone()
 
         if (isTtsReady && tts != null) {
             val cleanPickup = pickupTitle.substringBefore(",").take(22)
             val cleanDest = destinationTitle.substringBefore(",").take(22)
+            val distStr = if (distanceKm != null && distanceKm > 0.1) {
+                if (distanceKm < 1.0) "${(distanceKm * 1000).toInt()} meters"
+                else "${String.format(Locale.US, "%.1f", distanceKm)} kilometers"
+            } else null
+
             val speechText = if (voiceLanguage == "UR") {
-                "Nayi ride request. $cleanPickup say $cleanDest. Kiraya $farePkr rupay."
+                if (distStr != null) "Nayi request $distStr door, $farePkr rupay."
+                else "Nayi ride request. $cleanPickup say $cleanDest. Kiraya $farePkr rupay."
             } else {
-                "New ride request received. From $cleanPickup to $cleanDest. Fare $farePkr rupees."
+                if (distStr != null) "New request $distStr away, PKR $farePkr."
+                else "New ride request received. From $cleanPickup to $cleanDest. Fare $farePkr rupees."
             }
             tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "NEW_REQUEST_${System.currentTimeMillis()}")
         }
+    }
+
+    fun playOfferAcceptedAlert(passengerName: String = "Passenger", farePkr: Int = 0, rideId: String = "") {
+        if (rideId.isNotBlank()) {
+            announceActiveRideStatus(
+                rideId = rideId,
+                status = "OFFER_ACCEPTED",
+                farePkr = farePkr
+            )
+            return
+        }
+
+        if (!isVoiceEnabled) return
+        playOfferAcceptedTone()
+
+        if (isTtsReady && tts != null) {
+            val speechText = if (voiceLanguage == "UR") {
+                if (farePkr > 0) "Sawari ne $farePkr rupay ki offer qabool kar li hai. Pickup ki taraf rawana hon."
+                else "Sawari ne aap ki offer qabool kar li hai."
+            } else {
+                if (farePkr > 0) "Passenger accepted your bid of PKR $farePkr! Proceed to pickup."
+                else "Passenger accepted your bid! Proceed to pickup point."
+            }
+            tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, null, "OFFER_ACCEPTED_${System.currentTimeMillis()}")
+        }
+    }
+
+    fun playNewRequestTone() {
+        try {
+            toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 280)
+        } catch (_: Exception) {}
+        vibrateShort()
+    }
+
+    fun playOfferAcceptedTone() {
+        try {
+            toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 380)
+        } catch (_: Exception) {}
+        vibrateShort()
+    }
+
+    fun playArrivalTone() {
+        try {
+            toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 320)
+        } catch (_: Exception) {}
+        vibrateShort()
+    }
+
+    fun playTripStartTone() {
+        try {
+            toneGenerator?.startTone(ToneGenerator.TONE_CDMA_CONFIRM, 280)
+        } catch (_: Exception) {}
+        vibrateShort()
+    }
+
+    fun playTripCompleteTone() {
+        try {
+            toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 450)
+        } catch (_: Exception) {}
+        vibrateShort()
     }
 
     fun playPanicSiren() {

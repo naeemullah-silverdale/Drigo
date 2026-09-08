@@ -80,6 +80,9 @@ class RideNotificationManager private constructor(private val appContext: Contex
     private val _inAppNotification = MutableStateFlow<InAppNotificationItem?>(null)
     val inAppNotification: StateFlow<InAppNotificationItem?> = _inAppNotification.asStateFlow()
 
+    private val _notificationHistory = MutableStateFlow<List<InAppNotificationItem>>(emptyList())
+    val notificationHistory: StateFlow<List<InAppNotificationItem>> = _notificationHistory.asStateFlow()
+
     private var audioHelper: DriverAudioHelper? = null
 
     init {
@@ -93,10 +96,12 @@ class RideNotificationManager private constructor(private val appContext: Contex
 
     companion object {
         const val CHANNEL_PASSENGER = "passenger_ride_updates"
+        const val CHANNEL_PASSENGER_ACTIVE_RIDE = "passenger_active_ride_channel"
         const val CHANNEL_DRIVER = "driver_radar_alerts"
         const val CHANNEL_DRIVER_ACTIVE_RIDE = "driver_active_ride_channel"
         const val CHANNEL_EMERGENCY = "emergency_sos_alerts"
         const val NOTIFICATION_ID_DRIVER_ACTIVE_RIDE = 8801
+        const val NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE = 8802
 
         @Volatile
         private var INSTANCE: RideNotificationManager? = null
@@ -129,9 +134,21 @@ class RideNotificationManager private constructor(private val appContext: Contex
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 250, 150, 250)
                 setSound(defaultSoundUri, audioAttributes)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
 
-            // 2. Driver radar alerts channel
+            // 2. Passenger persistent active ride channel
+            val passengerActiveChannel = NotificationChannel(
+                CHANNEL_PASSENGER_ACTIVE_RIDE,
+                "Passenger Active Ride Status",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Persistent status updates while a passenger trip is active"
+                setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+
+            // 3. Driver radar alerts channel
             val driverChannel = NotificationChannel(
                 CHANNEL_DRIVER,
                 "Driver Radar & Requests",
@@ -141,9 +158,10 @@ class RideNotificationManager private constructor(private val appContext: Contex
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 300, 200, 300)
                 setSound(defaultSoundUri, audioAttributes)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
 
-            // 3. Driver active ride ongoing channel
+            // 4. Driver active ride ongoing channel
             val driverActiveChannel = NotificationChannel(
                 CHANNEL_DRIVER_ACTIVE_RIDE,
                 "Driver Active Ride Progress",
@@ -151,9 +169,10 @@ class RideNotificationManager private constructor(private val appContext: Contex
             ).apply {
                 description = "Ongoing persistent notification displaying active ride progress for drivers"
                 setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
 
-            // 4. Emergency SOS channel
+            // 5. Emergency SOS channel
             val emergencyChannel = NotificationChannel(
                 CHANNEL_EMERGENCY,
                 "Emergency & Safety SOS Alerts",
@@ -162,9 +181,12 @@ class RideNotificationManager private constructor(private val appContext: Contex
                 description = "Critical alerts for emergency assistance and safety updates"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
 
-            notificationManager.createNotificationChannels(listOf(passengerChannel, driverChannel, driverActiveChannel, emergencyChannel))
+            notificationManager.createNotificationChannels(
+                listOf(passengerChannel, passengerActiveChannel, driverChannel, driverActiveChannel, emergencyChannel)
+            )
         }
     }
 
@@ -193,7 +215,10 @@ class RideNotificationManager private constructor(private val appContext: Contex
             onActionClick = onActionClick
         )
 
-        // 1. Trigger In-App notification
+        // 1. Maintain recent notification history (capped at 50 items)
+        _notificationHistory.value = (listOf(item) + _notificationHistory.value).take(50)
+
+        // 2. Trigger In-App notification banner
         _inAppNotification.value = item
         dismissJob?.cancel()
         dismissJob = scope.launch {
@@ -203,7 +228,20 @@ class RideNotificationManager private constructor(private val appContext: Contex
             }
         }
 
-        // 2. Voice announcement strictly for active ride updates (deduped)
+        // 3. Trigger haptic vibration for in-app heads-up feedback
+        try {
+            val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(120, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(120)
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 4. Voice announcement strictly for active ride updates (deduped)
         if (speakAnnouncement) {
             try {
                 val effectiveRideId = rideId ?: "active_event_${type.name}"
@@ -230,13 +268,17 @@ class RideNotificationManager private constructor(private val appContext: Contex
             }
         }
 
-        // 3. System Push / Status Bar Notification
+        // 5. System Push / Status Bar Notification
         showSystemNotification(item)
     }
 
     fun dismissInAppNotification() {
         dismissJob?.cancel()
         _inAppNotification.value = null
+    }
+
+    fun clearNotificationHistory() {
+        _notificationHistory.value = emptyList()
     }
 
     private fun showSystemNotification(item: InAppNotificationItem) {
@@ -251,22 +293,28 @@ class RideNotificationManager private constructor(private val appContext: Contex
             }
 
             val intent = Intent(appContext, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("NOTIFICATION_RIDE_ID", item.rideId)
                 putExtra("NOTIFICATION_TYPE", item.type.name)
+                putExtra("OPEN_DRIVER_MODE", item.type.isDriverEvent)
+                putExtra("OPEN_PASSENGER_MODE", !item.type.isDriverEvent)
             }
+
+            val requestCode = ((item.rideId?.hashCode() ?: 0) * 31 + item.type.ordinal) and 0x7FFFFFFF
 
             val pendingIntent = PendingIntent.getActivity(
                 appContext,
-                item.type.hashCode(),
+                requestCode,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
             val builder = NotificationCompat.Builder(appContext, item.type.channelId)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(if (item.type.isDriverEvent) 0xFF00E676.toInt() else 0xFF6C47FF.toInt())
                 .setContentTitle(item.title)
                 .setContentText(item.message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(item.message))
                 .setSubText(item.subText ?: item.type.categoryName)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
@@ -274,7 +322,7 @@ class RideNotificationManager private constructor(private val appContext: Contex
                 .setContentIntent(pendingIntent)
 
             item.actionLabel?.let { label ->
-                builder.addAction(R.mipmap.ic_launcher, label, pendingIntent)
+                builder.addAction(R.drawable.ic_notification, label, pendingIntent)
             }
 
             val notificationId = (item.rideId?.hashCode() ?: System.currentTimeMillis().toInt()) and 0x7FFFFFFF
@@ -485,9 +533,11 @@ class RideNotificationManager private constructor(private val appContext: Contex
             )
 
             val builder = NotificationCompat.Builder(appContext, CHANNEL_DRIVER_ACTIVE_RIDE)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(0xFF00E676.toInt())
                 .setContentTitle(title)
                 .setContentText(contentText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
                 .setSubText("Drigo Captain Active Ride")
                 .setOngoing(true)
                 .setAutoCancel(false)
@@ -497,6 +547,82 @@ class RideNotificationManager private constructor(private val appContext: Contex
             NotificationManagerCompat.from(appContext).notify(NOTIFICATION_ID_DRIVER_ACTIVE_RIDE, builder.build())
         } catch (t: Throwable) {
             Log.e("RideNotificationManager", "Error updating active ride notification: ${t.message}")
+        }
+    }
+
+    /**
+     * Shows or updates a persistent, ongoing status bar notification for the active passenger trip.
+     * Stays visible while the passenger is waiting for the captain or in transit.
+     * Tapping it returns the passenger directly to the live trip screen in Drigo.
+     */
+    fun updatePassengerActiveRideNotification(order: PassengerOrder) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+            }
+
+            val captName = order.driverName.ifBlank { "Captain" }
+            val vehicleInfo = listOf(order.driverVehicleColor, order.driverVehicleMake, order.driverVehicleModel)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+                .ifBlank { "Vehicle" }
+
+            val title = when (order.status) {
+                PassengerOrderStatus.DRIVER_ARRIVED -> "Captain Has Arrived! • $captName"
+                PassengerOrderStatus.IN_TRIP -> "On the Road • Heading to Destination"
+                else -> "Captain on the Way • $captName"
+            }
+
+            val contentText = when (order.status) {
+                PassengerOrderStatus.DRIVER_ARRIVED -> "$vehicleInfo (${order.driverPlateNumber}) waiting at ${order.pickupTitle.take(24)}"
+                PassengerOrderStatus.IN_TRIP -> "Heading to: ${order.destinationTitle.take(24)} • PKR ${order.agreedFare}"
+                else -> "$vehicleInfo (${order.driverPlateNumber}) • ETA ~${order.etaMinutes} min • PKR ${order.agreedFare}"
+            }
+
+            val intent = Intent(appContext, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("OPEN_PASSENGER_MODE", true)
+                putExtra("OPEN_DRIVER_MODE", false)
+                putExtra("NOTIFICATION_RIDE_ID", order.id)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                appContext,
+                NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val builder = NotificationCompat.Builder(appContext, CHANNEL_PASSENGER_ACTIVE_RIDE)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(0xFF6C47FF.toInt())
+                .setContentTitle(title)
+                .setContentText(contentText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+                .setSubText("Drigo Active Trip")
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pendingIntent)
+
+            NotificationManagerCompat.from(appContext).notify(NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE, builder.build())
+        } catch (t: Throwable) {
+            Log.e("RideNotificationManager", "Error updating passenger active ride notification: ${t.message}")
+        }
+    }
+
+    /**
+     * Dismisses the persistent passenger active ride notification upon completion or cancellation.
+     */
+    fun dismissPassengerActiveRideNotification() {
+        try {
+            NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE)
+        } catch (e: Exception) {
+            Log.e("RideNotificationManager", "Error cancelling passenger active ride notification: ${e.message}")
         }
     }
 
