@@ -513,12 +513,14 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
        - `notifManager.notifyDriverRideCancelled(...)`
      - This causes the false "Passenger cancelled the ride" toast and notification to appear directly over the completed ride review/rating dialog.
 
-### 📋 Planned Fix Action Items
-1. **Guard Cancellation Observers in `DriverModeView.kt`**:
-   - In all 3 cancellation listeners (lines 944, 998, 1045), add a check to verify that `completedTripForRating == null` and the trip being cancelled does NOT match `completedTripForRating?.id` or `completedTripForRating?.requestId`.
+### 📋 Fix Implemented & Verified (COMPLETED)
+1. **Guarded Cancellation Observers in `DriverModeView.kt`**:
+   - Updated all 3 cancellation listeners (lines 944, 998, 1045) with `val isCompletedOrRating = completedTripForRating != null && (completedTripForRating?.id == tripId || completedTripForRating?.requestId == reqId)` to suppress false cancellation toasts/notifications if the ride is completed or in rating.
 2. **Explicit Status Transitioning on Completion**:
-   - In the "Complete Ride" tap handler (line 2636), explicitly update `lastKnownDriverTripStatus = PassengerOrderStatus.COMPLETED` prior to launching background persistence, ensuring state effects recognize the completion state transition immediately.
-3. **No Code Changed Yet**: Awaiting user's explicit "apply the fix" command before applying modifications.
+   - In the "Complete Ride" tap handler (line 2647), explicitly set `lastKnownDriverTripStatus = PassengerOrderStatus.COMPLETED` prior to launching background persistence.
+3. **Compilation & Push**:
+   - Verified compilation with `compile_applet` (0 errors).
+   - Committed (`20edfe3`) and pushed to `fix/driver-feed-radar-and-map-inspection`.
 
 
 
