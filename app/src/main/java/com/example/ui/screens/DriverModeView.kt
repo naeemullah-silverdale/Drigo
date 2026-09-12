@@ -942,7 +942,9 @@ fun DriverModeView(
                 }
 
                 if (remoteTrip.status == PassengerOrderStatus.CANCELLED) {
-                    if (activeDriverTrip != null && (activeDriverTrip?.id == remoteTrip.id || activeDriverTrip?.requestId == remoteTrip.requestId)) {
+                    val isCompletedOrRating = completedTripForRating != null &&
+                        (completedTripForRating?.id == remoteTrip.id || completedTripForRating?.requestId == remoteTrip.requestId)
+                    if (!isCompletedOrRating && activeDriverTrip != null && (activeDriverTrip?.id == remoteTrip.id || activeDriverTrip?.requestId == remoteTrip.requestId)) {
                         Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
                         notifManager.notifyDriverRideCancelled(
                             passengerName = remoteTrip.passengerName.ifBlank { "Passenger" },
@@ -991,16 +993,20 @@ fun DriverModeView(
                     override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                         val status = snapshot.getValue(String::class.java)
                         if (status == "CANCELLED") {
-                            notifManager.dismissDriverActiveRideNotification()
-                            activeDriverTrip = null
-                            driverRouteResult = null
-                            offerSentRequestId = null
-                            driverRecenterTrigger++
-                            Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
-                            notifManager.notifyDriverRideCancelled(
-                                passengerName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
-                                rideId = trip.id
-                            )
+                            val isCompletedOrRating = completedTripForRating != null &&
+                                (completedTripForRating?.id == trip.id || completedTripForRating?.requestId == reqId)
+                            if (!isCompletedOrRating) {
+                                notifManager.dismissDriverActiveRideNotification()
+                                activeDriverTrip = null
+                                driverRouteResult = null
+                                offerSentRequestId = null
+                                driverRecenterTrigger++
+                                Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()
+                                notifManager.notifyDriverRideCancelled(
+                                    passengerName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
+                                    rideId = trip.id
+                                )
+                            }
                         } else if (status == "COMPLETED") {
                             notifManager.dismissDriverActiveRideNotification()
                             if (activeDriverTrip?.status != PassengerOrderStatus.COMPLETED) {
@@ -1043,11 +1049,15 @@ fun DriverModeView(
             }
             if (trip.status != lastKnownDriverTripStatus) {
                 if (trip.status == PassengerOrderStatus.CANCELLED) {
-                    notifManager.notifyDriverRideCancelled(
-                        passengerName = passName,
-                        rideId = trip.id
-                    )
-                    notifManager.clearVoiceQueueAndTracking()
+                    val isCompletedOrRating = completedTripForRating != null &&
+                        (completedTripForRating?.id == trip.id || completedTripForRating?.requestId == trip.requestId)
+                    if (!isCompletedOrRating) {
+                        notifManager.notifyDriverRideCancelled(
+                            passengerName = passName,
+                            rideId = trip.id
+                        )
+                        notifManager.clearVoiceQueueAndTracking()
+                    }
                 }
                 lastKnownDriverTripStatus = trip.status
             }
@@ -2634,6 +2644,7 @@ fun DriverModeView(
                                             netEarningsPkr = (totalCashToCollect * 0.90).toInt()
                                         )
                                         showPassengerRatingDialog = true
+                                        lastKnownDriverTripStatus = PassengerOrderStatus.COMPLETED
                                         audioHelper.playTripCompleteChime(totalCashToCollect, trip.id)
                                         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                             val safeReqId = trip.requestId.ifBlank { trip.id }

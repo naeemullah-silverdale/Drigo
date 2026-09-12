@@ -492,14 +492,33 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
   - Dynamically updates dark tile color filters and map rendering in accordance with the user's active theme preference (`LIGHT` / `DARK` / `SYSTEM`).
   - Correctly renders driver car, pickup (A), and destination (B) pins.
 
+
 ---
 
-### 📋 Verified Issue Status:
-- **Issue 1 Status**: **COMPLETED & VERIFIED** (Radar empty state, inDrive list view feed, 3-marker A/B preview map).
-- **Issue 2 Status**: **COMPLETED & VERIFIED** — Ride Inspection Map Touch & Dismiss Fix:
-  - Replaced `ModalBottomSheet` for ride inspection in `DriverModeView.kt` with a non-modal `Surface` card anchored to `Alignment.BottomCenter` inside the main screen `Box`.
-  - The map surface (`RealOsmMapView`) is now directly exposed and receives 100% of touch gestures (panning, zooming, pinching, tapping map pins) without closing the inspection view.
-  - Tapping the map area no longer dismisses the view; dismissal occurs exclusively when tapping **Close**, tapping **Accept**, or clicking the close (X) header button.
+## 15. DIAGNOSTIC & FIX SPECIFICATION: FALSE PASSENGER CANCELLATION MESSAGE ON RIDE COMPLETION
+
+### 🛑 Problem Diagnosis & Issue Verification (CONFIRMED)
+- **Issue Confirmed**: Yes, this issue was verified in `DriverModeView.kt`.
+- **Root Cause Analysis**:
+  1. **Ride Completion Flow**: When the driver clicks **"Complete Ride"** in `DriverModeView.kt` (lines 2636–2658), the driver rating dialog (`PostRideRatingDialog`) is opened by setting `completedTripForRating = updated` and `showPassengerRatingDialog = true`.
+  2. **Asynchronous Firebase Updates**: In the background IO thread, `RideManager.completeTrip(...)`, `repo.updateDriverTripStatus(...)`, and `repo.updateRideRequestStatus(...)` execute to transition the ride status from `IN_TRIP` to `COMPLETED` across Firebase RTDB nodes (`/active_trips`, `/ride_requests`, `/passenger_orders`, `/users/{driverId}/active_driver_trip`).
+  3. **Listener Race Conditions & Unchecked Cancellation Observers**:
+     - `DriverModeView.kt` has 3 distinct real-time listeners for ride cancellations:
+       - **Listener 1** (lines 944–956): `repo.listenToDriverActiveTrip(...)` collector checks `if (remoteTrip.status == PassengerOrderStatus.CANCELLED)`.
+       - **Listener 2** (lines 998–1005): RTDB `ride_requests/{reqId}/status` `ValueEventListener` checks `if (status == "CANCELLED")`.
+       - **Listener 3** (lines 1045–1051): `LaunchedEffect(activeDriverTrip?.id, activeDriverTrip?.status)` checks `if (trip.status == PassengerOrderStatus.CANCELLED)`.
+     - None of these 3 observers checked whether the trip was ALREADY completed or in the post-ride rating phase (`completedTripForRating != null` or `completedTripForRating?.id == trip.id`).
+     - As a result, when the active trip state transitions or when RTDB updates/removes active nodes during completion, these listeners fire and trigger:
+       - `Toast.makeText(context, "Passenger cancelled the ride", Toast.LENGTH_SHORT).show()`
+       - `notifManager.notifyDriverRideCancelled(...)`
+     - This causes the false "Passenger cancelled the ride" toast and notification to appear directly over the completed ride review/rating dialog.
+
+### 📋 Planned Fix Action Items
+1. **Guard Cancellation Observers in `DriverModeView.kt`**:
+   - In all 3 cancellation listeners (lines 944, 998, 1045), add a check to verify that `completedTripForRating == null` and the trip being cancelled does NOT match `completedTripForRating?.id` or `completedTripForRating?.requestId`.
+2. **Explicit Status Transitioning on Completion**:
+   - In the "Complete Ride" tap handler (line 2636), explicitly update `lastKnownDriverTripStatus = PassengerOrderStatus.COMPLETED` prior to launching background persistence, ensuring state effects recognize the completion state transition immediately.
+3. **No Code Changed Yet**: Awaiting user's explicit "apply the fix" command before applying modifications.
 
 
 
