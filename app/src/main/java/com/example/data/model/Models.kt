@@ -282,6 +282,7 @@ data class PassengerOrder(
     val requestId: String = "",
     val passengerId: String = "",
     val passengerName: String = "",
+    val passengerRating: Double = 5.0,
     val passengerEmail: String = "",
     val passengerPhone: String = "+92 300 9876543",
     val pickupTitle: String = "",
@@ -678,6 +679,102 @@ data class BlockedUserEntity(
     val reason: String = "",
     val timestamp: Long = System.currentTimeMillis()
 )
+
+/**
+ * City-to-City Planned / Scheduled Departure posted by Captains.
+ */
+data class PlannedDeparture(
+    val id: String = UUID.randomUUID().toString(),
+    val driverId: String = "",
+    val driverName: String = "Captain Farhan",
+    val driverPhone: String = "+92 300 1234567",
+    val driverRating: Double = 4.92,
+    val driverTotalTrips: Int = 1240,
+    val driverVehicle: String = "Toyota Corolla (White)",
+    val driverPlateNumber: String = "LEA-18-4921",
+    val driverVehicleType: String = "AC Sedan",
+    val driverAvatarUrl: String? = null,
+    val driverBadges: List<String> = listOf("Verified Captain • Top Rated", "Instant Booking"),
+    val pickupCity: String = "Islamabad",
+    val pickupHub: String = "G-9 Markaz Hub",
+    val pickupStopDetails: String = "Near Karachi Company Taxi Stand",
+    val pickupLat: Double = 33.6844,
+    val pickupLon: Double = 73.0479,
+    val dropoffCity: String = "Lahore",
+    val dropoffHub: String = "DHA Phase 5 / Ring Road",
+    val dropoffStopDetails: String = "Via Thokar Interchange Exit",
+    val dropoffLat: Double = 31.5204,
+    val dropoffLon: Double = 74.3587,
+    val corridorName: String = "Via M-2 Motorway",
+    val corridorSubtitle: String = "375 km • ~4h 15m via M-2",
+    val distanceKm: Double = 375.0,
+    val durationMinutes: Int = 255,
+    val estimatedArrival: String = "~12:15 PM",
+    val tollsPreCleared: Boolean = true,
+    val departureDateText: String = "Tomorrow, 25 Oct",
+    val departureTimeText: String = "08:00 AM",
+    val flexWindowMins: Int = 15,
+    val pickupWindowText: String = "07:45 AM – 08:15 AM",
+    val farePerSeat: Int = 1900,
+    val totalSeats: Int = 4,
+    val availableSeats: Int = 4,
+    val allowFullCarBuyout: Boolean = true,
+    val fullCarFare: Int = 7500,
+    val isInstantBooking: Boolean = true,
+    val allowCounterOffers: Boolean = true,
+    val isLadiesOnly: Boolean = false,
+    val luggagePolicy: String = "2 Bags max / rider",
+    val isClimateControlled: Boolean = true,
+    val approvalWindowText: String = "",
+    val offersReceivedCount: Int = 0,
+    val bookedSeatsCount: Int = 0,
+    val isFullCarBooked: Boolean = false,
+    val status: String = "ACTIVE", // "ACTIVE", "IN_PROGRESS", "COMPLETED", "CANCELLED"
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class PlannedDepartureBooking(
+    val id: String = UUID.randomUUID().toString(),
+    val departureId: String = "",
+    val passengerId: String = "",
+    val passengerName: String = "",
+    val passengerPhone: String = "",
+    val passengerRating: Double = 4.9,
+    val seatsBooked: Int = 1,
+    val pickupStop: String = "G-9/4 Stop",
+    val isFullCar: Boolean = false,
+    val totalFarePkr: Int = 1900,
+    val status: String = "CONFIRMED", // "CONFIRMED", "PENDING_APPROVAL", "CANCELLED"
+    val bookedAt: Long = System.currentTimeMillis()
+)
+
+data class PlannedDepartureOffer(
+    val id: String = UUID.randomUUID().toString(),
+    val departureId: String = "",
+    val passengerId: String = "",
+    val passengerName: String = "Bilal Tariq",
+    val passengerPhone: String = "+92 301 9876543",
+    val passengerRating: Double = 4.9,
+    val passengerRidesCompleted: Int = 42,
+    val passengerAvatarUrl: String? = null,
+    val isVerified: Boolean = true,
+    val bookingType: String = "SHARED", // "SHARED" or "PRIVATE"
+    val requestedSeats: Int = 2,
+    val luggageDetails: String = "1 Suitcase + 1 Backpack included",
+    val pickupPoint: String = "Karachi Company Gate 2",
+    val dropoffPoint: String = "Lahore DHA Phase 5 / Ring Road Exit",
+    val standardAsking: Int = 3800,
+    val offeredFare: Int = 3600,
+    val differencePkr: Int = -200, // < 0 means discounted, 0 means full fare, > 0 means bonus
+    val tagText: String = "OFFERED PKR 200 LESS",
+    val isFullFare: Boolean = false,
+    val note: String = "",
+    val paymentMethod: String = "Cash on Boarding",
+    val status: String = "PENDING", // "PENDING", "ACCEPTED", "DECLINED", "COUNTERED"
+    val counterOfferPkr: Int? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 
 
 

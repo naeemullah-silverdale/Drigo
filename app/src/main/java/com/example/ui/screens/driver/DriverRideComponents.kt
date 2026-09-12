@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,42 +70,41 @@ fun PassengerRequestItemCard(
     } else 0.8
     val etaMins = ((distKmToPickup / 25.0) * 60.0).toInt().coerceIn(2, 25)
 
-    val passengerInitial = request.passengerName.trim().take(1).uppercase().ifBlank { "J" }
+    val passengerInitial = request.passengerName.trim().take(1).lowercase().ifBlank { "j" }
     val passengerName = request.passengerName.ifBlank { "jawad" }
     val ratingText = String.format(Locale.US, "%.2f", if (request.passengerRating > 0.0) request.passengerRating else 4.73)
+    val totalRidesCount = if (request.passengerId.isNotBlank()) (Math.abs(request.passengerId.hashCode() % 80) + 12) else 44
 
-    Surface(
-        onClick = onSelect,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shadowElevation = 4.dp,
+    Column(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .background(MaterialTheme.colorScheme.surface)
             .testTag("passenger_request_item_${request.id}")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.Top
         ) {
             // Left Column: Avatar + Name + Rating + ETA
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.width(72.dp)
+                modifier = Modifier.width(68.dp)
             ) {
                 Surface(
                     shape = CircleShape,
-                    color = DrigoBrandPurple, // purple circle color
-                    modifier = Modifier.size(52.dp)
+                    color = Color(0xFF5E35B1), // Purple circle avatar from screenshot
+                    modifier = Modifier.size(50.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = passengerInitial,
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 22.sp
+                            fontSize = 24.sp
                         )
                     }
                 }
@@ -114,10 +114,11 @@ fun PassengerRequestItemCard(
                 Text(
                     text = passengerName,
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(2.dp))
@@ -129,7 +130,7 @@ fun PassengerRequestItemCard(
                     Icon(
                         imageVector = Icons.Default.Star,
                         contentDescription = null,
-                        tint = Color(0xFFFFC107),
+                        tint = Color(0xFFFFB300),
                         modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(2.dp))
@@ -139,211 +140,173 @@ fun PassengerRequestItemCard(
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Text(
-                        text = "(44)",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Normal
-                    )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "($totalRidesCount)",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Normal
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
                     text = "$etaMins min.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
 
-            // Right Main Content Column: Distance, Fare, Badge, Addresses, Category Pill
+            // Center Column: Distance, Fare + Fair Price, Pickup, Destination, Category Pill
             Column(modifier = Modifier.weight(1f)) {
-                // Top Row: Distance & Fare & Fair Price Badge & Overflow Menu
+                // Top Row: Distance & 3-dot overflow menu
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = String.format(Locale.US, "~%.1f km", request.distanceKm),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "PKR$formattedFare",
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Black
+                    Text(
+                        text = String.format(Locale.US, "~%.1f km", request.distanceKm).replace(".", ","),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Options",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("View Route Details", color = MaterialTheme.colorScheme.onSurface) },
+                                onClick = {
+                                    showMenu = false
+                                    onSelect()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Skip / Ignore Request", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                onClick = { showMenu = false }
                             )
                         }
                     }
+                }
+
+                // Fare line + Fair Price badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "PKR$formattedFare",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
-                        // Fair price Badge
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f))
+                            shape = CircleShape,
+                            color = Color(0xFFCE93D8).copy(alpha = 0.2f),
+                            modifier = Modifier.size(15.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
+                            Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.Default.TrendingUp,
+                                    imageVector = Icons.Default.KeyboardArrowUp,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Text(
-                                    text = "Fair price",
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    tint = Color(0xFFCE93D8),
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
                         }
-
-                        // 3-dot overflow options menu
-                        Box {
-                            IconButton(
-                                onClick = { showMenu = true },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Options",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false },
-                                modifier = Modifier.background(MaterialTheme.colorScheme.surface)
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("View Route Details", color = MaterialTheme.colorScheme.onSurface) },
-                                    onClick = {
-                                        showMenu = false
-                                        onSelect()
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Skip / Ignore Request", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                    onClick = { showMenu = false }
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Fair price",
+                            color = Color(0xFFCE93D8),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
-                // Route Timeline Details (A & B)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    // A & B Indicator Icons with connecting line
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(top = 2.dp, end = 10.dp)
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .background(Color(0xFF2979FF), CircleShape)
-                        ) {
-                            Text("A", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
-                        }
-                        Box(
-                            modifier = Modifier
-                                .width(1.5.dp)
-                                .height(26.dp)
-                                .background(MaterialTheme.colorScheme.outlineVariant)
-                        )
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .background(Color(0xFF00C853), CircleShape)
-                        ) {
-                            Text("B", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black)
-                        }
-                    }
-
-                    // Destination and Pickup Text
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = request.pickupTitle,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (request.pickupSubtitle.isNotBlank()) {
-                            Text(
-                                text = request.pickupSubtitle,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Text(
-                            text = request.destinationTitle,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (request.destinationSubtitle.isNotBlank()) {
-                            Text(
-                                text = request.destinationSubtitle,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                // Pickup location (bold)
+                val pickupDisplay = buildString {
+                    append(request.pickupTitle.ifBlank { "Pickup location" })
+                    if (request.pickupSubtitle.isNotBlank() && !request.pickupTitle.contains(request.pickupSubtitle)) {
+                        append(" (${request.pickupSubtitle})")
                     }
                 }
+                Text(
+                    text = pickupDisplay,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(3.dp))
 
-                // Mini/Ride Category pill
+                // Destination location
+                val destDisplay = buildString {
+                    append(request.destinationTitle.ifBlank { "Destination" })
+                    if (request.destinationSubtitle.isNotBlank()) {
+                        append(" (${request.destinationSubtitle})")
+                    }
+                }
+                Text(
+                    text = destDisplay,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Normal,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Category pill (e.g. Mini)
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.align(Alignment.Start)
+                    color = Color(0xFF81D4FA).copy(alpha = 0.25f),
+                    border = BorderStroke(1.dp, Color(0xFF81D4FA).copy(alpha = 0.5f))
                 ) {
                     Text(
                         text = request.rideCategory.ifBlank { "Mini" },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
+                        color = Color(0xFF81D4FA),
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
             }
         }
+
+        // Subtle divider between list items matching screenshot
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            thickness = 1.dp
+        )
     }
 }
 

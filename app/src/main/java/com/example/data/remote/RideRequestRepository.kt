@@ -47,6 +47,41 @@ class RideRequestRepository private constructor() {
     }
 
     /**
+     * Actively queries Firebase Realtime Database for the current snapshot of ride requests.
+     * Parses and filters all valid, active, eligible passenger requests.
+     * Can be invoked on-demand (e.g. pull-to-refresh) for instant re-synchronization.
+     */
+    suspend fun fetchRideRequestsOnce(): List<RideRequest> = kotlinx.coroutines.withTimeoutOrNull(5000L) {
+        val db = getDatabase() ?: return@withTimeoutOrNull emptyList<RideRequest>()
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val ref = db.getReference(NODE_RIDE_REQUESTS)
+            val listener = object : com.google.firebase.database.ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val requests = mutableListOf<RideRequest>()
+                    for (child in snapshot.children) {
+                        val req = parseSnapshotToRideRequest(child)
+                        if (req != null && isEligibleActiveRequest(req)) {
+                            requests.add(req)
+                        }
+                    }
+                    val sorted = requests.sortedByDescending { it.timestamp }
+                    if (cont.isActive) {
+                        cont.resume(sorted) {}
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.w(TAG, "fetchRideRequestsOnce cancelled: ${error.message}")
+                    if (cont.isActive) {
+                        cont.resume(emptyList()) {}
+                    }
+                }
+            }
+            ref.addListenerForSingleValueEvent(listener)
+        }
+    } ?: emptyList()
+
+    /**
      * Attaches a ChildEventListener to the existing passenger ride-request node ("ride_requests").
      * Uses callbackFlow and ensures proper cleanup via awaitClose { removeEventListener(...) }.
      * Emits only real, valid, active passenger requests with status PENDING or SEARCHING.

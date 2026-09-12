@@ -27,6 +27,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -66,6 +67,7 @@ import com.example.data.remote.FirebaseRepository
 import com.example.ui.components.CityRideType
 import com.example.ui.components.CityToCityPassengerFlow
 import com.example.ui.components.CityToCityStep
+import com.example.ui.components.PassengerScheduledDeparturesSheet
 import com.example.ui.components.InDriveFixedBottomBar
 import com.example.ui.components.InDriveLimeGreen
 import com.example.ui.components.InDriveRideOption
@@ -88,6 +90,7 @@ import com.example.ui.components.TactileFareAdjustmentChips
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.example.ui.theme.DrigoBrandPurple
+import com.example.ui.theme.drigoColors
 import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import com.example.R
@@ -113,13 +116,16 @@ fun HomeScreen(
     onSignOutClick: () -> Unit,
     onNavigateToWallet: () -> Unit = {},
     onNavigateToGoogleDrive: () -> Unit = {},
+    onNavigateToTripHistory: () -> Unit = {},
     driverVerification: com.example.data.model.DriverVerification? = null,
     liveRideRequests: List<com.example.data.model.RideRequest> = emptyList(),
+    onRefreshDriverRideRequests: (suspend () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val isDark = MaterialTheme.drigoColors.isDark
 
     val routeService = remember { RouteService(context) }
     val locationHelper = remember { LocationHelper(context) }
@@ -166,6 +172,7 @@ fun HomeScreen(
     var isBookingInProgress by remember { mutableStateOf(false) }
     var activeRideRequestId by remember { mutableStateOf<String?>(null) }
     var incomingDriverOffers by remember { mutableStateOf<List<DriverOffer>>(emptyList()) }
+    var showPassengerScheduledDeparturesSheet by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Real-Time Chat State
@@ -192,12 +199,24 @@ fun HomeScreen(
         )
     }
 
+    val isOrderRatedOrSkipped = remember(ratedOrSkippedOrderIds) {
+        { id1: String, id2: String ->
+            val safe1 = id1.trim()
+            val safe2 = id2.trim()
+            (safe1.isNotBlank() && (safe1 in ratedOrSkippedOrderIds || ratingPrefs.getBoolean("rated_or_skipped_$safe1", false))) ||
+            (safe2.isNotBlank() && (safe2 in ratedOrSkippedOrderIds || ratingPrefs.getBoolean("rated_or_skipped_$safe2", false)))
+        }
+    }
+
     val markOrderRatedOrSkipped = remember {
         { id1: String, id2: String ->
             val safe1 = id1.trim()
             val safe2 = id2.trim()
             val newSet = ratedOrSkippedOrderIds + safe1 + safe2
             ratedOrSkippedOrderIds = newSet
+            try {
+                FirebaseRepository.getInstance(context).markRideRatedOrSkipped(safe1, safe2, "PASSENGER")
+            } catch (_: Exception) {}
             ratingPrefs.edit().apply {
                 if (safe1.isNotBlank()) putBoolean("rated_or_skipped_$safe1", true)
                 if (safe2.isNotBlank()) putBoolean("rated_or_skipped_$safe2", true)
@@ -212,17 +231,31 @@ fun HomeScreen(
     var completedOrderForRating by remember { mutableStateOf<PassengerOrder?>(null) }
     var showPassengerRatingDialog by remember { mutableStateOf(false) }
 
+    // Reset passenger rating dialog state if switching modes
+    LaunchedEffect(userMode) {
+        if (userMode == UserMode.DRIVER) {
+            showPassengerRatingDialog = false
+            completedOrderForRating = null
+        }
+    }
+
     // Passenger Bottom Tab Navigation & Orders State (Screenshots & My orders tab)
     var passengerNavTab by remember { mutableIntStateOf(0) } // 0 = Ride, 1 = My orders
     var passengerOrders by remember { mutableStateOf<List<PassengerOrder>>(emptyList()) }
     var incomingDriverOffer by remember { mutableStateOf<PassengerOrder?>(null) }
+    val rideManagerTrip by com.example.data.remote.RideManager.activeTrip.collectAsState()
 
     // Active order tracking for passenger map (Live Car visualization)
-    val activePassengerOrder = passengerOrders.firstOrNull {
-        it.status == PassengerOrderStatus.DRIVER_COMING ||
-        it.status == PassengerOrderStatus.ACCEPTED ||
-        it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
-        it.status == PassengerOrderStatus.IN_TRIP
+    val activePassengerOrder = remember(passengerOrders, rideManagerTrip) {
+        val activeStatuses = listOf(
+            PassengerOrderStatus.DRIVER_COMING,
+            PassengerOrderStatus.ACCEPTED,
+            PassengerOrderStatus.DRIVER_ARRIVED,
+            PassengerOrderStatus.IN_TRIP
+        )
+        val fromRm = rideManagerTrip?.takeIf { it.status in activeStatuses }
+        val fromOrders = passengerOrders.firstOrNull { it.status in activeStatuses }
+        fromRm ?: fromOrders
     }
     val isRideActive = activePassengerOrder != null
     var passengerMapDriverLoc by remember { mutableStateOf<LiveDriverLocation?>(null) }
@@ -241,6 +274,7 @@ fun HomeScreen(
             showPassengerRatingDialog ||
             showBookingDialog ||
             showPickupDestinationCard ||
+            showPassengerScheduledDeparturesSheet ||
             isRideSheetExpanded ||
             passengerNavTab != 0
 
@@ -252,6 +286,7 @@ fun HomeScreen(
             showPassengerRatingDialog -> showPassengerRatingDialog = false
             showBookingDialog -> showBookingDialog = false
             showPickupDestinationCard -> showPickupDestinationCard = false
+            showPassengerScheduledDeparturesSheet -> showPassengerScheduledDeparturesSheet = false
             isRideSheetExpanded -> isRideSheetExpanded = false
             passengerNavTab != 0 -> passengerNavTab = 0
         }
@@ -333,6 +368,9 @@ fun HomeScreen(
         }
     }
 
+    // Notification Manager Instance
+    val notifManager = remember(context) { RideNotificationManager.getInstance(context) }
+
     // Automatically sync passenger's selected From (pickup) and To (destination) locations to Firebase (only when not in active ride)
     LaunchedEffect(selectedPickupLocation, selectedDestinationLocation, user?.uid, isRideActive) {
         val uid = user?.uid
@@ -358,6 +396,48 @@ fun HomeScreen(
             repo.listenToLiveDriverLocation(reqId).collectLatest { loc ->
                 if (loc != null) {
                     passengerMapDriverLoc = loc
+                    if (loc.status.equals("COMPLETED", ignoreCase = true) || loc.status == PassengerOrderStatus.COMPLETED.name) {
+                        val currentOrder = activePassengerOrder ?: passengerOrders.firstOrNull { it.id == reqId || it.requestId == reqId }
+                        if (currentOrder != null) {
+                            val completed = currentOrder.copy(status = PassengerOrderStatus.COMPLETED)
+                            sessionActiveOrderIds.add(reqId)
+                            if (currentOrder.id.isNotBlank()) sessionActiveOrderIds.add(currentOrder.id)
+                            if (currentOrder.requestId.isNotBlank()) sessionActiveOrderIds.add(currentOrder.requestId)
+
+                            activeRideRequestId = null
+                            activeRoute = null
+                            selectedDestinationLocation = null
+                            passengerMapDriverLoc = null
+                            incomingDriverOffer = null
+                            incomingDriverOffers = emptyList()
+                            nearbyDriverMarkers = emptyList()
+                            isBookingInProgress = false
+                            isRideSheetExpanded = false
+                            customOfferedFare = null
+                            showChatSheet = false
+                            showSafetySheet = false
+                            showSafetyReportModal = false
+                            notifManager.dismissPassengerActiveRideNotification()
+                            notifManager.clearVoiceQueueAndTracking()
+
+                            val nonActiveOrders = passengerOrders.filter {
+                                it.status != PassengerOrderStatus.DRIVER_COMING &&
+                                it.status != PassengerOrderStatus.ACCEPTED &&
+                                it.status != PassengerOrderStatus.DRIVER_ARRIVED &&
+                                it.status != PassengerOrderStatus.IN_TRIP &&
+                                it.id != reqId && it.requestId != reqId
+                            }
+                            passengerOrders = listOf(completed) + nonActiveOrders
+
+                            val safeId = completed.id.ifBlank { completed.requestId }
+                            val isSkippedOrRated = isOrderRatedOrSkipped(safeId, completed.requestId) ||
+                                    repo.isRideRatedOrSkipped(safeId, completed.requestId, "PASSENGER")
+                            if (!isSkippedOrRated && !showPassengerRatingDialog) {
+                                completedOrderForRating = completed
+                                showPassengerRatingDialog = true
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -365,112 +445,31 @@ fun HomeScreen(
         }
     }
 
-    // Synchronize activeRideRequestId if activePassengerOrder is loaded
-    LaunchedEffect(activePassengerOrder?.requestId, activePassengerOrder?.id) {
-        val reqId = activePassengerOrder?.requestId?.ifBlank { activePassengerOrder?.id }
-        if (reqId != null && activeRideRequestId == null) {
-            activeRideRequestId = reqId
+    // Synchronize activeRideRequestId & RideManager observer whenever active trip is loaded or changed
+    LaunchedEffect(activeRideRequestId, activePassengerOrder?.requestId, activePassengerOrder?.id) {
+        val reqId = activePassengerOrder?.requestId?.ifBlank { activePassengerOrder?.id } ?: activeRideRequestId
+        if (reqId != null) {
+            if (activeRideRequestId == null) {
+                activeRideRequestId = reqId
+            }
+            com.example.data.remote.RideManager.observeActiveTrip(reqId)
         }
     }
 
-    // Live driver approaching simulation towards pickup for active accepted captain (fallback if no real driver broadcasting)
-    LaunchedEffect(activePassengerOrder?.id, activePassengerOrder?.status) {
+    // Live driver location listener for active accepted captain
+    LaunchedEffect(activePassengerOrder?.id, activePassengerOrder?.assignedDriverId, activePassengerOrder?.requestId) {
         val order = activePassengerOrder
-        if (order != null && (order.status == PassengerOrderStatus.ACCEPTED || order.status == PassengerOrderStatus.DRIVER_COMING)) {
-            val isRealDriver = passengerMapDriverLoc != null &&
-                    !passengerMapDriverLoc!!.driverId.startsWith("driver_") &&
-                    !passengerMapDriverLoc!!.driverId.startsWith("mock_")
-            if (isRealDriver) return@LaunchedEffect
-
-            val pickupPt = GeoPoint(order.pickupLat, order.pickupLon)
-            val driverStartLat = if (passengerMapDriverLoc != null) {
-                passengerMapDriverLoc!!.latitude
-            } else if (order.pickupLat != 0.0) {
-                order.pickupLat + 0.009
-            } else {
-                selectedPickupLocation.latitude + 0.009
-            }
-
-            val driverStartLon = if (passengerMapDriverLoc != null) {
-                passengerMapDriverLoc!!.longitude
-            } else if (order.pickupLon != 0.0) {
-                order.pickupLon + 0.009
-            } else {
-                selectedPickupLocation.longitude + 0.009
-            }
-            val driverStartPt = GeoPoint(driverStartLat, driverStartLon)
-
-            // Calculate route from driver position to passenger pickup location
-            val routeToPickup = routeService.calculateRoute(
-                startPoint = driverStartPt,
-                destPoint = pickupPt,
-                startAddress = "Captain Location",
-                destinationAddress = order.pickupTitle
-            )
-            activeRoute = routeToPickup
-
-            val points = routeToPickup.points
-            if (points.isNotEmpty()) {
-                val totalSteps = points.size
-                for (i in 0 until totalSteps) {
-                    val currentOrder = passengerOrders.firstOrNull { it.id == order.id }
-                    if (currentOrder == null || (currentOrder.status != PassengerOrderStatus.ACCEPTED && currentOrder.status != PassengerOrderStatus.DRIVER_COMING)) break
-
-                    // Check if a real driver started broadcasting
-                    val liveReal = passengerMapDriverLoc != null &&
-                            !passengerMapDriverLoc!!.driverId.startsWith("driver_") &&
-                            !passengerMapDriverLoc!!.driverId.startsWith("mock_")
-                    if (liveReal) break
-
-                    val currentPt = points[i]
-                    val nextPt = if (i < totalSteps - 1) points[i + 1] else currentPt
-
-                    val dLat = nextPt.latitude - currentPt.latitude
-                    val dLon = nextPt.longitude - currentPt.longitude
-                    val computedBearing = ((Math.toDegrees(Math.atan2(dLon, dLat)) + 360) % 360).toFloat()
-
-                    val remainingFraction = 1f - (i.toFloat() / totalSteps.coerceAtLeast(1))
-                    val remainingKm = (routeToPickup.distanceKm * remainingFraction).coerceAtLeast(0.1)
-                    val remainingMin = maxOf(1, (routeToPickup.durationMinutes * remainingFraction).toInt())
-
-                    val liveLoc = LiveDriverLocation(
-                        rideId = order.requestId.ifBlank { order.id },
-                        driverId = "driver_${order.id}",
-                        latitude = currentPt.latitude,
-                        longitude = currentPt.longitude,
-                        bearing = computedBearing,
-                        speedKmh = 35f,
-                        etaMinutes = remainingMin,
-                        distanceRemainingKm = remainingKm,
-                        status = PassengerOrderStatus.DRIVER_COMING.name,
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    passengerMapDriverLoc = liveLoc
-
-                    try {
-                        val repo = FirebaseRepository.getInstance(context)
-                        repo.updateLiveDriverLocation(liveLoc)
-                    } catch (_: Exception) {}
-
-                    kotlinx.coroutines.delay(1200)
-                }
-
-                val currentOrder = passengerOrders.firstOrNull { it.id == order.id }
-                if (currentOrder != null && (currentOrder.status == PassengerOrderStatus.ACCEPTED || currentOrder.status == PassengerOrderStatus.DRIVER_COMING)) {
-                    val arrivedOrder = order.copy(status = PassengerOrderStatus.DRIVER_ARRIVED)
-                    passengerOrders = passengerOrders.map { if (it.id == order.id) arrivedOrder else it }
-                    try {
-                        val repo = FirebaseRepository.getInstance(context)
-                        repo.savePassengerOrder(arrivedOrder)
-                        repo.updateRideRequestStatus(order.requestId, "DRIVER_ARRIVED")
-                    } catch (_: Exception) {}
+        if (order != null && (order.status == PassengerOrderStatus.ACCEPTED || order.status == PassengerOrderStatus.DRIVER_COMING || order.status == PassengerOrderStatus.DRIVER_ARRIVED || order.status == PassengerOrderStatus.IN_TRIP)) {
+            val reqId = order.requestId.ifBlank { order.id }
+            val repo = FirebaseRepository.getInstance(context)
+            repo.listenToLiveDriverLocation(reqId).collectLatest { loc ->
+                if (loc != null) {
+                    passengerMapDriverLoc = loc
                 }
             }
         }
     }
 
-    // Notification Manager Instance
-    val notifManager = remember(context) { RideNotificationManager.getInstance(context) }
     var showNotificationCenterSheet by remember { mutableStateOf(false) }
     val notificationHistory by notifManager.notificationHistory.collectAsState()
     var lastKnownPassengerOrderStatus by remember { mutableStateOf<PassengerOrderStatus?>(null) }
@@ -593,18 +592,149 @@ fun HomeScreen(
             if (rideManagerTrip != null) {
                 val safeId = rideManagerTrip.id.ifBlank { rideManagerTrip.requestId }
                 if (safeId.isNotBlank()) {
-                    val existingFiltered = passengerOrders.filter { 
-                        it.id != safeId && it.requestId != safeId && it.id != rideManagerTrip.requestId && it.requestId != rideManagerTrip.id 
-                    }
-                    passengerOrders = listOf(rideManagerTrip) + existingFiltered
-
                     if (rideManagerTrip.status == PassengerOrderStatus.COMPLETED) {
+                        // 1. Clear all active in-progress state immediately so the screen transitions out of 'Trip in progress'
+                        activeRideRequestId = null
+                        activeRoute = null
+                        selectedDestinationLocation = null
+                        passengerMapDriverLoc = null
+                        incomingDriverOffer = null
+                        incomingDriverOffers = emptyList()
+                        nearbyDriverMarkers = emptyList()
+                        isBookingInProgress = false
+                        isRideSheetExpanded = false
+                        customOfferedFare = null
+                        showChatSheet = false
+                        showSafetySheet = false
+                        showSafetyReportModal = false
+                        notifManager.dismissPassengerActiveRideNotification()
+                        notifManager.clearVoiceQueueAndTracking()
+
+                        // 2. Mark any active orders as COMPLETED
+                        val nonActiveOrders = passengerOrders.filter { 
+                            it.status != PassengerOrderStatus.DRIVER_COMING &&
+                            it.status != PassengerOrderStatus.ACCEPTED &&
+                            it.status != PassengerOrderStatus.DRIVER_ARRIVED &&
+                            it.status != PassengerOrderStatus.IN_TRIP &&
+                            it.id != safeId && it.requestId != safeId &&
+                            it.id != rideManagerTrip.requestId && it.requestId != rideManagerTrip.id
+                        }
+                        passengerOrders = listOf(rideManagerTrip) + nonActiveOrders
+
+                        // 3. Immediately prompt the Passenger Review & Feedback Dialog (Passenger Mode only)
                         val repo = FirebaseRepository.getInstance(context)
-                        val alreadyRated = repo.hasUserRatedRide(safeId, "PASSENGER")
-                        if (!alreadyRated) {
-                            completedOrderForRating = rideManagerTrip
+                        val isSkippedOrRated = isOrderRatedOrSkipped(safeId, rideManagerTrip.requestId) ||
+                                repo.isRideRatedOrSkipped(safeId, rideManagerTrip.requestId, "PASSENGER")
+                        if (userMode == UserMode.PASSENGER && !isSkippedOrRated && !showPassengerRatingDialog) {
+                            var fullOrder = rideManagerTrip
+                            if (fullOrder.driverId.isNotBlank() && (fullOrder.driverName.isBlank() || fullOrder.driverPlateNumber.isBlank())) {
+                                val profile = repo.getDriverProfile(fullOrder.driverId)
+                                if (profile != null) {
+                                    fullOrder = fullOrder.copy(
+                                        driverName = fullOrder.driverName.ifBlank { profile.name },
+                                        driverPhone = fullOrder.driverPhone.ifBlank { profile.phone },
+                                        driverPlateNumber = fullOrder.driverPlateNumber.ifBlank { profile.vehicleNumber },
+                                        driverVehicleMake = fullOrder.driverVehicleMake.ifBlank { profile.vehicleCompany },
+                                        driverVehicleModel = fullOrder.driverVehicleModel.ifBlank { profile.vehicleModel }
+                                    )
+                                }
+                            }
+                            completedOrderForRating = fullOrder
                             showPassengerRatingDialog = true
                         }
+                    } else if (rideManagerTrip.status == PassengerOrderStatus.CANCELLED) {
+                        activeRideRequestId = null
+                        activeRoute = null
+                        selectedDestinationLocation = null
+                        passengerMapDriverLoc = null
+                        incomingDriverOffer = null
+                        incomingDriverOffers = emptyList()
+                        nearbyDriverMarkers = emptyList()
+                        isBookingInProgress = false
+                        isRideSheetExpanded = false
+                        customOfferedFare = null
+                        showChatSheet = false
+                        showSafetySheet = false
+                        showSafetyReportModal = false
+                        notifManager.dismissPassengerActiveRideNotification()
+                        notifManager.clearVoiceQueueAndTracking()
+
+                        val nonActiveOrders = passengerOrders.filter { 
+                            it.status != PassengerOrderStatus.DRIVER_COMING &&
+                            it.status != PassengerOrderStatus.ACCEPTED &&
+                            it.status != PassengerOrderStatus.DRIVER_ARRIVED &&
+                            it.status != PassengerOrderStatus.IN_TRIP &&
+                            it.id != safeId && it.requestId != safeId &&
+                            it.id != rideManagerTrip.requestId && it.requestId != rideManagerTrip.id
+                        }
+                        passengerOrders = listOf(rideManagerTrip) + nonActiveOrders
+                    } else {
+                        // ACTIVE RIDE (ACCEPTED, DRIVER_COMING, DRIVER_ARRIVED, IN_TRIP)
+                        val existingFiltered = passengerOrders.filter { 
+                            it.id != safeId && it.requestId != safeId && it.id != rideManagerTrip.requestId && it.requestId != rideManagerTrip.id 
+                        }
+                        passengerOrders = listOf(rideManagerTrip) + existingFiltered
+                        activeRideRequestId = safeId
+                        if (rideManagerTrip.pickupLat != 0.0 && rideManagerTrip.pickupLon != 0.0) {
+                            selectedPickupLocation = AppLocation(
+                                title = rideManagerTrip.pickupTitle.ifBlank { "Pickup" },
+                                subtitle = rideManagerTrip.pickupSubtitle,
+                                latitude = rideManagerTrip.pickupLat,
+                                longitude = rideManagerTrip.pickupLon
+                            )
+                        }
+                        if (rideManagerTrip.destinationLat != 0.0 && rideManagerTrip.destinationLon != 0.0) {
+                            selectedDestinationLocation = AppLocation(
+                                title = rideManagerTrip.destinationTitle.ifBlank { "Destination" },
+                                subtitle = rideManagerTrip.destinationSubtitle,
+                                latitude = rideManagerTrip.destinationLat,
+                                longitude = rideManagerTrip.destinationLon
+                            )
+                        }
+                    }
+                }
+            } else {
+                // If RideManager active trip was cleared (e.g. driver completed or cleared it)
+                // and passenger currently has an active in-trip or accepted order:
+                val activeOrder = passengerOrders.firstOrNull { 
+                    it.status == PassengerOrderStatus.DRIVER_COMING ||
+                    it.status == PassengerOrderStatus.ACCEPTED ||
+                    it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
+                    it.status == PassengerOrderStatus.IN_TRIP
+                }
+                if (activeOrder != null && sessionActiveOrderIds.isNotEmpty()) {
+                    activeRideRequestId = null
+                    activeRoute = null
+                    selectedDestinationLocation = null
+                    passengerMapDriverLoc = null
+                    incomingDriverOffer = null
+                    incomingDriverOffers = emptyList()
+                    nearbyDriverMarkers = emptyList()
+                    isBookingInProgress = false
+                    isRideSheetExpanded = false
+                    customOfferedFare = null
+                    showChatSheet = false
+                    showSafetySheet = false
+                    showSafetyReportModal = false
+                    notifManager.dismissPassengerActiveRideNotification()
+                    notifManager.clearVoiceQueueAndTracking()
+
+                    val completed = activeOrder.copy(status = PassengerOrderStatus.COMPLETED)
+                    val nonActive = passengerOrders.filter { 
+                        it.id != activeOrder.id && it.requestId != activeOrder.requestId &&
+                        it.status != PassengerOrderStatus.DRIVER_COMING &&
+                        it.status != PassengerOrderStatus.ACCEPTED &&
+                        it.status != PassengerOrderStatus.DRIVER_ARRIVED &&
+                        it.status != PassengerOrderStatus.IN_TRIP
+                    }
+                    passengerOrders = listOf(completed) + nonActive
+                    val safeId = completed.id.ifBlank { completed.requestId }
+                    val repo = FirebaseRepository.getInstance(context)
+                    val isSkippedOrRated = isOrderRatedOrSkipped(safeId, completed.requestId) ||
+                            repo.isRideRatedOrSkipped(safeId, completed.requestId, "PASSENGER")
+                    if (userMode == UserMode.PASSENGER && !isSkippedOrRated && !showPassengerRatingDialog) {
+                        completedOrderForRating = completed
+                        showPassengerRatingDialog = true
                     }
                 }
             }
@@ -617,25 +747,129 @@ fun HomeScreen(
         val email = user?.email ?: ""
         val repo = FirebaseRepository.getInstance(context)
         repo.listenToPassengerOrders(uid, email).collectLatest { cloudOrders ->
-            val cloudIds = cloudOrders.map { it.id }.filter { it.isNotBlank() }.toSet()
-            val cloudReqIds = cloudOrders.map { it.requestId }.filter { it.isNotBlank() }.toSet()
+            val currentRmTrip = com.example.data.remote.RideManager.activeTrip.value
+            val activeStatuses = listOf(
+                PassengerOrderStatus.DRIVER_COMING,
+                PassengerOrderStatus.ACCEPTED,
+                PassengerOrderStatus.DRIVER_ARRIVED,
+                PassengerOrderStatus.IN_TRIP
+            )
+            val mappedCloudOrders = cloudOrders.map { order ->
+                if (order.status == PassengerOrderStatus.COMPLETED || order.status == PassengerOrderStatus.CANCELLED) {
+                    order
+                } else if (currentRmTrip != null && (
+                    order.id == currentRmTrip.id || 
+                    order.requestId == currentRmTrip.requestId || 
+                    order.id == currentRmTrip.requestId || 
+                    order.requestId == currentRmTrip.id
+                )) {
+                    val rmIsActive = currentRmTrip.status in activeStatuses
+                    val cloudIsActive = order.status in activeStatuses
+                    if (rmIsActive && !cloudIsActive) {
+                        currentRmTrip
+                    } else if (cloudIsActive) {
+                        order
+                    } else {
+                        order
+                    }
+                } else {
+                    order
+                }
+            }
+
+            val completedOrderInCloud = mappedCloudOrders.firstOrNull { order ->
+                order.status == PassengerOrderStatus.COMPLETED && (
+                    order.id == activeRideRequestId || order.requestId == activeRideRequestId ||
+                    sessionActiveOrderIds.contains(order.id) || sessionActiveOrderIds.contains(order.requestId) ||
+                    (activePassengerOrder != null && (
+                        order.id == activePassengerOrder.id || order.requestId == activePassengerOrder.requestId ||
+                        order.id == activePassengerOrder.requestId || order.requestId == activePassengerOrder.id
+                    ))
+                )
+            }
+
+            val cloudIds = mappedCloudOrders.map { it.id }.filter { it.isNotBlank() }.toSet()
+            val cloudReqIds = mappedCloudOrders.map { it.requestId }.filter { it.isNotBlank() }.toSet()
             val cloudKeys = cloudIds + cloudReqIds
+            val completedKeys = mappedCloudOrders
+                .filter { it.status == PassengerOrderStatus.COMPLETED || it.status == PassengerOrderStatus.CANCELLED }
+                .flatMap { listOf(it.id, it.requestId) }
+                .filter { it.isNotBlank() }
+                .toSet()
+
             val localOnly = passengerOrders.filter { 
                 it.id !in cloudKeys && 
                 it.requestId !in cloudKeys && 
+                it.id !in completedKeys &&
+                it.requestId !in completedKeys &&
                 it.status != PassengerOrderStatus.CANCELLED &&
                 it.status != PassengerOrderStatus.COMPLETED
             }
-            passengerOrders = (cloudOrders + localOnly).distinctBy { it.id.ifBlank { it.requestId } }
+
+            // Always prioritize active trip from RideManager or active local order
+            val activePrepend = listOfNotNull(
+                currentRmTrip?.takeIf { it.status in activeStatuses },
+                passengerOrders.firstOrNull { it.status in activeStatuses }
+            )
+            passengerOrders = (activePrepend + mappedCloudOrders + localOnly).distinctBy { it.requestId.ifBlank { it.id } }
+
+            if (completedOrderInCloud != null) {
+                val safeId = completedOrderInCloud.id.ifBlank { completedOrderInCloud.requestId }
+                sessionActiveOrderIds.add(safeId)
+                if (completedOrderInCloud.id.isNotBlank()) sessionActiveOrderIds.add(completedOrderInCloud.id)
+                if (completedOrderInCloud.requestId.isNotBlank()) sessionActiveOrderIds.add(completedOrderInCloud.requestId)
+
+                // Instantly exit the "Trip in Progress" view
+                activeRideRequestId = null
+                activeRoute = null
+                selectedDestinationLocation = null
+                passengerMapDriverLoc = null
+                incomingDriverOffer = null
+                incomingDriverOffers = emptyList()
+                nearbyDriverMarkers = emptyList()
+                isBookingInProgress = false
+                isRideSheetExpanded = false
+                customOfferedFare = null
+                showChatSheet = false
+                showSafetySheet = false
+                showSafetyReportModal = false
+                notifManager.dismissPassengerActiveRideNotification()
+                notifManager.clearVoiceQueueAndTracking()
+
+                if (currentRmTrip != null && (currentRmTrip.id == safeId || currentRmTrip.requestId == safeId)) {
+                    com.example.data.remote.RideManager.clearActiveTrip()
+                }
+
+                val isSkippedOrRated = isOrderRatedOrSkipped(safeId, completedOrderInCloud.requestId) ||
+                        repo.isRideRatedOrSkipped(safeId, completedOrderInCloud.requestId, "PASSENGER")
+                if (userMode == UserMode.PASSENGER && !isSkippedOrRated && !showPassengerRatingDialog) {
+                    var fullOrder = completedOrderInCloud
+                    if (fullOrder.driverId.isNotBlank() && (fullOrder.driverName.isBlank() || fullOrder.driverPlateNumber.isBlank())) {
+                        val profile = repo.getDriverProfile(fullOrder.driverId)
+                        if (profile != null) {
+                            fullOrder = fullOrder.copy(
+                                driverName = fullOrder.driverName.ifBlank { profile.name },
+                                driverPhone = fullOrder.driverPhone.ifBlank { profile.phone },
+                                driverPlateNumber = fullOrder.driverPlateNumber.ifBlank { profile.vehicleNumber },
+                                driverVehicleMake = fullOrder.driverVehicleMake.ifBlank { profile.vehicleCompany },
+                                driverVehicleModel = fullOrder.driverVehicleModel.ifBlank { profile.vehicleModel }
+                            )
+                        }
+                    }
+                    completedOrderForRating = fullOrder
+                    showPassengerRatingDialog = true
+                }
+            }
+
 
             // Ensure RideManager observes the active trip document
-            cloudOrders.firstOrNull { 
+            mappedCloudOrders.firstOrNull { 
                 it.status == PassengerOrderStatus.ACCEPTED || 
                 it.status == PassengerOrderStatus.DRIVER_COMING || 
                 it.status == PassengerOrderStatus.DRIVER_ARRIVED || 
                 it.status == PassengerOrderStatus.IN_TRIP 
             }?.let { activeOrder ->
-                val activeId = activeOrder.id.ifBlank { activeOrder.requestId }
+                val activeId = activeOrder.requestId.ifBlank { activeOrder.id }
                 if (activeId.isNotBlank()) {
                     com.example.data.remote.RideManager.observeActiveTrip(activeId)
                 }
@@ -662,7 +896,7 @@ fun HomeScreen(
     }
 
     // Automatically trigger Passenger Post-Ride Feedback ONLY when a ride active in this session becomes COMPLETED
-    LaunchedEffect(passengerOrders) {
+    LaunchedEffect(passengerOrders, ratedOrSkippedOrderIds) {
         val completedOrder = passengerOrders.firstOrNull { order ->
             val safeId = order.id.ifBlank { order.requestId }
             val isRecent = (System.currentTimeMillis() - order.createdAt) < 3 * 60 * 60 * 1000L || order.createdAt == 0L
@@ -670,14 +904,14 @@ fun HomeScreen(
             order.status == PassengerOrderStatus.COMPLETED &&
             safeId.isNotBlank() &&
             (isActiveInSession || isRecent) &&
-            safeId !in ratedOrSkippedOrderIds &&
-            (order.requestId.isBlank() || order.requestId !in ratedOrSkippedOrderIds)
+            !isOrderRatedOrSkipped(safeId, order.requestId)
         }
-        if (completedOrder != null && !showPassengerRatingDialog) {
+        if (userMode == UserMode.PASSENGER && completedOrder != null && !showPassengerRatingDialog) {
             val safeId = completedOrder.id.ifBlank { completedOrder.requestId }
             val repo = FirebaseRepository.getInstance(context)
-            val alreadyRated = repo.hasUserRatedRide(safeId, "PASSENGER")
-            if (!alreadyRated) {
+            val isSkippedOrRated = isOrderRatedOrSkipped(safeId, completedOrder.requestId) ||
+                    repo.isRideRatedOrSkipped(safeId, completedOrder.requestId, "PASSENGER")
+            if (!isSkippedOrRated) {
                 var fullOrder = completedOrder
                 if (fullOrder.driverId.isNotBlank() && (fullOrder.driverName.isBlank() || fullOrder.driverPlateNumber.isBlank())) {
                     val profile = repo.getDriverProfile(fullOrder.driverId)
@@ -787,14 +1021,62 @@ fun HomeScreen(
                     selectedDestinationLocation = null
                     passengerMapDriverLoc = null
                     incomingDriverOffer = null
+                    incomingDriverOffers = emptyList()
                     nearbyDriverMarkers = emptyList()
                     isBookingInProgress = false
                     isRideSheetExpanded = false
                     customOfferedFare = null
+                    showChatSheet = false
+                    showSafetySheet = false
+                    showSafetyReportModal = false
+                    notifManager.dismissPassengerActiveRideNotification()
+                    notifManager.clearVoiceQueueAndTracking()
+
+                    var foundCompletedOrder: PassengerOrder? = null
                     passengerOrders = passengerOrders.map {
-                        if (it.requestId == reqId || it.id == reqId) {
-                            it.copy(status = PassengerOrderStatus.COMPLETED)
+                        if (it.requestId == reqId || it.id == reqId ||
+                            it.status == PassengerOrderStatus.DRIVER_COMING ||
+                            it.status == PassengerOrderStatus.ACCEPTED ||
+                            it.status == PassengerOrderStatus.DRIVER_ARRIVED ||
+                            it.status == PassengerOrderStatus.IN_TRIP) {
+                            val completed = it.copy(
+                                status = PassengerOrderStatus.COMPLETED,
+                                agreedFare = if (update.assignedFare > 0) update.assignedFare else it.agreedFare,
+                                assignedDriverId = it.assignedDriverId.ifBlank { update.assignedDriverId },
+                                driverName = it.driverName.ifBlank { update.driverName },
+                                driverPhone = it.driverPhone.ifBlank { update.driverPhone },
+                                driverPlateNumber = it.driverPlateNumber.ifBlank { update.driverPlateNumber },
+                                driverVehicleMake = it.driverVehicleMake.ifBlank { update.driverVehicleMake },
+                                driverVehicleModel = it.driverVehicleModel.ifBlank { update.driverVehicleModel },
+                                driverVehicleColor = it.driverVehicleColor.ifBlank { update.driverVehicleColor },
+                                driverRating = if (update.driverRating > 0) update.driverRating else it.driverRating
+                            )
+                            if (foundCompletedOrder == null) foundCompletedOrder = completed
+                            completed
                         } else it
+                    }
+
+                    val targetOrder = foundCompletedOrder ?: PassengerOrder(
+                        id = reqId,
+                        requestId = reqId,
+                        assignedDriverId = update.assignedDriverId,
+                        status = PassengerOrderStatus.COMPLETED,
+                        driverName = update.driverName,
+                        driverPhone = update.driverPhone,
+                        driverPlateNumber = update.driverPlateNumber,
+                        driverVehicleMake = update.driverVehicleMake,
+                        driverVehicleModel = update.driverVehicleModel,
+                        agreedFare = update.assignedFare,
+                        pickupTitle = selectedPickupLocation.title,
+                        destinationTitle = selectedDestinationLocation?.title ?: "",
+                        createdAt = System.currentTimeMillis()
+                    )
+
+                    val isSkippedOrRated = isOrderRatedOrSkipped(reqId, targetOrder.id) ||
+                            repo.isRideRatedOrSkipped(reqId, targetOrder.id, "PASSENGER")
+                    if (userMode == UserMode.PASSENGER && !isSkippedOrRated && !showPassengerRatingDialog) {
+                        completedOrderForRating = targetOrder
+                        showPassengerRatingDialog = true
                     }
                     snackbarHostState.showSnackbar("Ride completed! Thank you for riding with Drigo.")
                 }
@@ -844,6 +1126,25 @@ fun HomeScreen(
                             etaMinutes = if (update.etaMinutes > 0) update.etaMinutes else existing.etaMinutes
                         )
                         passengerOrders = passengerOrders.toMutableList().apply { set(existingIndex, updated) }
+                        com.example.data.remote.RideManager.saveActiveTrip(updated)
+                        incomingDriverOffer = null
+                        incomingDriverOffers = emptyList()
+                        isBookingInProgress = false
+                        isRideSheetExpanded = true
+                        if (passengerMapDriverLoc == null) {
+                            passengerMapDriverLoc = LiveDriverLocation(
+                                rideId = reqId,
+                                driverId = update.assignedDriverId,
+                                latitude = selectedPickupLocation.latitude + 0.008,
+                                longitude = selectedPickupLocation.longitude + 0.008,
+                                bearing = 45f,
+                                speedKmh = 35f,
+                                etaMinutes = update.etaMinutes.coerceAtLeast(1),
+                                distanceRemainingKm = 2.0,
+                                status = targetStatus.name,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        }
                     } else {
                         val newOrder = PassengerOrder(
                             id = reqId,
@@ -874,6 +1175,25 @@ fun HomeScreen(
                             etaMinutes = update.etaMinutes
                         )
                         passengerOrders = listOf(newOrder) + passengerOrders
+                        com.example.data.remote.RideManager.saveActiveTrip(newOrder)
+                        incomingDriverOffer = null
+                        incomingDriverOffers = emptyList()
+                        isBookingInProgress = false
+                        isRideSheetExpanded = true
+                        if (passengerMapDriverLoc == null) {
+                            passengerMapDriverLoc = LiveDriverLocation(
+                                rideId = reqId,
+                                driverId = update.assignedDriverId,
+                                latitude = selectedPickupLocation.latitude + 0.008,
+                                longitude = selectedPickupLocation.longitude + 0.008,
+                                bearing = 45f,
+                                speedKmh = 35f,
+                                etaMinutes = update.etaMinutes.coerceAtLeast(1),
+                                distanceRemainingKm = 2.0,
+                                status = targetStatus.name,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        }
                     }
                 }
             }
@@ -890,6 +1210,11 @@ fun HomeScreen(
 
     // Driver Live Requests State
     var driverRideRequests by remember { mutableStateOf<List<RideRequest>>(emptyList()) }
+
+    // Driver Planned Departures / City-to-City scheduled rides state
+    var showDriverPlannedDepartures by remember { mutableStateOf(false) }
+    var showDriverPostPlannedRide by remember { mutableStateOf(false) }
+    var selectedDepartureForManageId by remember { mutableStateOf<String?>(null) }
 
     // Listen for live driver requests when driver is online
     LaunchedEffect(isDriverOnline) {
@@ -1464,6 +1789,38 @@ fun HomeScreen(
                             modifier = Modifier.padding(horizontal = 10.dp)
                         )
 
+                        NavigationDrawerItem(
+                            icon = { Icon(Icons.Default.DepartureBoard, contentDescription = null, tint = DrigoBrandPurple) },
+                            label = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("City to City", fontSize = 14.sp)
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = InDriveLimeGreen.copy(alpha = 0.2f)
+                                    ) {
+                                        Text(
+                                            text = "Departures",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isDark) InDriveLimeGreen else Color(0xFF00796B),
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            selected = selectedTopCategory == "city" || showPassengerScheduledDeparturesSheet,
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                selectedTopCategory = "city"
+                                showPassengerScheduledDeparturesSheet = true
+                            },
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        )
+
                         if (!isRegisteredAsDriver) {
                             NavigationDrawerItem(
                                 icon = { Icon(Icons.Default.Badge, contentDescription = null, tint = Color(0xFF8B004F)) },
@@ -1508,8 +1865,12 @@ fun HomeScreen(
                         NavigationDrawerItem(
                             icon = { Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = DrigoBrandPurple) },
                             label = { Text("Driver Dashboard", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
-                            selected = true,
-                            onClick = { scope.launch { drawerState.close() } },
+                            selected = !showDriverPlannedDepartures && !showDriverPostPlannedRide,
+                            onClick = {
+                                showDriverPlannedDepartures = false
+                                showDriverPostPlannedRide = false
+                                scope.launch { drawerState.close() }
+                            },
                             modifier = Modifier.padding(horizontal = 10.dp)
                         )
 
@@ -1517,8 +1878,53 @@ fun HomeScreen(
                             icon = { Icon(Icons.Default.AltRoute, contentDescription = null) },
                             label = { Text("Active Requests", fontSize = 14.sp) },
                             selected = false,
-                            onClick = { scope.launch { drawerState.close() } },
+                            onClick = {
+                                showDriverPlannedDepartures = false
+                                showDriverPostPlannedRide = false
+                                scope.launch { drawerState.close() }
+                            },
                             modifier = Modifier.padding(horizontal = 10.dp)
+                        )
+
+                        NavigationDrawerItem(
+                            icon = { Icon(Icons.Default.DepartureBoard, contentDescription = "City to City", tint = DrigoBrandPurple) },
+                            label = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "City to City",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = DrigoBrandPurple.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "Scheduled",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DrigoBrandPurple,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            selected = showDriverPlannedDepartures || showDriverPostPlannedRide,
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                showDriverPlannedDepartures = true
+                            },
+                            modifier = Modifier
+                                .padding(horizontal = 10.dp)
+                                .testTag("drawer_driver_city_to_city_item")
                         )
                     }
 
@@ -1558,11 +1964,18 @@ fun HomeScreen(
                     )
 
                     NavigationDrawerItem(
-                        icon = { Icon(Icons.Default.History, contentDescription = null) },
-                        label = { Text("Trip History") },
+                        icon = { Icon(Icons.Default.History, contentDescription = null, tint = DrigoBrandPurple) },
+                        label = { Text("Trip History", fontWeight = FontWeight.SemiBold) },
                         selected = false,
-                        onClick = { scope.launch { drawerState.close() } },
-                        modifier = Modifier.padding(horizontal = 12.dp)
+                        onClick = {
+                            scope.launch {
+                                drawerState.close()
+                                onNavigateToTripHistory()
+                            }
+                        },
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .testTag("drawer_history_item")
                     )
 
                     NavigationDrawerItem(
@@ -2770,14 +3183,67 @@ fun HomeScreen(
                                                 }
                                             }
 
+                                            if (selectedTopCategory == "city") {
+                                                Surface(
+                                                    onClick = { showPassengerScheduledDeparturesSheet = true },
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    color = if (isDark) Color(0xFF1E222D) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                                    border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.4f)),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Surface(
+                                                            shape = CircleShape,
+                                                            color = DrigoBrandPurple.copy(alpha = 0.15f),
+                                                            modifier = Modifier.size(34.dp)
+                                                        ) {
+                                                            Box(contentAlignment = Alignment.Center) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.DepartureBoard,
+                                                                    contentDescription = null,
+                                                                    tint = DrigoBrandPurple,
+                                                                    modifier = Modifier.size(18.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = "Browse Scheduled Departures",
+                                                                fontWeight = FontWeight.Bold,
+                                                                fontSize = 13.sp,
+                                                                color = MaterialTheme.colorScheme.onSurface
+                                                            )
+                                                            Text(
+                                                                text = "Join intercity rides with fixed/negotiable seats",
+                                                                fontSize = 10.5.sp,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                        Icon(
+                                                            imageVector = Icons.Default.ArrowForwardIos,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.size(12.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
                                             // 3-Card Bento Layout in Initial Discovery View
                                             RideCategoryBentoCards(
                                                 selectedCategory = selectedRideCategory,
                                                 onShareRideClick = {
                                                     selectedRideCategory = "Share Ride"
                                                     selectedTopCategory = "city"
-                                                    cardInitialEditPickup = false
-                                                    showPickupDestinationCard = true
+                                                    showPassengerScheduledDeparturesSheet = true
                                                 },
                                                 onSendParcelClick = {
                                                     selectedRideCategory = "Parcel"
@@ -2935,27 +3401,78 @@ fun HomeScreen(
 }
         } else {
             // ================= DRIVER MODE (inDrive Captain Dashboard) =================
-            DriverModeView(
-                user = user,
-                driverVerification = driverVerification,
-                isDriverOnline = isDriverOnline,
-                onToggleOnline = onToggleDriverOnline,
-                onOpenDrawer = { scope.launch { drawerState.open() } },
-                onNavigateToWallet = onNavigateToWallet,
-                onSwitchToPassenger = { onSwitchUserMode(UserMode.PASSENGER) },
-                onOpenChat = { tripId, partnerName, role, phone, pickup, dest ->
-                    chatTripId = tripId
-                    chatPartnerName = partnerName
-                    chatPartnerRole = role
-                    chatPartnerPhone = phone
-                    chatPickupTitle = pickup
-                    chatDestinationTitle = dest
-                    showChatSheet = true
-                },
-                initialUserLocation = userLocationData,
-                liveRideRequests = liveRideRequests,
-                modifier = modifier
-            )
+            if (selectedDepartureForManageId != null) {
+                ManageDepartureScreen(
+                    departureId = selectedDepartureForManageId!!,
+                    onBack = { selectedDepartureForManageId = null },
+                    onSosClick = { showSafetySheet = true },
+                    modifier = modifier
+                )
+            } else if (showDriverPostPlannedRide) {
+                val dId = driverVerification?.uid?.takeIf { it.isNotBlank() } ?: user?.uid ?: "driver_default"
+                val dName = driverVerification?.name?.takeIf { it.isNotBlank() } ?: user?.displayName?.takeIf { it.isNotBlank() } ?: "Drigo Captain"
+                val dPhone = driverVerification?.phone?.takeIf { it.isNotBlank() } ?: user?.phoneNumber?.takeIf { it.isNotBlank() } ?: ""
+                PostPlannedRideScreen(
+                    driverId = dId,
+                    driverName = dName,
+                    driverPhone = dPhone,
+                    onBackClick = {
+                        showDriverPostPlannedRide = false
+                        showDriverPlannedDepartures = true
+                    },
+                    onPublishedSuccess = { departure ->
+                        showDriverPostPlannedRide = false
+                        showDriverPlannedDepartures = true
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Scheduled ride from ${departure.pickupCity} to ${departure.dropoffCity} posted successfully!")
+                        }
+                    },
+                    onOpenSos = { showSafetySheet = true },
+                    modifier = modifier
+                )
+            } else if (showDriverPlannedDepartures) {
+                val dId = driverVerification?.uid?.takeIf { it.isNotBlank() } ?: user?.uid ?: "driver_default"
+                val dName = driverVerification?.name?.takeIf { it.isNotBlank() } ?: user?.displayName?.takeIf { it.isNotBlank() } ?: "Drigo Captain"
+                val dPhone = driverVerification?.phone?.takeIf { it.isNotBlank() } ?: user?.phoneNumber?.takeIf { it.isNotBlank() } ?: ""
+                PlannedDeparturesScreen(
+                    driverId = dId,
+                    driverName = dName,
+                    driverPhone = dPhone,
+                    onBackClick = { showDriverPlannedDepartures = false },
+                    onPostRideClick = {
+                        showDriverPlannedDepartures = false
+                        showDriverPostPlannedRide = true
+                    },
+                    onManageDeparture = { departure ->
+                        selectedDepartureForManageId = departure.id
+                    },
+                    onOpenSos = { showSafetySheet = true },
+                    modifier = modifier
+                )
+            } else {
+                DriverModeView(
+                    user = user,
+                    driverVerification = driverVerification,
+                    isDriverOnline = isDriverOnline,
+                    onToggleOnline = onToggleDriverOnline,
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onNavigateToWallet = onNavigateToWallet,
+                    onSwitchToPassenger = { onSwitchUserMode(UserMode.PASSENGER) },
+                    onOpenChat = { tripId, partnerName, role, phone, pickup, dest ->
+                        chatTripId = tripId
+                        chatPartnerName = partnerName
+                        chatPartnerRole = role
+                        chatPartnerPhone = phone
+                        chatPickupTitle = pickup
+                        chatDestinationTitle = dest
+                        showChatSheet = true
+                    },
+                    initialUserLocation = userLocationData,
+                    liveRideRequests = liveRideRequests,
+                    onRefreshRideRequests = onRefreshDriverRideRequests,
+                    modifier = modifier
+                )
+            }
         }
     }
 
@@ -3199,8 +3716,8 @@ fun HomeScreen(
         )
     }
 
-    // Passenger Post-Ride Rating & Feedback Dialog
-    if (showPassengerRatingDialog && completedOrderForRating != null) {
+    // Passenger Post-Ride Rating & Feedback Dialog (Passenger Mode only)
+    if (userMode == UserMode.PASSENGER && showPassengerRatingDialog && completedOrderForRating != null) {
         val order = completedOrderForRating!!
         val safeId = order.id.ifBlank { order.requestId }
         PostRideRatingDialog(
@@ -3292,6 +3809,15 @@ fun HomeScreen(
                     snackbarHostState.showSnackbar("Offer Declined")
                 }
             }
+        )
+    }
+
+    // City to City Passenger Scheduled Departures Modal Sheet
+    if (showPassengerScheduledDeparturesSheet) {
+        PassengerScheduledDeparturesSheet(
+            onDismiss = { showPassengerScheduledDeparturesSheet = false },
+            initialFromCity = selectedPickupLocation.subtitle.split(",").lastOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "Islamabad",
+            initialToCity = selectedDestinationLocation?.subtitle?.split(",")?.lastOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "Lahore"
         )
     }
 }
@@ -3583,6 +4109,7 @@ fun ActiveCaptainAssignedCard(
     val distKm = liveLocation?.distanceRemainingKm ?: order.distanceKm
     val isArrived = order.status == PassengerOrderStatus.DRIVER_ARRIVED || (liveLocation?.status == PassengerOrderStatus.DRIVER_ARRIVED.name)
     val isInTrip = order.status == PassengerOrderStatus.IN_TRIP || (liveLocation?.status == PassengerOrderStatus.IN_TRIP.name)
+    val isDark = MaterialTheme.drigoColors.isDark
 
     var isSharingLocationWithDriver by remember { mutableStateOf(true) }
 
@@ -3600,9 +4127,9 @@ fun ActiveCaptainAssignedCard(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             val statusColor = when {
-                isInTrip -> Color(0xFF29B6F6)
-                isArrived -> Color(0xFF00E676)
-                else -> Color(0xFFFFB300)
+                isInTrip -> if (isDark) Color(0xFF29B6F6) else Color(0xFF0288D1)
+                isArrived -> if (isDark) Color(0xFF00E676) else Color(0xFF2E7D32)
+                else -> if (isDark) Color(0xFFFFB300) else Color(0xFFE65100)
             }
             Text(
                 text = when {
@@ -3623,8 +4150,8 @@ fun ActiveCaptainAssignedCard(
             Spacer(modifier = Modifier.height(6.dp))
             Surface(
                 shape = RoundedCornerShape(20.dp),
-                color = statusColor.copy(alpha = 0.15f),
-                border = BorderStroke(1.dp, statusColor)
+                color = statusColor.copy(alpha = if (isDark) 0.15f else 0.10f),
+                border = BorderStroke(1.dp, statusColor.copy(alpha = if (isDark) 0.8f else 0.5f))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
@@ -3676,8 +4203,8 @@ fun ActiveCaptainAssignedCard(
             val waitSecs = remainingWaitSeconds % 60
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = Color(0xFF2E7D32).copy(alpha = 0.15f),
-                border = BorderStroke(1.dp, Color(0xFF00E676)),
+                color = if (isDark) Color(0xFF2E7D32).copy(alpha = 0.15f) else Color(0xFFE8F5E9),
+                border = BorderStroke(1.dp, if (isDark) Color(0xFF00E676) else Color(0xFF4CAF50)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -3687,7 +4214,7 @@ fun ActiveCaptainAssignedCard(
                     Icon(
                         imageVector = Icons.Default.Timer,
                         contentDescription = "Waiting timer",
-                        tint = Color(0xFF00E676),
+                        tint = if (isDark) Color(0xFF00E676) else Color(0xFF2E7D32),
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -3700,7 +4227,7 @@ fun ActiveCaptainAssignedCard(
                         },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (remainingWaitSeconds > 0) Color(0xFF00E676) else Color(0xFFFFB74D)
+                        color = if (remainingWaitSeconds > 0) (if (isDark) Color(0xFF00E676) else Color(0xFF2E7D32)) else (if (isDark) Color(0xFFFFB74D) else Color(0xFFE65100))
                     )
                 }
             }
@@ -3708,10 +4235,11 @@ fun ActiveCaptainAssignedCard(
 
         // 1.5 Prominent 4-Digit Ride Verification PIN (Safety Architecture - Item 4)
         val ridePin = order.verificationPin
+        val pinAccentColor = if (isDark) InDriveLimeGreen else MaterialTheme.colorScheme.primary
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
-            border = BorderStroke(1.5.dp, InDriveLimeGreen),
+            border = BorderStroke(1.5.dp, pinAccentColor.copy(alpha = 0.7f)),
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("passenger_4digit_pin_card")
@@ -3728,14 +4256,14 @@ fun ActiveCaptainAssignedCard(
                     Icon(
                         imageVector = Icons.Default.Shield,
                         contentDescription = null,
-                        tint = InDriveLimeGreen,
+                        tint = pinAccentColor,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
                         text = "YOUR 4-DIGIT RIDE PIN",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = InDriveLimeGreen,
+                        color = pinAccentColor,
                         letterSpacing = 1.sp
                     )
                 }
@@ -3792,7 +4320,7 @@ fun ActiveCaptainAssignedCard(
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(2.dp, InDriveLimeGreen),
+                        border = BorderStroke(2.dp, if (isDark) InDriveLimeGreen else MaterialTheme.colorScheme.primary),
                         modifier = Modifier.size(54.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -3892,7 +4420,7 @@ fun ActiveCaptainAssignedCard(
                 ) {
                     Button(
                         onClick = onCallCaptain,
-                        colors = ButtonDefaults.buttonColors(containerColor = InDriveLimeGreen),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (isDark) InDriveLimeGreen else Color(0xFF00A859)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
@@ -3906,7 +4434,7 @@ fun ActiveCaptainAssignedCard(
 
                     Button(
                         onClick = onOpenChat,
-                        colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                        colors = ButtonDefaults.buttonColors(containerColor = if (isDark) DrigoBrandPurple else DrigoBrandPurple),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
@@ -3941,7 +4469,7 @@ fun ActiveCaptainAssignedCard(
                 Row(verticalAlignment = Alignment.Top) {
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFF00E676),
+                        color = Color(0xFF00C853),
                         modifier = Modifier
                             .padding(top = 2.dp)
                             .size(10.dp)
@@ -3963,7 +4491,7 @@ fun ActiveCaptainAssignedCard(
                         }
                         Text(
                             text = String.format(Locale.US, "📍 Lat: %.5f, Lon: %.5f", pickLat, pickLon),
-                            color = Color(0xFF81D4FA),
+                            color = if (isDark) Color(0xFF81D4FA) else MaterialTheme.colorScheme.primary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -3979,7 +4507,7 @@ fun ActiveCaptainAssignedCard(
                 Row(verticalAlignment = Alignment.Top) {
                     Surface(
                         shape = CircleShape,
-                        color = Color(0xFFFF2A2A),
+                        color = Color(0xFFE53935),
                         modifier = Modifier
                             .padding(top = 2.dp)
                             .size(10.dp)
@@ -4001,7 +4529,7 @@ fun ActiveCaptainAssignedCard(
                         }
                         Text(
                             text = String.format(Locale.US, "📍 Lat: %.5f, Lon: %.5f", destLat, destLon),
-                            color = Color(0xFFFF8A80),
+                            color = if (isDark) Color(0xFFFF8A80) else MaterialTheme.colorScheme.error,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -4048,7 +4576,7 @@ fun ActiveCaptainAssignedCard(
                 Icon(
                     imageVector = Icons.Default.Payments,
                     contentDescription = "Cash",
-                    tint = Color(0xFF00E676),
+                    tint = if (isDark) Color(0xFF00E676) else Color(0xFF00A859),
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -4080,8 +4608,8 @@ fun ActiveCaptainAssignedCard(
                     onCheckedChange = { isSharingLocationWithDriver = it },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
-                        checkedTrackColor = InDriveLimeGreen,
-                        uncheckedThumbColor = Color.Gray,
+                        checkedTrackColor = if (isDark) InDriveLimeGreen else MaterialTheme.colorScheme.primary,
+                        uncheckedThumbColor = MaterialTheme.colorScheme.outline,
                         uncheckedTrackColor = MaterialTheme.colorScheme.outlineVariant
                     )
                 )
@@ -4109,7 +4637,10 @@ fun ActiveCaptainAssignedCard(
 
             Button(
                 onClick = onShareTrip,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier
                     .weight(1f)

@@ -28,6 +28,7 @@ import com.example.ui.screens.WalletScreen
 import com.example.ui.screens.DriverRegistrationScreen
 import com.example.ui.screens.AdminVerificationScreen
 import com.example.ui.screens.GoogleDriveDocumentsScreen
+import com.example.ui.screens.TripHistoryScreen
 import com.example.ui.theme.DrigoTheme
 import com.example.util.RideNotificationManager
 import com.example.util.ThemeManager
@@ -194,8 +195,12 @@ fun DrigoApp(viewModel: MainViewModel) {
                     onNavigateToGoogleDrive = {
                         viewModel.navigateTo(AppScreen.GOOGLE_DRIVE_DOCUMENTS)
                     },
+                    onNavigateToTripHistory = {
+                        viewModel.navigateTo(AppScreen.HISTORY)
+                    },
                     driverVerification = driverVerification,
-                    liveRideRequests = liveRideRequests
+                    liveRideRequests = liveRideRequests,
+                    onRefreshDriverRideRequests = { viewModel.refreshDriverRideRequests() }
                 )
             }
             AppScreen.WALLET -> {
@@ -204,6 +209,18 @@ fun DrigoApp(viewModel: MainViewModel) {
                     userRole = if (userMode == UserMode.DRIVER) "DRIVER" else "PASSENGER",
                     onBackClick = {
                         viewModel.popBackStack()
+                    }
+                )
+            }
+            AppScreen.HISTORY -> {
+                TripHistoryScreen(
+                    user = currentUser,
+                    initialUserMode = userMode,
+                    onBackClick = {
+                        viewModel.popBackStack()
+                    },
+                    onRebookTrip = {
+                        viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
                     }
                 )
             }

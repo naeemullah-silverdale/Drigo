@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -14,6 +15,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,15 +40,23 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.data.model.PlannedDeparture
+import com.example.data.model.PlannedDepartureBooking
+import com.example.data.model.PlannedDepartureOffer
+import com.example.data.remote.FirebaseRepository
+import com.example.ui.theme.drigoColors
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -86,16 +97,28 @@ fun CityToCityPassengerFlow(
     var showDateTimeDialog by remember { mutableStateOf(false) }
     var showCommentsDialog by remember { mutableStateOf(false) }
     var showMorePassengersDialog by remember { mutableStateOf(false) }
+    var showAvailableDeparturesSheet by remember { mutableStateOf(false) }
 
     // Dynamic fares for intercity
     val privateFare = (1200 + (distanceKm * 42)).toInt()
     val sharedSeatFare = (450 + (distanceKm * 18)).toInt()
     val parcelFare = (600 + (distanceKm * 20)).toInt()
 
+    val isDark = MaterialTheme.drigoColors.isDark
+    val sheetColor = if (isDark) Color(0xFF16181D) else MaterialTheme.colorScheme.surface
+    val cardBg = if (isDark) Color(0xFF1B1D23) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    val cardSelectedBg = if (isDark) Color(0xFF252834) else InDriveLimeGreen.copy(alpha = 0.12f)
+    val borderDefault = if (isDark) Color(0xFF2C303B) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+    val textPrimary = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+    val textSecondary = if (isDark) Color(0xFFA0A6B5) else MaterialTheme.colorScheme.onSurfaceVariant
+    val chipBg = if (isDark) Color(0xFF2A2D37) else MaterialTheme.colorScheme.surfaceVariant
+    val fareBoxBg = if (isDark) Color(0xFF1D2027) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+    val counterBtnBg = if (isDark) Color(0xFF2C303B) else MaterialTheme.colorScheme.surfaceVariant
+
     Surface(
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        color = Color(0xFF16181D),
-        border = BorderStroke(1.dp, Color(0xFF2C303B)),
+        color = sheetColor,
+        border = BorderStroke(1.dp, borderDefault),
         shadowElevation = 24.dp,
         modifier = modifier
             .fillMaxWidth()
@@ -150,8 +173,8 @@ fun CityToCityPassengerFlow(
                                 text = "What ride do you need?",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                fontSize = 22.sp,
+                                color = textPrimary,
+                                fontSize = 21.sp,
                                 modifier = Modifier.padding(bottom = 4.dp)
                             )
 
@@ -160,10 +183,10 @@ fun CityToCityPassengerFlow(
                             Surface(
                                 onClick = { onRideTypeChange(CityRideType.PRIVATE) },
                                 shape = RoundedCornerShape(16.dp),
-                                color = if (isPrivate) Color(0xFF252834) else Color(0xFF1B1D23),
+                                color = if (isPrivate) cardSelectedBg else cardBg,
                                 border = BorderStroke(
                                     if (isPrivate) 1.5.dp else 1.dp,
-                                    if (isPrivate) InDriveLimeGreen else Color(0xFF2C303B)
+                                    if (isPrivate) InDriveLimeGreen else borderDefault
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -172,40 +195,47 @@ fun CityToCityPassengerFlow(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp),
+                                        .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
-                                        modifier = Modifier.size(56.dp, 36.dp),
+                                        modifier = Modifier.size(50.dp, 34.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         CityPrivateCarGraphic(modifier = Modifier.fillMaxSize())
                                     }
 
-                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Private ride",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 16.sp
+                                            color = textPrimary,
+                                            fontSize = 15.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
                                             text = "Whole cabin for you",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFA0A6B5),
-                                            fontSize = 12.sp
+                                            color = textSecondary,
+                                            fontSize = 11.5.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
 
                                     Text(
                                         text = "~PKR ${"%,d".format(privateFare)}",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        fontSize = 16.sp
+                                        color = textPrimary,
+                                        fontSize = 15.sp,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -215,10 +245,10 @@ fun CityToCityPassengerFlow(
                             Surface(
                                 onClick = { onRideTypeChange(CityRideType.SHARED) },
                                 shape = RoundedCornerShape(16.dp),
-                                color = if (isShared) Color(0xFF252834) else Color(0xFF1B1D23),
+                                color = if (isShared) cardSelectedBg else cardBg,
                                 border = BorderStroke(
                                     if (isShared) 1.5.dp else 1.dp,
-                                    if (isShared) InDriveLimeGreen else Color(0xFF2C303B)
+                                    if (isShared) InDriveLimeGreen else borderDefault
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -227,48 +257,56 @@ fun CityToCityPassengerFlow(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp),
+                                        .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
-                                        modifier = Modifier.size(56.dp, 36.dp),
+                                        modifier = Modifier.size(50.dp, 34.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         CitySharedCarGraphic(modifier = Modifier.fillMaxSize())
                                     }
 
-                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Shared ride",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 16.sp
+                                            color = textPrimary,
+                                            fontSize = 15.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
                                             text = "Share the ride with other passengers. Pay only for your seat",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFA0A6B5),
-                                            fontSize = 12.sp,
-                                            lineHeight = 15.sp
+                                            color = textSecondary,
+                                            fontSize = 11.5.sp,
+                                            lineHeight = 14.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
 
                                     Column(horizontalAlignment = Alignment.End) {
                                         Text(
                                             text = "~PKR ${"%,d".format(sharedSeatFare)}",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 16.sp
+                                            color = textPrimary,
+                                            fontSize = 15.sp,
+                                            maxLines = 1
                                         )
                                         Text(
                                             text = "for 1 seat",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFFA0A6B5),
-                                            fontSize = 11.sp
+                                            color = textSecondary,
+                                            fontSize = 11.sp,
+                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -279,10 +317,10 @@ fun CityToCityPassengerFlow(
                             Surface(
                                 onClick = { onRideTypeChange(CityRideType.PARCEL) },
                                 shape = RoundedCornerShape(16.dp),
-                                color = if (isParcel) Color(0xFF252834) else Color(0xFF1B1D23),
+                                color = if (isParcel) cardSelectedBg else cardBg,
                                 border = BorderStroke(
                                     if (isParcel) 1.5.dp else 1.dp,
-                                    if (isParcel) InDriveLimeGreen else Color(0xFF2C303B)
+                                    if (isParcel) InDriveLimeGreen else borderDefault
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -291,45 +329,117 @@ fun CityToCityPassengerFlow(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(14.dp),
+                                        .padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
-                                        modifier = Modifier.size(56.dp, 36.dp),
+                                        modifier = Modifier.size(50.dp, 34.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         CityParcelDeliveryGraphic(modifier = Modifier.fillMaxSize())
                                     }
 
-                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Parcel delivery",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 16.sp
+                                            color = textPrimary,
+                                            fontSize = 15.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
                                             text = "Door-to-door, between cities",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFA0A6B5),
-                                            fontSize = 12.sp
+                                            color = textSecondary,
+                                            fontSize = 11.5.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
 
                                     Text(
                                         text = "~PKR ${"%,d".format(parcelFare)}",
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        fontSize = 16.sp
+                                        color = textPrimary,
+                                        fontSize = 15.sp,
+                                        maxLines = 1
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Browse Captain Scheduled Departures Button
+                            Surface(
+                                onClick = { showAvailableDeparturesSheet = true },
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isDark) Color(0xFF1E222D) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                border = BorderStroke(1.dp, Color(0xFF2979FF).copy(alpha = 0.5f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("browse_scheduled_rides_btn")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Color(0xFF2979FF).copy(alpha = 0.2f),
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Outlined.CalendarMonth,
+                                                contentDescription = null,
+                                                tint = Color(0xFF2979FF),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Browse Scheduled Departures",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.5.sp,
+                                            color = textPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "Book 1 seat or entire car from Captains",
+                                            fontSize = 11.sp,
+                                            color = textSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFF00E676).copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = "LIVE",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF00E676),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             // "Next" Button
                             Button(
@@ -341,7 +451,7 @@ fun CityToCityPassengerFlow(
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp)
+                                    .height(50.dp)
                                     .testTag("city_step1_next_btn")
                             ) {
                                 Text(
@@ -360,14 +470,14 @@ fun CityToCityPassengerFlow(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             Text(
                                 text = "When to start the ride",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                fontSize = 22.sp,
+                                color = textPrimary,
+                                fontSize = 21.sp,
                                 modifier = Modifier.padding(bottom = 4.dp)
                             )
 
@@ -375,10 +485,10 @@ fun CityToCityPassengerFlow(
                             Surface(
                                 onClick = { onTimingChange(true) },
                                 shape = RoundedCornerShape(16.dp),
-                                color = if (selectedTimingIsNow) Color(0xFF252834) else Color(0xFF1B1D23),
+                                color = if (selectedTimingIsNow) cardSelectedBg else cardBg,
                                 border = BorderStroke(
                                     if (selectedTimingIsNow) 1.5.dp else 1.dp,
-                                    if (selectedTimingIsNow) InDriveLimeGreen else Color(0xFF2C303B)
+                                    if (selectedTimingIsNow) InDriveLimeGreen else borderDefault
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -387,24 +497,24 @@ fun CityToCityPassengerFlow(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 18.dp),
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                         Icon(
                                             imageVector = Icons.Outlined.Schedule,
                                             contentDescription = "Now",
-                                            tint = Color.White,
+                                            tint = textPrimary,
                                             modifier = Modifier.size(24.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Spacer(modifier = Modifier.width(14.dp))
                                         Text(
                                             text = "Now",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 17.sp
+                                            color = textPrimary,
+                                            fontSize = 16.sp
                                         )
                                     }
 
@@ -418,7 +528,7 @@ fun CityToCityPassengerFlow(
                                             )
                                             .border(
                                                 2.dp,
-                                                if (selectedTimingIsNow) InDriveLimeGreen else Color(0xFF555B6D),
+                                                if (selectedTimingIsNow) InDriveLimeGreen else borderDefault,
                                                 CircleShape
                                             ),
                                         contentAlignment = Alignment.Center
@@ -442,10 +552,10 @@ fun CityToCityPassengerFlow(
                                     showDateTimeDialog = true
                                 },
                                 shape = RoundedCornerShape(16.dp),
-                                color = if (!selectedTimingIsNow) Color(0xFF252834) else Color(0xFF1B1D23),
+                                color = if (!selectedTimingIsNow) cardSelectedBg else cardBg,
                                 border = BorderStroke(
                                     if (!selectedTimingIsNow) 1.5.dp else 1.dp,
-                                    if (!selectedTimingIsNow) InDriveLimeGreen else Color(0xFF2C303B)
+                                    if (!selectedTimingIsNow) InDriveLimeGreen else borderDefault
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -454,7 +564,7 @@ fun CityToCityPassengerFlow(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 18.dp),
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
@@ -465,17 +575,17 @@ fun CityToCityPassengerFlow(
                                         Icon(
                                             imageVector = Icons.Outlined.CalendarMonth,
                                             contentDescription = "Later",
-                                            tint = Color.White,
+                                            tint = textPrimary,
                                             modifier = Modifier.size(24.dp)
                                         )
-                                        Spacer(modifier = Modifier.width(16.dp))
+                                        Spacer(modifier = Modifier.width(14.dp))
                                         Column {
                                             Text(
                                                 text = "Later",
                                                 style = MaterialTheme.typography.titleMedium,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color.White,
-                                                fontSize = 17.sp
+                                                color = textPrimary,
+                                                fontSize = 16.sp
                                             )
                                             Text(
                                                 text = if (!selectedTimingIsNow && scheduledDateTimeText.isNotBlank())
@@ -483,8 +593,10 @@ fun CityToCityPassengerFlow(
                                                 else
                                                     "Select date and time",
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = if (!selectedTimingIsNow) InDriveLimeGreen else Color(0xFFA0A6B5),
-                                                fontSize = 13.sp
+                                                color = if (!selectedTimingIsNow) InDriveLimeGreen else textSecondary,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
@@ -499,7 +611,7 @@ fun CityToCityPassengerFlow(
                                             )
                                             .border(
                                                 2.dp,
-                                                if (!selectedTimingIsNow) InDriveLimeGreen else Color(0xFF555B6D),
+                                                if (!selectedTimingIsNow) InDriveLimeGreen else borderDefault,
                                                 CircleShape
                                             ),
                                         contentAlignment = Alignment.Center
@@ -516,7 +628,7 @@ fun CityToCityPassengerFlow(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             // "Next" Button
                             Button(
@@ -528,7 +640,7 @@ fun CityToCityPassengerFlow(
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp)
+                                    .height(50.dp)
                                     .testTag("city_step2_next_btn")
                             ) {
                                 Text(
@@ -547,7 +659,7 @@ fun CityToCityPassengerFlow(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(11.dp)
                         ) {
                             // Header Row: Ride Type Title on left + Vehicle Graphic on right
                             Row(
@@ -560,8 +672,8 @@ fun CityToCityPassengerFlow(
                                         text = selectedRideType.title,
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color.White,
-                                        fontSize = 22.sp
+                                        color = textPrimary,
+                                        fontSize = 21.sp
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
@@ -570,15 +682,17 @@ fun CityToCityPassengerFlow(
                                         else
                                             "Specify number of passengers and your fare",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = Color(0xFFA0A6B5),
-                                        fontSize = 13.sp
+                                        color = textSecondary,
+                                        fontSize = 12.5.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
                                 Box(
                                     modifier = Modifier
-                                        .size(68.dp, 40.dp)
-                                        .padding(start = 8.dp),
+                                        .size(64.dp, 38.dp)
+                                        .padding(start = 6.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     when (selectedRideType) {
@@ -595,7 +709,7 @@ fun CityToCityPassengerFlow(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     val passengerOptions = listOf(1, 2, 3, 4)
@@ -603,14 +717,14 @@ fun CityToCityPassengerFlow(
                                         val isSelected = passengerCount == count
                                         Surface(
                                             onClick = { onPassengerCountChange(count) },
-                                            shape = RoundedCornerShape(24.dp),
-                                            color = if (isSelected) Color.White else Color(0xFF2A2D37),
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = if (isSelected) textPrimary else chipBg,
                                             modifier = Modifier
-                                                .height(44.dp)
+                                                .height(40.dp)
                                                 .testTag("passenger_chip_$count")
                                         ) {
                                             Row(
-                                                modifier = Modifier.padding(horizontal = 20.dp),
+                                                modifier = Modifier.padding(horizontal = 16.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.Center
                                             ) {
@@ -618,16 +732,16 @@ fun CityToCityPassengerFlow(
                                                     Icon(
                                                         imageVector = Icons.Default.Person,
                                                         contentDescription = null,
-                                                        tint = if (isSelected) Color.Black else Color.White,
-                                                        modifier = Modifier.size(18.dp)
+                                                        tint = if (isSelected) (if (isDark) Color.Black else Color.White) else textPrimary,
+                                                        modifier = Modifier.size(16.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                 }
                                                 Text(
                                                     text = "$count",
                                                     fontWeight = FontWeight.Bold,
-                                                    fontSize = 15.sp,
-                                                    color = if (isSelected) Color.Black else Color.White
+                                                    fontSize = 14.sp,
+                                                    color = if (isSelected) (if (isDark) Color.Black else Color.White) else textPrimary
                                                 )
                                             }
                                         }
@@ -637,27 +751,27 @@ fun CityToCityPassengerFlow(
                                     val isMoreSelected = passengerCount > 4
                                     Surface(
                                         onClick = { showMorePassengersDialog = true },
-                                        shape = RoundedCornerShape(24.dp),
-                                        color = if (isMoreSelected) Color.White else Color(0xFF2A2D37),
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = if (isMoreSelected) textPrimary else chipBg,
                                         modifier = Modifier
-                                            .height(44.dp)
+                                            .height(40.dp)
                                             .testTag("passenger_chip_more")
-                                    ) {
+                                        ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                            modifier = Modifier.padding(horizontal = 14.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
                                                 text = if (isMoreSelected) "$passengerCount Pax" else "More",
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = if (isMoreSelected) Color.Black else Color.White
+                                                fontSize = 13.5.sp,
+                                                color = if (isMoreSelected) (if (isDark) Color.Black else Color.White) else textPrimary
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Icon(
                                                 imageVector = Icons.Default.KeyboardArrowDown,
                                                 contentDescription = "More passengers",
-                                                tint = if (isMoreSelected) Color.Black else Color.White,
+                                                tint = if (isMoreSelected) (if (isDark) Color.Black else Color.White) else textPrimary,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
@@ -668,8 +782,8 @@ fun CityToCityPassengerFlow(
                             // Fare Container Card with [-] PKR 8,100 [+]
                             Surface(
                                 shape = RoundedCornerShape(18.dp),
-                                color = Color(0xFF1D2027),
-                                border = BorderStroke(1.dp, Color(0xFF333744)),
+                                color = fareBoxBg,
+                                border = BorderStroke(1.dp, borderDefault),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("city_fare_box")
@@ -689,15 +803,15 @@ fun CityToCityPassengerFlow(
                                         Surface(
                                             onClick = onDecreaseFare,
                                             shape = CircleShape,
-                                            color = Color(0xFF2C303B),
+                                            color = counterBtnBg,
                                             modifier = Modifier
-                                                .size(44.dp)
+                                                .size(42.dp)
                                                 .testTag("city_fare_minus")
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Text(
                                                     text = "—",
-                                                    color = Color.White,
+                                                    color = textPrimary,
                                                     fontSize = 18.sp,
                                                     fontWeight = FontWeight.ExtraBold
                                                 )
@@ -709,25 +823,27 @@ fun CityToCityPassengerFlow(
                                             text = "PKR ${"%,d".format(customFare)}",
                                             style = MaterialTheme.typography.headlineMedium,
                                             fontWeight = FontWeight.ExtraBold,
-                                            color = Color.White,
-                                            fontSize = 24.sp
+                                            color = textPrimary,
+                                            fontSize = 22.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
 
                                         // Plus Button
                                         Surface(
                                             onClick = onIncreaseFare,
                                             shape = CircleShape,
-                                            color = Color(0xFF2C303B),
+                                            color = counterBtnBg,
                                             modifier = Modifier
-                                                .size(44.dp)
+                                                .size(42.dp)
                                                 .testTag("city_fare_plus")
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
                                                     imageVector = Icons.Default.Add,
                                                     contentDescription = "Increase Fare",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(22.dp)
+                                                    tint = textPrimary,
+                                                    modifier = Modifier.size(20.dp)
                                                 )
                                             }
                                         }
@@ -749,8 +865,8 @@ fun CityToCityPassengerFlow(
                             Surface(
                                 onClick = { showDateTimeDialog = true },
                                 shape = RoundedCornerShape(16.dp),
-                                color = Color(0xFF1D2027),
-                                border = BorderStroke(1.dp, Color(0xFF2C303B)),
+                                color = cardBg,
+                                border = BorderStroke(1.dp, borderDefault),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("city_date_time_row")
@@ -758,38 +874,40 @@ fun CityToCityPassengerFlow(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                                        .padding(horizontal = 14.dp, vertical = 13.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
                                         imageVector = Icons.Outlined.Schedule,
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = textPrimary,
                                         modifier = Modifier.size(22.dp)
                                     )
 
-                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Date and time",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFA0A6B5),
-                                            fontSize = 12.sp
+                                            color = textSecondary,
+                                            fontSize = 11.5.sp
                                         )
                                         Text(
                                             text = if (selectedTimingIsNow) "Now" else scheduledDateTimeText.ifBlank { "Select date & time" },
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            fontSize = 15.sp
+                                            color = textPrimary,
+                                            fontSize = 14.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
 
                                     Icon(
                                         imageVector = Icons.Default.ChevronRight,
                                         contentDescription = "Edit time",
-                                        tint = Color(0xFFA0A6B5),
+                                        tint = textSecondary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -799,8 +917,8 @@ fun CityToCityPassengerFlow(
                             Surface(
                                 onClick = { showCommentsDialog = true },
                                 shape = RoundedCornerShape(16.dp),
-                                color = Color(0xFF1D2027),
-                                border = BorderStroke(1.dp, Color(0xFF2C303B)),
+                                color = cardBg,
+                                border = BorderStroke(1.dp, borderDefault),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("city_comments_row")
@@ -808,31 +926,31 @@ fun CityToCityPassengerFlow(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                                        .padding(horizontal = 14.dp, vertical = 13.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
                                         imageVector = Icons.Outlined.ChatBubbleOutline,
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = textPrimary,
                                         modifier = Modifier.size(22.dp)
                                     )
 
-                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Comments",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFFA0A6B5),
-                                            fontSize = 12.sp
+                                            color = textSecondary,
+                                            fontSize = 11.5.sp
                                         )
                                         Text(
                                             text = comments.ifBlank { "Add comments for driver (optional)" },
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = if (comments.isNotBlank()) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (comments.isNotBlank()) Color.White else Color(0xFFA0A6B5),
-                                            fontSize = 14.sp,
+                                            color = if (comments.isNotBlank()) textPrimary else textSecondary,
+                                            fontSize = 13.5.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -841,7 +959,7 @@ fun CityToCityPassengerFlow(
                                     Icon(
                                         imageVector = Icons.Default.ChevronRight,
                                         contentDescription = "Edit comments",
-                                        tint = Color(0xFFA0A6B5),
+                                        tint = textSecondary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -853,7 +971,7 @@ fun CityToCityPassengerFlow(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(52.dp),
+                                    .height(50.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
@@ -861,10 +979,10 @@ fun CityToCityPassengerFlow(
                                 Surface(
                                     onClick = onPaymentMethodClick,
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color(0xFF22252C),
-                                    border = BorderStroke(1.dp, Color(0xFF323642)),
+                                    color = cardBg,
+                                    border = BorderStroke(1.dp, borderDefault),
                                     modifier = Modifier
-                                        .size(52.dp)
+                                        .size(50.dp)
                                         .testTag("city_payment_btn")
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
@@ -872,20 +990,20 @@ fun CityToCityPassengerFlow(
                                         Surface(
                                             shape = RoundedCornerShape(3.dp),
                                             color = Color(0xFF4CAF50),
-                                            modifier = Modifier.size(28.dp, 18.dp)
+                                            modifier = Modifier.size(26.dp, 16.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Surface(
                                                     shape = CircleShape,
                                                     color = Color(0xFF2E7D32),
-                                                    modifier = Modifier.size(8.dp)
+                                                    modifier = Modifier.size(7.dp)
                                                 ) {}
                                             }
                                         }
                                     }
                                 }
 
-                                // Unified Brand Fuchsia "Find a driver" Button
+                                // Unified Brand "Find a driver" Button
                                 Button(
                                     onClick = onFindDriverClick,
                                     colors = ButtonDefaults.buttonColors(
@@ -903,7 +1021,7 @@ fun CityToCityPassengerFlow(
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = Color.White,
-                                        fontSize = 17.sp
+                                        fontSize = 16.sp
                                     )
                                 }
                             }
@@ -912,6 +1030,13 @@ fun CityToCityPassengerFlow(
                 }
             }
         }
+    }
+
+    // Sheet 0: Available Scheduled Departures from Captains
+    if (showAvailableDeparturesSheet) {
+        PassengerScheduledDeparturesSheet(
+            onDismiss = { showAvailableDeparturesSheet = false }
+        )
     }
 
     // Dialog 1: Date & Time Picker
@@ -1390,5 +1515,1032 @@ fun CityParcelDeliveryGraphic(modifier: Modifier = Modifier) {
         val wheelY = carBottom - carH * 0.04f
         drawCircle(Color(0xFF212121), radius = wheelRadius, center = Offset(carLeft + carW * 0.30f, wheelY))
         drawCircle(Color(0xFF212121), radius = wheelRadius, center = Offset(carLeft + carW * 0.76f, wheelY))
+    }
+}
+
+/**
+ * Bottom Sheet for Passengers to browse and book scheduled departures posted by drivers
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PassengerScheduledDeparturesSheet(
+    onDismiss: () -> Unit,
+    initialFromCity: String = "Islamabad",
+    initialToCity: String = "Lahore"
+) {
+    val isDark = MaterialTheme.drigoColors.isDark
+    val sheetBg = if (isDark) Color(0xFF14161C) else MaterialTheme.colorScheme.surface
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = sheetBg,
+        dragHandle = null,
+        modifier = Modifier.fillMaxHeight(0.96f)
+    ) {
+        CityToCityPassengerDeparturesContent(
+            onBackClick = onDismiss,
+            onSosClick = { },
+            initialFromCity = initialFromCity,
+            initialToCity = initialToCity,
+            isSheetMode = true,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LegacyPassengerScheduledDeparturesSheet(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val repo = remember { FirebaseRepository.getInstance(context) }
+    val scope = rememberCoroutineScope()
+    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList())
+
+    val isDark = MaterialTheme.drigoColors.isDark
+    val sheetBg = if (isDark) Color(0xFF14161C) else MaterialTheme.colorScheme.surface
+    val cardBg = if (isDark) Color(0xFF1C1F28) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    val borderCol = if (isDark) Color(0xFF2C303B) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+    val textPrimary = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+    val textSecondary = if (isDark) Color(0xFFA0A6B5) else MaterialTheme.colorScheme.onSurfaceVariant
+    val searchBg = if (isDark) Color(0xFF1E222D) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+
+    var selectedDepartureForBooking by remember { mutableStateOf<PlannedDeparture?>(null) }
+    var selectedDepartureForOffer by remember { mutableStateOf<PlannedDeparture?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredDepartures = remember(allDepartures, searchQuery) {
+        allDepartures.filter { dep ->
+            dep.status.equals("ACTIVE", ignoreCase = true) &&
+                    (searchQuery.isBlank() ||
+                            dep.corridorName.contains(searchQuery, ignoreCase = true) ||
+                            dep.pickupCity.contains(searchQuery, ignoreCase = true) ||
+                            dep.dropoffCity.contains(searchQuery, ignoreCase = true) ||
+                            dep.pickupHub.contains(searchQuery, ignoreCase = true) ||
+                            dep.dropoffHub.contains(searchQuery, ignoreCase = true) ||
+                            dep.driverName.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = sheetBg,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .background(Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                )
+            }
+        },
+        modifier = Modifier.fillMaxHeight(0.92f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
+                .navigationBarsPadding()
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Scheduled Departures",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = textPrimary,
+                        fontSize = 20.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Book seat, full car, or make fare offer to Captains",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = textSecondary,
+                        fontSize = 11.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Surface(
+                    onClick = onDismiss,
+                    shape = CircleShape,
+                    color = if (isDark) Color(0xFF252834) else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = textPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search city, hub, corridor...", color = textSecondary, fontSize = 13.sp) },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = textSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = textPrimary, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = searchBg,
+                    unfocusedContainerColor = searchBg,
+                    focusedBorderColor = InDriveLimeGreen,
+                    unfocusedBorderColor = borderCol,
+                    focusedTextColor = textPrimary,
+                    unfocusedTextColor = textPrimary
+                ),
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            )
+
+            if (filteredDepartures.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DirectionsCar,
+                            contentDescription = null,
+                            tint = textSecondary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "No scheduled departures found",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = textPrimary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Captains frequently post new trips. You can also request an instant ride in City to City.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(filteredDepartures, key = { it.id }) { dep ->
+                        PassengerDepartureCard(
+                            departure = dep,
+                            onBookClick = { selectedDepartureForBooking = dep },
+                            onOfferClick = { selectedDepartureForOffer = dep }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // Booking Dialog for selected departure
+    if (selectedDepartureForBooking != null) {
+        val dep = selectedDepartureForBooking!!
+        var isFullCarBuyout by remember { mutableStateOf(false) }
+        var seatsToBook by remember { mutableIntStateOf(1) }
+        var passengerName by remember { mutableStateOf("") }
+        var passengerPhone by remember { mutableStateOf("") }
+        var passengerNote by remember { mutableStateOf("") }
+        var isSubmitting by remember { mutableStateOf(false) }
+
+        val remainingSeats = (dep.totalSeats - dep.bookedSeatsCount).coerceAtLeast(1)
+        val calculatedFare = if (isFullCarBuyout) {
+            dep.fullCarFare
+        } else {
+            dep.farePerSeat * seatsToBook
+        }
+
+        val dialogBg = if (isDark) Color(0xFF1E212B) else MaterialTheme.colorScheme.surface
+        val dialogCardBg = if (isDark) Color(0xFF14161C) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+
+        Dialog(onDismissRequest = { if (!isSubmitting) selectedDepartureForBooking = null }) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = dialogBg,
+                border = BorderStroke(1.dp, borderCol),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 14.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState())
+                        .imePadding(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Book Scheduled Ride",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${dep.pickupCity} ➔ ${dep.dropoffCity}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = InDriveLimeGreen,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(onClick = { if (!isSubmitting) selectedDepartureForBooking = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = textPrimary)
+                        }
+                    }
+
+                    // Captain & Trip Info
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = dialogCardBg,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF2979FF), modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Captain: ${dep.driverName} (${dep.driverRating} ★)",
+                                    fontSize = 13.sp,
+                                    color = textPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = textSecondary, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "${dep.driverVehicle} • ${dep.driverPlateNumber}",
+                                    fontSize = 12.sp,
+                                    color = textSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AccessTime, contentDescription = null, tint = InDriveLimeGreen, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "${dep.departureDateText} at ${dep.departureTimeText}",
+                                    fontSize = 12.5.sp,
+                                    color = InDriveLimeGreen,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Text(
+                                text = "Pickup: ${dep.pickupHub} • Drop: ${dep.dropoffHub}",
+                                fontSize = 11.5.sp,
+                                color = textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // Booking Type: Seat vs Whole Car
+                    if (dep.allowFullCarBuyout) {
+                        Text(text = "Choose Booking Mode", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = textPrimary)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                onClick = { isFullCarBuyout = false },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (!isFullCarBuyout) InDriveLimeGreen else if (isDark) Color(0xFF252834) else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.weight(1f).height(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Per Seat (PKR ${dep.farePerSeat})",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (!isFullCarBuyout) Color.Black else textPrimary
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                onClick = { isFullCarBuyout = true },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isFullCarBuyout) InDriveLimeGreen else if (isDark) Color(0xFF252834) else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.weight(1f).height(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Full Car (PKR ${dep.fullCarFare})",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isFullCarBuyout) Color.Black else textPrimary
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Number of seats selector if not full car
+                    if (!isFullCarBuyout) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(text = "Number of Seats:", fontSize = 13.sp, color = textPrimary)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                (1..remainingSeats.coerceAtMost(4)).forEach { num ->
+                                    Surface(
+                                        onClick = { seatsToBook = num },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (seatsToBook == num) InDriveLimeGreen else if (isDark) Color(0xFF252834) else MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.padding(start = 6.dp).size(34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = "$num",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (seatsToBook == num) Color.Black else textPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Passenger Details Input
+                    OutlinedTextField(
+                        value = passengerName,
+                        onValueChange = { passengerName = it },
+                        label = { Text("Your Name", fontSize = 12.sp) },
+                        placeholder = { Text("e.g. Usman Ali") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = dialogCardBg,
+                            unfocusedContainerColor = dialogCardBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = passengerPhone,
+                        onValueChange = { passengerPhone = it },
+                        label = { Text("Your Phone Number", fontSize = 12.sp) },
+                        placeholder = { Text("0300-1234567") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = dialogCardBg,
+                            unfocusedContainerColor = dialogCardBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = passengerNote,
+                        onValueChange = { passengerNote = it },
+                        label = { Text("Note/Luggage Info (Optional)", fontSize = 12.sp) },
+                        placeholder = { Text("e.g. 1 medium suitcase") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = dialogCardBg,
+                            unfocusedContainerColor = dialogCardBg,
+                            focusedTextColor = textPrimary,
+                            unfocusedTextColor = textPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Total Fare Summary
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(dialogCardBg, RoundedCornerShape(10.dp))
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "Total Payable:", fontSize = 13.sp, color = textSecondary)
+                        Text(
+                            text = "PKR ${"%,d".format(calculatedFare)}",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = InDriveLimeGreen
+                        )
+                    }
+
+                    // Confirm Booking Button
+                    Button(
+                        onClick = {
+                            if (passengerName.isBlank() || passengerPhone.isBlank()) {
+                                Toast.makeText(context, "Please enter your name and phone number", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            isSubmitting = true
+                            scope.launch {
+                                val result = repo.bookPlannedDepartureSeat(
+                                    departureId = dep.id,
+                                    passengerId = "pass_${System.currentTimeMillis().toString().takeLast(6)}",
+                                    passengerName = passengerName.trim(),
+                                    passengerPhone = passengerPhone.trim(),
+                                    seatsBooked = if (isFullCarBuyout) dep.totalSeats else seatsToBook,
+                                    isFullCar = isFullCarBuyout,
+                                    totalFarePkr = calculatedFare
+                                )
+                                isSubmitting = false
+                                if (result.isSuccess) {
+                                    Toast.makeText(context, "Ride booked successfully! Captain notified.", Toast.LENGTH_LONG).show()
+                                    selectedDepartureForBooking = null
+                                    onDismiss()
+                                } else {
+                                    Toast.makeText(context, "Could not complete booking. Please try again.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        enabled = !isSubmitting,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = InDriveLimeGreen,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        if (isSubmitting) {
+                            CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text(text = "Confirm & Book Ride", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fare Offer Dialog for selected departure
+    if (selectedDepartureForOffer != null) {
+        PassengerMakeOfferDialog(
+            departure = selectedDepartureForOffer!!,
+            onDismiss = { selectedDepartureForOffer = null }
+        )
+    }
+}
+
+@Composable
+private fun PassengerMakeOfferDialog(
+    departure: PlannedDeparture,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val repo = remember { FirebaseRepository.getInstance(context) }
+    val scope = rememberCoroutineScope()
+    val isDark = MaterialTheme.drigoColors.isDark
+
+    var offeredFare by remember { mutableIntStateOf(departure.farePerSeat) }
+    var requestedSeats by remember { mutableIntStateOf(1) }
+    var passengerName by remember { mutableStateOf("") }
+    var passengerPhone by remember { mutableStateOf("") }
+    var pickupPoint by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    val remainingSeats = (departure.totalSeats - departure.bookedSeatsCount).coerceAtLeast(1)
+    val diff = offeredFare - departure.farePerSeat
+
+    val dialogBg = if (isDark) Color(0xFF1E212B) else MaterialTheme.colorScheme.surface
+    val cardBg = if (isDark) Color(0xFF14161C) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    val textPrimary = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+    val textSecondary = if (isDark) Color(0xFFA0A6B5) else MaterialTheme.colorScheme.onSurfaceVariant
+    val borderColor = if (isDark) Color(0xFF353945) else MaterialTheme.colorScheme.outlineVariant
+
+    Dialog(onDismissRequest = { if (!isSubmitting) onDismiss() }) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = dialogBg,
+            border = BorderStroke(1.dp, borderColor),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+                    .imePadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Make Fare Offer",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${departure.pickupCity} ➔ ${departure.dropoffCity}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = InDriveLimeGreen,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(onClick = { if (!isSubmitting) onDismiss() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = textPrimary)
+                    }
+                }
+
+                // Captain details card
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = cardBg,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Captain ${departure.driverName} • ${departure.driverVehicle}",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Standard asking fare: PKR ${"%,d".format(departure.farePerSeat)} per seat",
+                            fontSize = 11.5.sp,
+                            color = textSecondary
+                        )
+                    }
+                }
+
+                // Offered Fare Stepper
+                Text(
+                    text = "Your Offered Fare Per Seat",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = textPrimary
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = cardBg,
+                    border = BorderStroke(1.dp, borderColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Surface(
+                                onClick = { offeredFare = (offeredFare - 100).coerceAtLeast(100) },
+                                shape = CircleShape,
+                                color = if (isDark) Color(0xFF2C303B) else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(text = "—", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = textPrimary)
+                                }
+                            }
+
+                            Text(
+                                text = "PKR ${"%,d".format(offeredFare)}",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = textPrimary,
+                                fontSize = 20.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Surface(
+                                onClick = { offeredFare += 100 },
+                                shape = CircleShape,
+                                color = if (isDark) Color(0xFF2C303B) else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Add, contentDescription = "Add", tint = textPrimary, modifier = Modifier.size(20.dp))
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Difference tag
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = when {
+                                diff < 0 -> Color(0xFFFFB300).copy(alpha = 0.15f)
+                                diff > 0 -> InDriveLimeGreen.copy(alpha = 0.15f)
+                                else -> Color(0xFF2979FF).copy(alpha = 0.15f)
+                            }
+                        ) {
+                            Text(
+                                text = when {
+                                    diff < 0 -> "PKR ${"%,d".format(-diff)} below asking fare"
+                                    diff > 0 -> "PKR ${"%,d".format(diff)} above asking fare"
+                                    else -> "At standard asking fare"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    diff < 0 -> Color(0xFFFFB300)
+                                    diff > 0 -> InDriveLimeGreen
+                                    else -> Color(0xFF2979FF)
+                                },
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Seats needed
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "Number of Seats:", fontSize = 13.sp, color = textPrimary, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        (1..remainingSeats.coerceAtMost(4)).forEach { num ->
+                            Surface(
+                                onClick = { requestedSeats = num },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (requestedSeats == num) InDriveLimeGreen else if (isDark) Color(0xFF252834) else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.padding(start = 6.dp).size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "$num",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (requestedSeats == num) Color.Black else textPrimary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Passenger Name & Phone
+                OutlinedTextField(
+                    value = passengerName,
+                    onValueChange = { passengerName = it },
+                    label = { Text("Your Name", fontSize = 12.sp) },
+                    placeholder = { Text("e.g. Tariq Mehmood") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = cardBg,
+                        unfocusedContainerColor = cardBg,
+                        focusedTextColor = textPrimary,
+                        unfocusedTextColor = textPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = passengerPhone,
+                    onValueChange = { passengerPhone = it },
+                    label = { Text("Phone Number", fontSize = 12.sp) },
+                    placeholder = { Text("0300-1234567") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = cardBg,
+                        unfocusedContainerColor = cardBg,
+                        focusedTextColor = textPrimary,
+                        unfocusedTextColor = textPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = pickupPoint,
+                    onValueChange = { pickupPoint = it },
+                    label = { Text("Preferred Pickup Point (Optional)", fontSize = 12.sp) },
+                    placeholder = { Text("e.g. Near Thokar Niaz Baig") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = cardBg,
+                        unfocusedContainerColor = cardBg,
+                        focusedTextColor = textPrimary,
+                        unfocusedTextColor = textPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Total Calculation
+                val totalOffered = offeredFare * requestedSeats
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(cardBg, RoundedCornerShape(10.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "Total Offered Fare:", fontSize = 13.sp, color = textSecondary)
+                    Text(
+                        text = "PKR ${"%,d".format(totalOffered)}",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = InDriveLimeGreen
+                    )
+                }
+
+                // Submit Button
+                Button(
+                    onClick = {
+                        if (passengerName.isBlank() || passengerPhone.isBlank()) {
+                            Toast.makeText(context, "Please enter your name and phone number", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        isSubmitting = true
+                        scope.launch {
+                            val result = repo.submitDepartureOffer(
+                                departureId = departure.id,
+                                passengerId = "pass_${System.currentTimeMillis().toString().takeLast(6)}",
+                                passengerName = passengerName.trim(),
+                                passengerPhone = passengerPhone.trim(),
+                                requestedSeats = requestedSeats,
+                                offeredFare = offeredFare,
+                                standardAsking = departure.farePerSeat,
+                                pickupPoint = pickupPoint.trim(),
+                                luggageDetails = ""
+                            )
+                            isSubmitting = false
+                            if (result.isSuccess) {
+                                Toast.makeText(context, "Offer of PKR $offeredFare sent to Captain!", Toast.LENGTH_LONG).show()
+                                onDismiss()
+                            } else {
+                                Toast.makeText(context, "Could not send offer. Please try again.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    enabled = !isSubmitting,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = InDriveLimeGreen,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text(text = "Send Offer to Captain", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PassengerDepartureCard(
+    departure: PlannedDeparture,
+    onBookClick: () -> Unit,
+    onOfferClick: () -> Unit
+) {
+    val isDark = MaterialTheme.drigoColors.isDark
+    val cardBg = if (isDark) Color(0xFF1C1F28) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    val borderCol = if (isDark) Color(0xFF2C303B) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+    val textPrimary = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+    val textSecondary = if (isDark) Color(0xFFA0A6B5) else MaterialTheme.colorScheme.onSurfaceVariant
+
+    val remainingSeats = (departure.totalSeats - departure.bookedSeatsCount).coerceAtLeast(0)
+    val isFull = remainingSeats <= 0
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = cardBg,
+        border = BorderStroke(1.dp, borderCol),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Corridor & Departure Time
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f, fill = false)) {
+                    Text(
+                        text = departure.pickupCity,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp,
+                        color = textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowForward,
+                        contentDescription = null,
+                        tint = InDriveLimeGreen,
+                        modifier = Modifier.padding(horizontal = 4.dp).size(15.dp)
+                    )
+                    Text(
+                        text = departure.dropoffCity,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp,
+                        color = textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = InDriveLimeGreen.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = "${departure.departureDateText} • ${departure.departureTimeText}",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = InDriveLimeGreen,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // Hubs & Captain
+            Text(
+                text = "📍 ${departure.pickupHub} ➔ ${departure.dropoffHub}",
+                fontSize = 12.sp,
+                color = textSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Captain ${departure.driverName} • ${departure.driverVehicle}",
+                    fontSize = 11.5.sp,
+                    color = textSecondary,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "$remainingSeats seats left",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (remainingSeats > 1) InDriveLimeGreen else Color(0xFFFFB300)
+                )
+            }
+
+            HorizontalDivider(color = borderCol.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+            // Pricing & Booking Action
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "PKR ${"%,d".format(departure.farePerSeat)}",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.5.sp,
+                        color = textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (departure.allowFullCarBuyout) "or PKR ${"%,d".format(departure.fullCarFare)} full car" else "per seat",
+                        fontSize = 10.5.sp,
+                        color = textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onOfferClick,
+                        enabled = !isFull,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = InDriveLimeGreen
+                        ),
+                        border = BorderStroke(1.dp, InDriveLimeGreen),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text(
+                            text = "Offer",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = onBookClick,
+                        enabled = !isFull,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isFull) Color(0xFF374151) else InDriveLimeGreen,
+                            contentColor = if (isFull) Color(0xFF9CA3AF) else Color.Black
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text(
+                            text = if (isFull) "Full" else "Book",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
     }
 }

@@ -1063,157 +1063,63 @@ private fun createDrigoLocationMarkerDrawable(context: Context): BitmapDrawable 
     return BitmapDrawable(context.resources, bitmap)
 }
 
-/**
- * Creates distinct Destination Marker (Red/Crimson pin with clear flag icon)
- */
-private fun createDestinationMarkerDrawable(context: Context): BitmapDrawable {
+private fun createLetterMarkerDrawable(context: Context, letter: String, circleColor: Int): BitmapDrawable {
     val density = context.resources.displayMetrics.density
-    val widthPx = (38 * density).toInt().coerceAtLeast(1)
-    val heightPx = (50 * density).toInt().coerceAtLeast(1)
-    val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+    val sizePx = (36 * density).toInt().coerceAtLeast(1)
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
-    val cx = widthPx / 2f
-    val pinHeadRadius = 14f * density
-    val pinHeadCy = 16f * density
+    val cx = sizePx / 2f
+    val cy = sizePx / 2f
+    val radius = 15f * density
 
     // Ground shadow
     val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(90, 0, 0, 0)
+        color = android.graphics.Color.argb(80, 0, 0, 0)
         style = Paint.Style.FILL
     }
-    canvas.drawOval(cx - 7f * density, heightPx - 5f * density, cx + 7f * density, heightPx - 1f * density, shadowPaint)
+    canvas.drawCircle(cx, cy + 2f * density, radius, shadowPaint)
 
-    // Pin stem triangle down to bottom
-    val path = android.graphics.Path().apply {
-        moveTo(cx - 10f * density, pinHeadCy + 4f * density)
-        lineTo(cx, heightPx - 4f * density)
-        lineTo(cx + 10f * density, pinHeadCy + 4f * density)
-        close()
-    }
-    val crimsonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#E53935") // Crimson Red
+    // Circle background
+    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = circleColor
         style = Paint.Style.FILL
     }
-    canvas.drawPath(path, crimsonPaint)
-
-    // Pin head circle
-    canvas.drawCircle(cx, pinHeadCy, pinHeadRadius, crimsonPaint)
+    canvas.drawCircle(cx, cy, radius, bgPaint)
 
     // White border ring
-    val whiteRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
         style = Paint.Style.STROKE
         strokeWidth = 2.5f * density
     }
-    canvas.drawCircle(cx, pinHeadCy, pinHeadRadius - 1.2f * density, whiteRing)
+    canvas.drawCircle(cx, cy, radius - 1.2f * density, ringPaint)
 
-    // White circular interior background
-    val whiteInner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    // Letter Text
+    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
-        style = Paint.Style.FILL
+        textSize = 17f * density
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        textAlign = Paint.Align.CENTER
     }
-    canvas.drawCircle(cx, pinHeadCy, 9.5f * density, whiteInner)
-
-    // Draw Flag Icon inside head:
-    // Flagpole
-    val polePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#B71C1C")
-        strokeWidth = 2f * density
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-    }
-    val poleX = cx - 3.5f * density
-    val poleTop = pinHeadCy - 6.5f * density
-    val poleBottom = pinHeadCy + 6.5f * density
-    canvas.drawLine(poleX, poleTop, poleX, poleBottom, polePaint)
-
-    // Flag banner (triangle)
-    val flagPath = android.graphics.Path().apply {
-        moveTo(poleX, poleTop)
-        lineTo(poleX + 7.5f * density, pinHeadCy - 3.2f * density)
-        lineTo(poleX, pinHeadCy)
-        close()
-    }
-    val flagPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#E53935")
-        style = Paint.Style.FILL
-    }
-    canvas.drawPath(flagPath, flagPaint)
+    val textY = cy - ((textPaint.descent() + textPaint.ascent()) / 2)
+    canvas.drawText(letter, cx, textY, textPaint)
 
     return BitmapDrawable(context.resources, bitmap)
 }
 
 /**
- * Creates distinct Pickup Marker (Emerald Green pin with clear person/pickup icon)
+ * Creates distinct Destination Marker B (Green circle badge with bold "B")
+ */
+private fun createDestinationMarkerDrawable(context: Context): BitmapDrawable {
+    return createLetterMarkerDrawable(context, "B", android.graphics.Color.parseColor("#00E676"))
+}
+
+/**
+ * Creates distinct Pickup Marker A (Blue circle badge with bold "A")
  */
 private fun createPickupMarkerDrawable(context: Context): BitmapDrawable {
-    val density = context.resources.displayMetrics.density
-    val widthPx = (38 * density).toInt().coerceAtLeast(1)
-    val heightPx = (50 * density).toInt().coerceAtLeast(1)
-    val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-
-    val cx = widthPx / 2f
-    val pinHeadRadius = 14f * density
-    val pinHeadCy = 16f * density
-
-    // Ground shadow
-    val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(90, 0, 0, 0)
-        style = Paint.Style.FILL
-    }
-    canvas.drawOval(cx - 7f * density, heightPx - 5f * density, cx + 7f * density, heightPx - 1f * density, shadowPaint)
-
-    // Pin stem triangle down to bottom
-    val path = android.graphics.Path().apply {
-        moveTo(cx - 10f * density, pinHeadCy + 4f * density)
-        lineTo(cx, heightPx - 4f * density)
-        lineTo(cx + 10f * density, pinHeadCy + 4f * density)
-        close()
-    }
-    val greenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#2E7D32") // Forest Green
-        style = Paint.Style.FILL
-    }
-    canvas.drawPath(path, greenPaint)
-
-    // Pin head circle
-    canvas.drawCircle(cx, pinHeadCy, pinHeadRadius, greenPaint)
-
-    // White border ring
-    val whiteRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
-        style = Paint.Style.STROKE
-        strokeWidth = 2.5f * density
-    }
-    canvas.drawCircle(cx, pinHeadCy, pinHeadRadius - 1.2f * density, whiteRing)
-
-    // White circular interior background
-    val whiteInner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
-        style = Paint.Style.FILL
-    }
-    canvas.drawCircle(cx, pinHeadCy, 9.5f * density, whiteInner)
-
-    // Person / Passenger Icon inside
-    val personPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.parseColor("#2E7D32")
-        style = Paint.Style.FILL
-    }
-    // Head circle
-    canvas.drawCircle(cx, pinHeadCy - 3f * density, 2.8f * density, personPaint)
-
-    // Body arc
-    val bodyRect = android.graphics.RectF(
-        cx - 5f * density,
-        pinHeadCy + 0.5f * density,
-        cx + 5f * density,
-        pinHeadCy + 7f * density
-    )
-    canvas.drawArc(bodyRect, 180f, 180f, true, personPaint)
-
-    return BitmapDrawable(context.resources, bitmap)
+    return createLetterMarkerDrawable(context, "A", android.graphics.Color.parseColor("#2979FF"))
 }
 
 /**

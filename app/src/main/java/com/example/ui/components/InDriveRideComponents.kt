@@ -441,7 +441,7 @@ fun InDriveFixedBottomBar(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -449,7 +449,7 @@ fun InDriveFixedBottomBar(
                         text = "Auto-accept offer of PKR $currentFare",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -462,8 +462,8 @@ fun InDriveFixedBottomBar(
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = InDriveLimeGreen,
-                        uncheckedThumbColor = Color(0xFFA0A6B5),
-                        uncheckedTrackColor = Color(0xFF333742)
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
                     modifier = Modifier.testTag("auto_accept_switch")
                 )
@@ -483,9 +483,10 @@ fun InDriveFixedBottomBar(
                 Surface(
                     onClick = onPaymentMethodClick,
                     shape = RoundedCornerShape(10.dp),
-                    color = Color.Transparent,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(44.dp)
                         .testTag("payment_method_btn")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -532,13 +533,13 @@ fun InDriveFixedBottomBar(
                 IconButton(
                     onClick = onOptionsClick,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(44.dp)
                         .testTag("filter_options_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Tune,
                         contentDescription = "Preferences",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(22.dp)
                     )
                 }

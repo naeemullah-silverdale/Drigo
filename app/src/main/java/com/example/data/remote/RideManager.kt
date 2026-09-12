@@ -9,30 +9,25 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 /**
- * RideManager singleton enforcing a unified, reactive state model for active trips.
- * Both Passenger and Driver modes observe the same 'active_trips/{tripId}' document in Firestore
- * and Realtime DB to ensure 100% synchronous state transitions across both apps.
+ * RideManager singleton acting as a reactive mirror/cache of the authoritative Firebase
+ * ride record at `/ride_requests/{requestId}` and `/active_trips/{requestId}`.
+ * Local state caches and renders Firebase data without acting as an independent source of truth.
  */
 object RideManager {
     private const val TAG = "RideManager"
+    private const val RIDE_REQUESTS_COLLECTION = "ride_requests"
     private const val ACTIVE_TRIPS_COLLECTION = "active_trips"
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _activeTrip = MutableStateFlow<PassengerOrder?>(null)
     val activeTrip: StateFlow<PassengerOrder?> = _activeTrip.asStateFlow()
 
-    private var activeTripId: String? = null
+    private var activeObservedId: String? = null
     private var firestoreRegistration: ListenerRegistration? = null
     private var rtdbListener: ValueEventListener? = null
     private var rtdbRef: com.google.firebase.database.DatabaseReference? = null
@@ -59,66 +54,60 @@ object RideManager {
     }
 
     /**
-     * Start observing active_trips/{tripId} document in Firestore and Realtime Database.
-     * Both Passenger and Driver UIs observe this exact same reactive flow.
+     * Start observing the authoritative ride request at `/ride_requests/{requestId}`
+     * and mirror at `/active_trips/{requestId}`.
      */
-    fun observeActiveTrip(tripId: String) {
-        val cleanTripId = tripId.trim()
-        if (cleanTripId.isBlank()) return
-        if (activeTripId == cleanTripId && firestoreRegistration != null) {
+    fun observeActiveTrip(requestId: String) {
+        val cleanId = requestId.trim()
+        if (cleanId.isBlank()) return
+        if (activeObservedId == cleanId && rtdbListener != null) {
             return
         }
 
         stopObserving()
-        activeTripId = cleanTripId
+        activeObservedId = cleanId
 
-        // 1. Listen to Firestore active_trips/{tripId}
-        val firestore = getFirestore()
-        if (firestore != null) {
+        val db = getRtdb()
+        if (db != null) {
             try {
-                firestoreRegistration = firestore.collection(ACTIVE_TRIPS_COLLECTION)
-                    .document(cleanTripId)
-                    .addSnapshotListener { snapshot, error ->
-                        if (error != null) {
-                            Log.w(TAG, "Firestore active_trips listener error: ${error.message}")
-                            return@addSnapshotListener
-                        }
-                        if (snapshot != null && snapshot.exists()) {
-                            val order = parseFirestoreTrip(snapshot)
-                            if (order != null) {
-                                Log.d(TAG, "Reactive active_trips update from Firestore: id=${order.id}, status=${order.status}")
-                                _activeTrip.value = order
-                            }
-                        }
-                    }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to attach Firestore snapshot listener: ${e.message}")
-            }
-        }
-
-        // 2. Listen to Realtime Database active_trips/{tripId} for dual fallback/instant sync
-        val rtdb = getRtdb()
-        if (rtdb != null) {
-            try {
-                rtdbRef = rtdb.getReference(ACTIVE_TRIPS_COLLECTION).child(cleanTripId)
+                rtdbRef = db.getReference(RIDE_REQUESTS_COLLECTION).child(cleanId)
                 rtdbListener = object : ValueEventListener {
                     override fun onDataChange(snapshot: DataSnapshot) {
                         if (snapshot.exists()) {
                             val order = parseRtdbTrip(snapshot)
                             if (order != null) {
-                                Log.d(TAG, "Reactive active_trips update from RTDB: id=${order.id}, status=${order.status}")
+                                Log.d(TAG, "Authoritative ride update: id=${order.id}, reqId=${order.requestId}, status=${order.status}")
                                 _activeTrip.value = order
                             }
                         }
                     }
 
                     override fun onCancelled(error: DatabaseError) {
-                        Log.w(TAG, "RTDB active_trips listener cancelled: ${error.message}")
+                        Log.w(TAG, "RTDB ride listener cancelled: ${error.message}")
                     }
                 }
                 rtdbRef?.addValueEventListener(rtdbListener!!)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to attach RTDB listener: ${e.message}")
+            }
+        }
+
+        val firestore = getFirestore()
+        if (firestore != null) {
+            try {
+                firestoreRegistration = firestore.collection(RIDE_REQUESTS_COLLECTION)
+                    .document(cleanId)
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null || snapshot == null || !snapshot.exists()) {
+                            return@addSnapshotListener
+                        }
+                        val order = parseFirestoreTrip(snapshot)
+                        if (order != null) {
+                            _activeTrip.value = order
+                        }
+                    }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to attach Firestore snapshot listener: ${e.message}")
             }
         }
     }
@@ -135,87 +124,23 @@ object RideManager {
         }
         rtdbListener = null
         rtdbRef = null
-        activeTripId = null
+        activeObservedId = null
     }
 
     /**
-     * Save/Publish a trip to active_trips/{tripId} in Firestore and Realtime Database.
+     * Cache and mirror an active trip locally and in Firebase.
      */
     suspend fun saveActiveTrip(order: PassengerOrder): Result<Unit> {
-        val tripId = order.id.ifBlank { order.requestId }
-        if (tripId.isBlank()) return Result.failure(IllegalArgumentException("Trip ID cannot be blank"))
+        val reqId = order.requestId.ifBlank { order.id }
+        if (reqId.isBlank()) return Result.failure(IllegalArgumentException("Request ID cannot be blank"))
 
         _activeTrip.value = order
-        observeActiveTrip(tripId)
-
-        val map = mapOf(
-            "id" to order.id,
-            "requestId" to order.requestId,
-            "passengerId" to order.passengerId,
-            "passengerName" to order.passengerName,
-            "passengerEmail" to order.passengerEmail,
-            "passengerPhone" to order.passengerPhone,
-            "pickupTitle" to order.pickupTitle,
-            "pickupSubtitle" to order.pickupSubtitle,
-            "pickupLat" to order.pickupLat,
-            "pickupLon" to order.pickupLon,
-            "destinationTitle" to order.destinationTitle,
-            "destinationSubtitle" to order.destinationSubtitle,
-            "destinationLat" to order.destinationLat,
-            "destinationLon" to order.destinationLon,
-            "distanceKm" to order.distanceKm,
-            "durationMinutes" to order.durationMinutes,
-            "rideCategory" to order.rideCategory,
-            "agreedFare" to order.agreedFare,
-            "paymentMethod" to order.paymentMethod,
-            "driverName" to order.driverName,
-            "driverPhone" to order.driverPhone,
-            "driverRating" to order.driverRating,
-            "driverTotalRides" to order.driverTotalRides,
-            "driverVehicleMake" to order.driverVehicleMake,
-            "driverVehicleModel" to order.driverVehicleModel,
-            "driverVehicleColor" to order.driverVehicleColor,
-            "driverPlateNumber" to order.driverPlateNumber,
-            "assignedDriverId" to order.assignedDriverId,
-            "status" to order.status.name,
-            "statusLabel" to order.status.label,
-            "etaMinutes" to order.etaMinutes,
-            "createdAt" to order.createdAt,
-            "updatedAt" to System.currentTimeMillis()
-        )
-
-        // Write to Firestore active_trips/{tripId}
-        val firestore = getFirestore()
-        if (firestore != null) {
-            try {
-                firestore.collection(ACTIVE_TRIPS_COLLECTION).document(tripId).set(map).await()
-                if (order.requestId.isNotBlank() && order.requestId != tripId) {
-                    firestore.collection(ACTIVE_TRIPS_COLLECTION).document(order.requestId).set(map).await()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error writing active_trips to Firestore: ${e.message}")
-            }
-        }
-
-        // Write to RTDB active_trips/{tripId}
-        val rtdb = getRtdb()
-        if (rtdb != null) {
-            try {
-                rtdb.getReference(ACTIVE_TRIPS_COLLECTION).child(tripId).setValue(map).await()
-                if (order.requestId.isNotBlank() && order.requestId != tripId) {
-                    rtdb.getReference(ACTIVE_TRIPS_COLLECTION).child(order.requestId).setValue(map).await()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error writing active_trips to RTDB: ${e.message}")
-            }
-        }
-
+        observeActiveTrip(reqId)
         return Result.success(Unit)
     }
 
     /**
-     * Update active trip status in active_trips/{tripId} across Firestore and Realtime Database.
-     * Both Passenger and Driver listeners observe this change instantly.
+     * Updates trip status locally and mirrors to authoritative path.
      */
     suspend fun updateTripStatus(
         orderId: String,
@@ -223,80 +148,46 @@ object RideManager {
         requestId: String = "",
         passengerId: String = "",
         driverId: String = "",
-        finalFare: Int? = null
+        finalFare: Int? = null,
+        tripDetails: PassengerOrder? = null
     ): Result<Unit> {
-        val tripId = orderId.ifBlank { requestId }
-        if (tripId.isBlank()) return Result.failure(IllegalArgumentException("Order ID cannot be blank"))
+        val reqId = requestId.ifBlank { orderId }
+        if (reqId.isBlank()) return Result.failure(IllegalArgumentException("Request ID cannot be blank"))
 
-        val now = System.currentTimeMillis()
-        val updates = mutableMapOf<String, Any>(
-            "status" to status.name,
-            "statusLabel" to status.label,
-            "updatedAt" to now
+        // Update local StateFlow mirror
+        val current = _activeTrip.value
+        val updated = (current ?: tripDetails)?.copy(
+            status = status,
+            agreedFare = finalFare ?: (current?.agreedFare ?: (tripDetails?.agreedFare ?: 0))
         )
-        if (finalFare != null && finalFare > 0) {
-            updates["agreedFare"] = finalFare
-        }
-        if (status == PassengerOrderStatus.COMPLETED) {
-            updates["completedAt"] = now
-        } else if (status == PassengerOrderStatus.CANCELLED) {
-            updates["cancelledAt"] = now
-        }
-
-        // Immediately update in-memory active trip state so local UI updates immediately
-        _activeTrip.value?.let { current ->
-            if (current.id == tripId || current.requestId == tripId || current.id == orderId || current.requestId == requestId) {
-                _activeTrip.value = current.copy(
-                    status = status,
-                    agreedFare = finalFare ?: current.agreedFare
-                )
-            }
-        }
-
-        // 1. Update Firestore active_trips/{tripId}
-        val firestore = getFirestore()
-        if (firestore != null) {
-            try {
-                firestore.collection(ACTIVE_TRIPS_COLLECTION).document(tripId).update(updates).await()
-                if (orderId.isNotBlank() && orderId != tripId) {
-                    firestore.collection(ACTIVE_TRIPS_COLLECTION).document(orderId).update(updates).await()
-                }
-                if (requestId.isNotBlank() && requestId != tripId) {
-                    firestore.collection(ACTIVE_TRIPS_COLLECTION).document(requestId).update(updates).await()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Firestore active_trips update status error: ${e.message}")
-            }
-        }
-
-        // 2. Update RTDB active_trips/{tripId}
-        val rtdb = getRtdb()
-        if (rtdb != null) {
-            try {
-                rtdb.getReference(ACTIVE_TRIPS_COLLECTION).child(tripId).updateChildren(updates).await()
-                if (orderId.isNotBlank() && orderId != tripId) {
-                    rtdb.getReference(ACTIVE_TRIPS_COLLECTION).child(orderId).updateChildren(updates).await()
-                }
-                if (requestId.isNotBlank() && requestId != tripId) {
-                    rtdb.getReference(ACTIVE_TRIPS_COLLECTION).child(requestId).updateChildren(updates).await()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "RTDB active_trips update status error: ${e.message}")
-            }
-        }
-
-        // Delayed cleanup of active_trips node so both Passenger and Driver apps process COMPLETED/CANCELLED event first
-        if (status == PassengerOrderStatus.COMPLETED || status == PassengerOrderStatus.CANCELLED) {
-            scope.launch {
-                try {
-                    kotlinx.coroutines.delay(5000L)
-                    firestore?.collection(ACTIVE_TRIPS_COLLECTION)?.document(tripId)?.delete()?.await()
-                    rtdb?.getReference(ACTIVE_TRIPS_COLLECTION)?.child(tripId)?.removeValue()?.await()
-                } catch (_: Exception) {}
-            }
+        if (updated != null) {
+            _activeTrip.value = updated
         }
 
         return Result.success(Unit)
+    }
+
+    /**
+     * Completes trip locally and updates StateFlow mirror.
+     */
+    suspend fun completeTrip(
+        orderId: String,
+        requestId: String = "",
+        passengerId: String = "",
+        driverId: String = "",
+        finalFare: Int? = null,
+        tripDetails: PassengerOrder? = null
+    ): Result<Unit> {
+        val res = updateTripStatus(
+            orderId = orderId,
+            status = PassengerOrderStatus.COMPLETED,
+            requestId = requestId,
+            passengerId = passengerId,
+            driverId = driverId,
+            finalFare = finalFare,
+            tripDetails = tripDetails
+        )
+        return res
     }
 
     /**
@@ -334,9 +225,9 @@ object RideManager {
                 distanceKm = snapshot.getDouble("distanceKm") ?: 0.0,
                 durationMinutes = (snapshot.getLong("durationMinutes") ?: 0L).toInt(),
                 rideCategory = snapshot.getString("rideCategory") ?: "Ride A/C",
-                agreedFare = (snapshot.getLong("agreedFare") ?: 0L).toInt(),
+                agreedFare = (snapshot.getLong("agreedFare") ?: (snapshot.getLong("assignedFare") ?: 0L)).toInt(),
                 paymentMethod = snapshot.getString("paymentMethod") ?: "Cash",
-                driverName = snapshot.getString("driverName") ?: "",
+                driverName = snapshot.getString("driverName") ?: (snapshot.getString("assignedDriverName") ?: ""),
                 driverPhone = snapshot.getString("driverPhone") ?: "",
                 driverRating = snapshot.getDouble("driverRating") ?: 5.0,
                 driverTotalRides = (snapshot.getLong("driverTotalRides") ?: 0L).toInt(),
@@ -344,7 +235,7 @@ object RideManager {
                 driverVehicleModel = snapshot.getString("driverVehicleModel") ?: "",
                 driverVehicleColor = snapshot.getString("driverVehicleColor") ?: "",
                 driverPlateNumber = snapshot.getString("driverPlateNumber") ?: "",
-                assignedDriverId = snapshot.getString("assignedDriverId") ?: "",
+                assignedDriverId = snapshot.getString("assignedDriverId") ?: (snapshot.getString("driverId") ?: ""),
                 status = status,
                 etaMinutes = (snapshot.getLong("etaMinutes") ?: 0L).toInt(),
                 createdAt = snapshot.getLong("createdAt") ?: System.currentTimeMillis()
@@ -384,9 +275,11 @@ object RideManager {
                     ?: snapshot.child("durationMinutes").getValue(Long::class.java)?.toInt() ?: 0,
                 rideCategory = snapshot.child("rideCategory").getValue(String::class.java) ?: "Ride A/C",
                 agreedFare = snapshot.child("agreedFare").getValue(Int::class.java)
-                    ?: snapshot.child("agreedFare").getValue(Long::class.java)?.toInt() ?: 0,
+                    ?: (snapshot.child("assignedFare").getValue(Int::class.java)
+                    ?: snapshot.child("agreedFare").getValue(Long::class.java)?.toInt() ?: (snapshot.child("assignedFare").getValue(Long::class.java)?.toInt() ?: 0)),
                 paymentMethod = snapshot.child("paymentMethod").getValue(String::class.java) ?: "Cash",
-                driverName = snapshot.child("driverName").getValue(String::class.java) ?: "",
+                driverName = snapshot.child("driverName").getValue(String::class.java)
+                    ?: (snapshot.child("assignedDriverName").getValue(String::class.java) ?: ""),
                 driverPhone = snapshot.child("driverPhone").getValue(String::class.java) ?: "",
                 driverRating = snapshot.child("driverRating").getValue(Double::class.java) ?: 5.0,
                 driverTotalRides = snapshot.child("driverTotalRides").getValue(Int::class.java)
@@ -395,7 +288,8 @@ object RideManager {
                 driverVehicleModel = snapshot.child("driverVehicleModel").getValue(String::class.java) ?: "",
                 driverVehicleColor = snapshot.child("driverVehicleColor").getValue(String::class.java) ?: "",
                 driverPlateNumber = snapshot.child("driverPlateNumber").getValue(String::class.java) ?: "",
-                assignedDriverId = snapshot.child("assignedDriverId").getValue(String::class.java) ?: "",
+                assignedDriverId = snapshot.child("assignedDriverId").getValue(String::class.java)
+                    ?: (snapshot.child("driverId").getValue(String::class.java) ?: ""),
                 status = status,
                 etaMinutes = snapshot.child("etaMinutes").getValue(Int::class.java)
                     ?: snapshot.child("etaMinutes").getValue(Long::class.java)?.toInt() ?: 0,
