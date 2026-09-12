@@ -79,6 +79,7 @@
 
 - **Active Branch:** `fix/driver-feed-radar-and-map-inspection`
 - **Recent Commit History:**
+  - `fix: replace ModalBottomSheet with non-modal Surface card overlay during ride request inspection so map surface remains 100% interactive for pan/zoom/tap gestures`
   - `fix: implement full-screen animated radar search view for online empty state, 3-marker map preview with A and B badges for ride request inspection, and inDrive requests feed`
   - `fix: guarantee COMPLETED status updates across active_trips, ride_requests, passenger_orders, users active_ride_request and active_driver_trip when driver completes ride`
   - `fix: enforce authoritative ride status synchronization across all 5 active records (/active_trips, /ride_requests, /passenger_orders, /users/{passengerId}/active_ride_request, /users/{driverId}/active_driver_trip), RideManager, and driver_trip_history across all lifecycle states`
@@ -493,21 +494,13 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
 
 ---
 
-### 📋 Verified Issue Analysis & Planned Fix (Awaiting User Command "apply the fix"):
-- **Issue Status**: **VERIFIED** — Confirmed that the current codebase needs the following enhancements to match inDrive (Attachments 1, 2, and 3):
-  1. **Attachment 1 — Full-screen Radar View**:
-     - Animated radar search canvas (concentric circles, rotating sweep beam, pulsing green blips, `"Hold on, orders will appear here soon..."`) when driver goes online with no active requests.
-  2. **Attachment 2 — Ride Requests Feed (ListView)**:
-     - ListView showing passenger requests with fare, distance, pickup, destination, and category badge.
-  3. **Attachment 3 — 3-Marker Map & Inspection View**:
-     - **Driver Location Marker**: Green circular badge with car glyph (`#CCFF00`).
-     - **Pickup Marker A**: Blue circular badge with letter **"A"** (`#2979FF`).
-     - **Destination Marker B**: Green circular badge with letter **"B"** (`#00E676`).
-     - **Dual Polylines**:
-       - Leg 1: Driver → Pickup A (with floating badge e.g. `"7 min • 2,6 km"`).
-       - Leg 2: Pickup A → Destination B (with floating badge e.g. `"12 min • 8,9 km"`).
-     - **Camera Framing**: Auto-fits bounding box for Driver, A, and B.
-     - **Theme Integration**: Respects the active theme settings configured in `ThemeManager`.
+### 📋 Verified Issue Status:
+- **Issue 1 Status**: **COMPLETED & VERIFIED** (Radar empty state, inDrive list view feed, 3-marker A/B preview map).
+- **Issue 2 Status**: **COMPLETED & VERIFIED** — Ride Inspection Map Touch & Dismiss Fix:
+  - Replaced `ModalBottomSheet` for ride inspection in `DriverModeView.kt` with a non-modal `Surface` card anchored to `Alignment.BottomCenter` inside the main screen `Box`.
+  - The map surface (`RealOsmMapView`) is now directly exposed and receives 100% of touch gestures (panning, zooming, pinching, tapping map pins) without closing the inspection view.
+  - Tapping the map area no longer dismisses the view; dismissal occurs exclusively when tapping **Close**, tapping **Accept**, or clicking the close (X) header button.
+
 
 
 

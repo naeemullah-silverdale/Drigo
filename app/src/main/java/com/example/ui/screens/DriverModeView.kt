@@ -3410,41 +3410,67 @@ fun DriverModeView(
             )
         }
 
-        // 1.5. Ride Request Details Bottom Sheet (matching reference image)
+        // 1.5. Ride Request Details Non-Modal Card (Allows map underneath to remain 100% interactive)
         selectedRequestForOffer?.let { req ->
             var expandedBidding by remember(req.id) { mutableStateOf(false) }
             var customBidText by remember(req.id) { mutableStateOf("") }
             val sheetFocusManager = LocalFocusManager.current
 
-            ModalBottomSheet(
-                onDismissRequest = { selectedRequestForOffer = null },
-                containerColor = MaterialTheme.colorScheme.surface,
-                scrimColor = Color.Transparent,
-                dragHandle = {
-                    Box(
-                        modifier = Modifier
-                            .padding(vertical = 12.dp)
-                            .width(40.dp)
-                            .height(4.dp)
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
-                    )
-                }
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.BottomCenter
             ) {
-                val distAwayKm = if (driverGeoPoint.latitude != 0.0 && driverGeoPoint.longitude != 0.0 && req.pickupLat != 0.0) {
-                    calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon)
-                } else 0.9
-
-                val etaMins = ((distAwayKm / 25.0) * 60.0).toInt().coerceIn(2, 25)
-                val formattedFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(req.estimatedFare)
-
-                Column(
+                Surface(
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 12.dp,
+                    tonalElevation = 8.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 24.dp)
-                        .verticalScroll(rememberScrollState())
+                        .heightIn(max = 520.dp)
                 ) {
+                    val distAwayKm = if (driverGeoPoint.latitude != 0.0 && driverGeoPoint.longitude != 0.0 && req.pickupLat != 0.0) {
+                        calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon)
+                    } else 0.9
+
+                    val etaMins = ((distAwayKm / 25.0) * 60.0).toInt().coerceIn(2, 25)
+                    val formattedFare = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(req.estimatedFare)
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 20.dp)
+                            .padding(bottom = 20.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        // Header Drag Handle + Close Button Row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp, bottom = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Spacer(modifier = Modifier.size(28.dp))
+                            Box(
+                                modifier = Modifier
+                                    .width(40.dp)
+                                    .height(4.dp)
+                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                            )
+                            IconButton(
+                                onClick = { selectedRequestForOffer = null },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     // Profile + Info Main Section
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -4001,6 +4027,7 @@ fun DriverModeView(
                 }
             }
         }
+    }
 
         // 2. Filter & "On My Way Home" Preferences Sheet (Item 3 & Item 5)
         if (showFilterSheet) {
