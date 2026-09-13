@@ -6361,21 +6361,26 @@ class FirebaseRepository private constructor(private val context: Context) {
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
         }
 
-        fun buildMergedList(remoteList: List<PlannedDepartureOffer>): List<PlannedDepartureOffer> {
+        var rtdbOffers = emptyList<PlannedDepartureOffer>()
+        var rtdbBookings = emptyList<PlannedDepartureBooking>()
+        var firestoreOffers = emptyList<PlannedDepartureOffer>()
+
+        fun emitMerged() {
             val locals = localDepartureOffers[departureId] ?: emptyList()
             val localBookings = localDepartureBookings[departureId] ?: emptyList()
-            val merged = (remoteList + locals).toMutableList()
+            val allOffers = (rtdbOffers + firestoreOffers + locals).toMutableList()
+            val allBookings = (rtdbBookings + localBookings)
 
-            // Convert any booking without a matching offer into a synthetic offer
-            for (booking in localBookings) {
-                if (merged.none { it.id == booking.id || (it.passengerId == booking.passengerId && it.requestedSeats == booking.seatsBooked) }) {
+            // Convert any booking without a matching offer into an offer
+            for (booking in allBookings) {
+                if (allOffers.none { it.id == booking.id || (it.passengerId == booking.passengerId && it.requestedSeats == booking.seatsBooked) }) {
                     val perSeatFare = if (booking.seatsBooked > 0) booking.totalFarePkr / booking.seatsBooked else booking.totalFarePkr
                     val dep = localPlannedDepartures[departureId]
                     val askingFare = dep?.farePerSeat ?: perSeatFare
                     val diff = perSeatFare - askingFare
                     val tag = if (diff < 0) "OFFERED PKR ${-diff} LESS" else if (diff > 0) "OFFERED PKR $diff MORE" else "RIDER SEAT REQUEST"
 
-                    merged.add(
+                    allOffers.add(
                         PlannedDepartureOffer(
                             id = booking.id,
                             departureId = booking.departureId,
@@ -6401,31 +6406,71 @@ class FirebaseRepository private constructor(private val context: Context) {
                     )
                 }
             }
-            return merged.distinctBy { it.id }.filter { it.status != "DECLINED" }
+            val result = allOffers.distinctBy { it.id }.filter { it.status != "DECLINED" }
+            trySend(result)
         }
 
-        val listener = object : ValueEventListener {
+        val offersListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val list = mutableListOf<PlannedDepartureOffer>()
                 for (child in snapshot.children) {
                     val offer = child.toPlannedDepartureOffer()
                     list.add(offer)
                 }
-                trySend(buildMergedList(list))
+                rtdbOffers = list
+                emitMerged()
             }
 
             override fun onCancelled(error: DatabaseError) {
-                trySend(buildMergedList(emptyList()))
+                emitMerged()
             }
         }
 
-        val queryRef = db?.getReference("planned_departure_offers")?.child(departureId)
-        queryRef?.addValueEventListener(listener)
+        val bookingsListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val list = mutableListOf<PlannedDepartureBooking>()
+                for (child in snapshot.children) {
+                    val booking = child.toPlannedDepartureBooking()
+                    list.add(booking)
+                }
+                rtdbBookings = list
+                emitMerged()
+            }
 
-        trySend(buildMergedList(emptyList()))
+            override fun onCancelled(error: DatabaseError) {
+                emitMerged()
+            }
+        }
+
+        val offersRef = db?.getReference("planned_departure_offers")?.child(departureId)
+        val bookingsRef = db?.getReference("planned_departure_bookings")?.child(departureId)
+
+        offersRef?.addValueEventListener(offersListener)
+        bookingsRef?.addValueEventListener(bookingsListener)
+
+        var fsRegistration: ListenerRegistration? = null
+        try {
+            if (firestore != null) {
+                fsRegistration = firestore!!.collection("planned_departure_offers")
+                    .whereEqualTo("departureId", departureId)
+                    .addSnapshotListener { snapshot, _ ->
+                        if (snapshot != null) {
+                            val list = snapshot.documents.mapNotNull { doc ->
+                                try { doc.toPlannedDepartureOffer() } catch (_: Exception) { null }
+                            }
+                            firestoreOffers = list
+                            emitMerged()
+                        }
+                    }
+            }
+        } catch (_: Exception) {}
+
+        emitMerged()
 
         awaitClose {
-            queryRef?.removeEventListener(listener)
+            offersRef?.removeEventListener(offersListener)
+            bookingsRef?.removeEventListener(bookingsListener)
+            fsRegistration?.remove()
         }
     }
 
@@ -7324,60 +7369,72 @@ private fun DataSnapshot.toPlannedDepartureBooking(): PlannedDepartureBooking {
 
 
 private fun DataSnapshot.toPlannedDepartureOffer(): PlannedDepartureOffer {
-
-    val diff = getIntVal("differencePkr", 0)
-
+    val stdAsking = getIntVal("standardAsking", 3800)
+    val offFare = getIntVal("offeredFare", getIntVal("totalFarePkr", 3600))
+    val diff = if (hasChild("differencePkr")) getIntVal("differencePkr", 0) else (offFare - stdAsking)
     val tag = if (diff < 0) "OFFERED PKR ${-diff} LESS" else if (diff > 0) "OFFERED PKR $diff MORE" else "FULL FARE OFFER"
+    val reqSeats = getIntVal("requestedSeats", getIntVal("seatsBooked", 1))
 
     return PlannedDepartureOffer(
-
         id = getStringVal("id", key ?: UUID.randomUUID().toString()),
-
         departureId = getStringVal("departureId"),
-
         passengerId = getStringVal("passengerId"),
-
-        passengerName = getStringVal("passengerName", "Bilal Tariq"),
-
-        passengerPhone = getStringVal("passengerPhone", "+92 301 9876543"),
-
+        passengerName = getStringVal("passengerName", "Rider"),
+        passengerPhone = getStringVal("passengerPhone", "+92 300 0000000"),
         passengerRating = getDoubleVal("passengerRating", 4.9),
-
-        passengerRidesCompleted = getIntVal("passengerRidesCompleted", 42),
-
+        passengerRidesCompleted = getIntVal("passengerRidesCompleted", 12),
         passengerAvatarUrl = getStringVal("passengerAvatarUrl").ifBlank { null },
-
         isVerified = getBooleanVal("isVerified", true),
-
         bookingType = getStringVal("bookingType", "SHARED"),
-
-        requestedSeats = getIntVal("requestedSeats", 2),
-
-        luggageDetails = getStringVal("luggageDetails", "1 Suitcase + 1 Backpack included"),
-
-        pickupPoint = getStringVal("pickupPoint", "G-9 Markaz, Karachi Company Gate 2"),
-
-        dropoffPoint = getStringVal("dropoffPoint", "Lahore DHA Phase 5 / Ring Road Exit"),
-
-        standardAsking = getIntVal("standardAsking", 3800),
-
-        offeredFare = getIntVal("offeredFare", 3600),
-
+        requestedSeats = reqSeats,
+        luggageDetails = getStringVal("luggageDetails", "Standard Luggage"),
+        pickupPoint = getStringVal("pickupPoint", getStringVal("pickupStop", "Selected Pickup Location")),
+        dropoffPoint = getStringVal("dropoffPoint", "Destination"),
+        standardAsking = stdAsking,
+        offeredFare = offFare,
         differencePkr = diff,
-
         tagText = getStringVal("tagText", tag),
-
-        isFullFare = getBooleanVal("isFullFare", diff == 0),
-
+        isFullFare = getBooleanVal("isFullFare", diff >= 0),
         note = getStringVal("note", ""),
-
         paymentMethod = getStringVal("paymentMethod", "Cash on Boarding"),
-
         status = getStringVal("status", "PENDING"),
-
         counterOfferPkr = if (hasChild("counterOfferPkr")) getIntVal("counterOfferPkr", 0) else null,
-
         createdAt = getLongVal("createdAt", System.currentTimeMillis())
+    )
+}
+
+private fun com.google.firebase.firestore.DocumentSnapshot.toPlannedDepartureOffer(): PlannedDepartureOffer {
+    val stdAsking = (getLong("standardAsking") ?: 3800L).toInt()
+    val offFare = (getLong("offeredFare") ?: getLong("totalFarePkr") ?: 3600L).toInt()
+    val diff = (getLong("differencePkr") ?: (offFare - stdAsking).toLong()).toInt()
+    val tag = if (diff < 0) "OFFERED PKR ${-diff} LESS" else if (diff > 0) "OFFERED PKR $diff MORE" else "FULL FARE OFFER"
+    val reqSeats = (getLong("requestedSeats") ?: getLong("seatsBooked") ?: getString("requestedSeats")?.toLongOrNull() ?: 1L).toInt()
+
+    return PlannedDepartureOffer(
+        id = getString("id") ?: id,
+        departureId = getString("departureId") ?: "",
+        passengerId = getString("passengerId") ?: "",
+        passengerName = getString("passengerName") ?: "Rider",
+        passengerPhone = getString("passengerPhone") ?: "+92 300 0000000",
+        passengerRating = getDouble("passengerRating") ?: 4.9,
+        passengerRidesCompleted = (getLong("passengerRidesCompleted") ?: 12L).toInt(),
+        passengerAvatarUrl = getString("passengerAvatarUrl")?.ifBlank { null },
+        isVerified = getBoolean("isVerified") ?: true,
+        bookingType = getString("bookingType") ?: "SHARED",
+        requestedSeats = reqSeats,
+        luggageDetails = getString("luggageDetails") ?: "Standard Luggage",
+        pickupPoint = getString("pickupPoint") ?: getString("pickupStop") ?: "Selected Pickup Location",
+        dropoffPoint = getString("dropoffPoint") ?: "Destination",
+        standardAsking = stdAsking,
+        offeredFare = offFare,
+        differencePkr = diff,
+        tagText = getString("tagText") ?: tag,
+        isFullFare = getBoolean("isFullFare") ?: (diff >= 0),
+        note = getString("note") ?: "",
+        paymentMethod = getString("paymentMethod") ?: "Cash on Boarding",
+        status = getString("status") ?: "PENDING",
+        counterOfferPkr = getLong("counterOfferPkr")?.toInt(),
+        createdAt = getLong("createdAt") ?: System.currentTimeMillis()
     )
 }
 

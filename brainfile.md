@@ -83,7 +83,7 @@
 
 ## 🌿 5. GIT BRANCHES & COMMIT LOG
 
-- **Active Branch:** `feature/user-mode-datastore-persistence`
+- **Active Branch:** `feature/city-to-city-passenger-offers-fix`
 - **Completed Driver Mode UI Refinements & Fixes:**
   1. **Map Bleed-Through Bug Fix:** Updated top header bar in `DriverModeView.kt` to use a solid `Surface` with `MaterialTheme.colorScheme.surface` and `statusBarsPadding()`, completely eliminating the map layer bleed-through behind the status bar, hamburger menu button, Online toggle pill, and gear button.
   2. **City to City Intercity Banner Removal:** Removed the `City to City Intercity` purple card banner from the main ride requests list feed in `DriverModeView.kt`. All underlying Intercity feature logic, state handlers, management screens (`ManageDepartureScreen`, `PlannedDeparturesScreen`), bottom navigation "City to city" tab, and drawer entry points remain 100% intact.
@@ -94,7 +94,13 @@
   2. **Asynchronous Mode Persistence:** Updated `MainViewModel.setUserMode()` and `attemptSwitchUserMode()` to save selected `UserMode` to `UserRolePreference` asynchronously upon role toggle, while maintaining background sync to Firebase RTDB (`users/{uid}/mode`).
   3. **App Launch & Reactive State Routing:** Observed `userModeFlow` from DataStore on startup in `MainViewModel` and exposed `isRoleLoaded` state. `MainActivity.kt` renders a smooth loading transition while DataStore initializes, preventing screen flickering and preserving role state across app restarts.
 
+- **Completed City-to-City Passenger Offers & Bookings Display Fix:**
+  1. **Dual Storage for Bookings & Offers:** Updated `bookPlannedDepartureSeat` in `FirebaseRepository.kt` so that when a passenger submits a seat request or booking (e.g., 2 seats), a corresponding `PlannedDepartureOffer` object is created with `status = "PENDING"`, saved to `localDepartureOffers[departureId]` and Firebase RTDB `planned_departure_offers/{departureId}/{offer.id}`, and `dep.offersReceivedCount` is incremented.
+  2. **Merged Observation Pipeline:** Updated `observeDepartureOffers` in `FirebaseRepository.kt` to merge remote RTDB offer snapshots with in-memory local offers, while synthesizing offers for any pending bookings that lack an offer entry.
+  3. **Full Offer Actions in Driver Screen:** Updated `PassengerOfferCard` in `ManageDepartureScreen.kt` so that **Decline**, **Counter**, and **Accept** action buttons are always available for every passenger request, allowing the driver to accept, reject, or submit a counter offer for any seat request.
+
 - **Recent Commit History:**
+  - `541ad5c` - `fix: preserve and display city-to-city passenger offers and booking requests`
   - `b7b793c` - `feat: implement UserRolePreference DataStore persistence and reactive role routing on launch`
   - `4c6dbd4` - `fix: remove intercity banner from driver main feed and make top header bar background solid`
   - `1d50c62` - `Merge fix/driver-feed-radar-and-map-inspection into main: restore driver feed radar, active trip flow, and integrate city to city feature`
@@ -569,6 +575,23 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
 3. **Compilation & Push**:
    - Verified clean compilation with `compile_applet` (0 build errors).
    - Committed (`3fdf401`) and pushed to `fix/driver-feed-radar-and-map-inspection`.
+
+---
+
+## 18. DIAGNOSTIC & FIX SPECIFICATION: CITY-TO-CITY MULTI-SEAT PASSENGER OFFERS POPULATION IN DRIVER UI (COMPLETED)
+
+### 🛑 Problem Diagnosis & Issue Verification
+- **User Reported Issue**: When a passenger sends a request for seats (e.g., 2 seats), the summary card correctly displays `"1 rider offer received"`, but opening the departure details (`ManageDepartureScreen`) shows an empty list under Passenger Offers.
+- **Verification & Root Cause Analysis**:
+  1. **Firebase Listener Protocol Mismatch**: The repository's `observeDepartureOffers` previously relied solely on Realtime Database node `planned_departure_offers/{departureId}`, whereas passenger seat requests and multi-seat bookings are also dispatched to Firestore collections (`planned_departure_offers`) or created via booking flows (`bookPlannedDepartureSeat` / `planned_departure_bookings`).
+  2. **Data Model Field Mapping for Multi-Seat Requests**: `DataSnapshot.toPlannedDepartureOffer()` and Firestore document converters must safely parse `requestedSeats` / `seatsBooked` (handling Int, Long, and String representations) so multi-seat requests are never dropped or misparsed during deserialization.
+  3. **Status Filtering Scope**: Subscription streams now capture all active offer statuses (`"PENDING"`, `"COUNTERED"`, `"ACCEPTED"`, `"BOOKED"`, `"REQUESTED"`) while excluding only explicitly `"DECLINED"` entries.
+
+### 📋 Completed Implementation:
+1. **Dual Firebase Stream Subscription**: `observeDepartureOffers` in `FirebaseRepository.kt` now simultaneously subscribes to Firebase Realtime Database (`planned_departure_offers` and `planned_departure_bookings`) and Cloud Firestore (`planned_departure_offers` collection where `departureId == departureId`), merging remote snapshots with local memory state.
+2. **Robust Multi-Seat Mapping**: Implemented flexible `requestedSeats` and `seatsBooked` parsing in both `DataSnapshot.toPlannedDepartureOffer()` and `DocumentSnapshot.toPlannedDepartureOffer()` to safely handle multi-seat requests (e.g., 2 seats).
+3. **UI State Combination**: Every seat request and booking seamlessly populates in `ManageDepartureScreen` with interactive **Accept**, **Decline**, and **Counter** controls.
+4. **Build Verification**: Clean compilation with 0 errors via `compile_applet`.
 
 
 
