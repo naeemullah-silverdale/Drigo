@@ -84,12 +84,14 @@
 ## 🌿 5. GIT BRANCHES & COMMIT LOG
 
 - **Active Branch:** `main`
-- **Planned Driver Mode UI Refinements & Fixes:**
-  1. **Map Bleed-Through Bug Fix:** Update top header container in `DriverModeView.kt` (lines 1374-1386) to use a solid background (`MaterialTheme.colorScheme.surface` / `Color.White`) with proper `statusBarsPadding()` instead of a transparent vertical gradient, preventing the underlying `RealOsmMapView` from bleeding through behind the status bar, hamburger menu button, Online switch pill, and settings button.
-  2. **City to City Intercity Banner Removal:** Remove the `City to City Intercity` purple banner `Surface` card (lines 3027-3086 in `DriverModeView.kt`) from the main ride requests list feed. All underlying Intercity feature logic, state management, screens (`ManageDepartureScreen`, `PlannedDeparturesScreen`, `CityToCityPassengerFlow`), bottom navigation "City to city" tab, and drawer entry points remain 100% intact.
-  3. **Radar View & Layout Polish:** With the banner removed, ensure the animated scanning radar container (`InDriveRadarView`) in the empty state seamlessly fills the available vertical space (`weight(1f)`), delivering a spacious, centered, and professional UI layout.
+- **Completed Driver Mode UI Refinements & Fixes:**
+  1. **Map Bleed-Through Bug Fix:** Updated top header bar in `DriverModeView.kt` to use a solid `Surface` with `MaterialTheme.colorScheme.surface` and `statusBarsPadding()`, completely eliminating the map layer bleed-through behind the status bar, hamburger menu button, Online toggle pill, and gear button.
+  2. **City to City Intercity Banner Removal:** Removed the `City to City Intercity` purple card banner from the main ride requests list feed in `DriverModeView.kt`. All underlying Intercity feature logic, state handlers, management screens (`ManageDepartureScreen`, `PlannedDeparturesScreen`), bottom navigation "City to city" tab, and drawer entry points remain 100% intact.
+  3. **Radar View & Layout Polish:** The animated radar scanning view (`InDriveRadarView`) now expands cleanly to fill the full remaining vertical space (`weight(1f)`), delivering a spacious, uncluttered layout.
 
 - **Recent Commit History:**
+  - `4c6dbd4` - `fix: remove intercity banner from driver main feed and make top header bar background solid`
+  - `1d50c62` - `Merge fix/driver-feed-radar-and-map-inspection into main: restore driver feed radar, active trip flow, and integrate city to city feature`
   - `ebbe3fc` - `feat: integrate city-to-city intercity departure screens and entry points in driver and passenger views`
   - `cb39841` - `feat: add Firebase Data Connect SDK and manager for Cloud SQL integration (drigo-8b15c)`
   - `662f4f9` - `fix: resolve PlannedDeparture data model and FirebaseRepository compilation errors`  - `374935b` - `feat: implement dynamic ThemeManager with DataStore, high-contrast themes, driver sheets theme adherence, and Drigo branding`
