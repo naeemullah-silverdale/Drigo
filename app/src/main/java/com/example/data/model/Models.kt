@@ -282,6 +282,7 @@ data class PassengerOrder(
     val requestId: String = "",
     val passengerId: String = "",
     val passengerName: String = "",
+    val passengerRating: Double = 5.0,
     val passengerEmail: String = "",
     val passengerPhone: String = "+92 300 9876543",
     val pickupTitle: String = "",
@@ -773,6 +774,5 @@ data class PlannedDepartureOffer(
     val counterOfferPkr: Int? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
-
 
 

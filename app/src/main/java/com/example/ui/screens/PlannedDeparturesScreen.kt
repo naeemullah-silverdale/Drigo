@@ -54,7 +54,7 @@ fun PlannedDeparturesScreen(
     val scope = rememberCoroutineScope()
     val repo = remember { FirebaseRepository.getInstance(context) }
 
-    val departures by repo.observeDriverPlannedDepartures(driverId).collectAsState(initial = emptyList<PlannedDeparture>())
+    val departures by repo.observeDriverPlannedDepartures(driverId).collectAsState(initial = emptyList())
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Active, 1 = History
 
     val activeRides = remember(departures) {

@@ -60,7 +60,7 @@ fun ManageDepartureScreen(
 
     // Live departure observation
     var departure by remember { mutableStateOf(repo.getDepartureById(departureId) ?: PlannedDeparture(id = departureId)) }
-    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList<PlannedDeparture>())
+    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList())
     LaunchedEffect(allDepartures, departureId) {
         val found = allDepartures.find { it.id == departureId } ?: repo.getDepartureById(departureId)
         if (found != null) {
@@ -69,8 +69,8 @@ fun ManageDepartureScreen(
     }
 
     // Live bookings & offers
-    val bookings by repo.observeDepartureBookings(departureId).collectAsState(initial = emptyList<PlannedDepartureBooking>())
-    val offers by repo.observeDepartureOffers(departureId).collectAsState(initial = emptyList<PlannedDepartureOffer>())
+    val bookings by repo.observeDepartureBookings(departureId).collectAsState(initial = emptyList())
+    val offers by repo.observeDepartureOffers(departureId).collectAsState(initial = emptyList())
 
     // Tabs: 0 -> Departure Details, 1 -> Passenger Offers
     var selectedTab by remember { mutableIntStateOf(0) }

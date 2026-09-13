@@ -90,11 +90,16 @@ fun PostRideRatingDialog(
         }
     }
 
+    val handleDismissOrSkip = {
+        repo.markRideRatedOrSkipped(rideId, raterRole = if (isDriver) "DRIVER" else "PASSENGER")
+        onDismiss()
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1B1E26),
-        titleContentColor = Color.White,
-        textContentColor = Color.White,
+        onDismissRequest = handleDismissOrSkip,
+        containerColor = MaterialTheme.colorScheme.surface,
+        titleContentColor = MaterialTheme.colorScheme.onSurface,
+        textContentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(24.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -128,15 +133,16 @@ fun PostRideRatingDialog(
                     text = if (farePkr > 0) "Ride Completed • PKR $farePkr" else "Trip Completed!",
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 18.sp,
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onSurface,
                     textAlign = TextAlign.Center
                 )
 
                 Text(
-                    text = if (isDriver) "Rate your experience with passenger $targetName" else "How was your ride with $targetName?",
+                    text = if (isDriver) "Rate Passenger: ${targetName.ifBlank { "Passenger" }}" else "How was your ride with Captain ${targetName.ifBlank { "Captain" }}?",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFA0A6B5),
-                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 4.dp)
                 )
@@ -153,8 +159,8 @@ fun PostRideRatingDialog(
                 // Identity Card of Target
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF14161E),
-                    border = BorderStroke(1.dp, Color(0xFF282C38)),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -163,14 +169,14 @@ fun PostRideRatingDialog(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = Color(0xFF2B303F),
+                            color = if (isDriver) InDriveLimeGreen.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surface,
                             modifier = Modifier.size(42.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = if (isDriver) Icons.Default.Person else Icons.Default.DirectionsCar,
                                     contentDescription = null,
-                                    tint = Color.White,
+                                    tint = if (isDriver) Color.Black else MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -184,13 +190,22 @@ fun PostRideRatingDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = targetName.ifBlank { if (isDriver) "Passenger" else "Driver Captain" },
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
+                                Column(modifier = Modifier.weight(1f, fill = false)) {
+                                    Text(
+                                        text = targetName.ifBlank { if (isDriver) "Passenger" else "Driver Captain" },
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 14.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = if (isDriver) "Passenger" else "Captain",
+                                        fontSize = 10.sp,
+                                        color = if (isDriver) InDriveLimeGreen else MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                                 if (targetRating > 0.0) {
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -213,13 +228,13 @@ fun PostRideRatingDialog(
                             if (targetVehicleSummary.isNotBlank()) {
                                 Text(
                                     text = "$targetVehicleSummary${if (targetPlateNumber.isNotBlank()) " • $targetPlateNumber" else ""}",
-                                    color = Color(0xFFA0A6B5),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp
                                 )
-                            } else if (pickupTitle.isNotBlank()) {
+                            } else if (destinationTitle.isNotBlank()) {
                                 Text(
                                     text = "To: $destinationTitle",
-                                    color = Color(0xFFA0A6B5),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -279,7 +294,7 @@ fun PostRideRatingDialog(
                     Text(
                         text = "Quick Feedback Tags:",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFA0A6B5),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold
                     )
 
@@ -295,15 +310,15 @@ fun PostRideRatingDialog(
                                     selectedTags = if (isSelected) selectedTags - tag else selectedTags + tag
                                 },
                                 shape = RoundedCornerShape(20.dp),
-                                color = if (isSelected) DrigoBrandPurple.copy(alpha = 0.25f) else Color(0xFF232734),
+                                color = if (isSelected) DrigoBrandPurple.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant,
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isSelected) DrigoBrandPurple else Color(0xFF353B4D)
+                                    if (isSelected) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant
                                 )
                             ) {
                                 Text(
                                     text = tag,
-                                    color = if (isSelected) Color.White else Color(0xFFB0B6C7),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 10.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
@@ -324,15 +339,15 @@ fun PostRideRatingDialog(
                                         selectedTags = if (isSelected) selectedTags - tag else selectedTags + tag
                                     },
                                     shape = RoundedCornerShape(20.dp),
-                                    color = if (isSelected) DrigoBrandPurple.copy(alpha = 0.25f) else Color(0xFF232734),
+                                    color = if (isSelected) DrigoBrandPurple.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isSelected) DrigoBrandPurple else Color(0xFF353B4D)
+                                        if (isSelected) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant
                                     )
                                 ) {
                                     Text(
                                         text = tag,
-                                        color = if (isSelected) Color.White else Color(0xFFB0B6C7),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 10.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
@@ -352,7 +367,7 @@ fun PostRideRatingDialog(
                         Text(
                             text = "Add Tip for Captain (Optional):",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFA0A6B5),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.SemiBold
                         )
 
@@ -365,10 +380,10 @@ fun PostRideRatingDialog(
                                 Surface(
                                     onClick = { tipAmountPkr = tip },
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (isSelected) InDriveLimeGreen.copy(alpha = 0.2f) else Color(0xFF222632),
+                                    color = if (isSelected) InDriveLimeGreen.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isSelected) InDriveLimeGreen else Color(0xFF323847)
+                                        if (isSelected) InDriveLimeGreen else MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     modifier = Modifier.weight(1f).height(36.dp)
                                 ) {
@@ -377,7 +392,7 @@ fun PostRideRatingDialog(
                                             text = if (tip == 0) "None" else "PKR $tip",
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                             fontSize = 11.sp,
-                                            color = if (isSelected) InDriveLimeGreen else Color.White
+                                            color = if (isSelected) InDriveLimeGreen else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }
@@ -393,17 +408,17 @@ fun PostRideRatingDialog(
                     placeholder = {
                         Text(
                             text = "Write an optional review or compliments...",
-                            color = Color(0xFF7A8194),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF151820),
-                        unfocusedContainerColor = Color(0xFF151820),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedBorderColor = DrigoBrandPurple,
-                        unfocusedBorderColor = Color(0xFF313645),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                     ),
                     shape = RoundedCornerShape(12.dp),
                     minLines = 2,
@@ -416,8 +431,8 @@ fun PostRideRatingDialog(
                 // Safety Options: Block User & Report Ride
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF231F25),
-                    border = BorderStroke(1.dp, Color(0xFF422E3B)),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -436,14 +451,14 @@ fun PostRideRatingDialog(
                                 onCheckedChange = { isBlockSelected = it },
                                 colors = CheckboxDefaults.colors(
                                     checkedColor = Color(0xFFEF5350),
-                                    uncheckedColor = Color(0xFF7A8194)
+                                    uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (isDriver) "Block this passenger from matching again" else "Do not match me with this driver again",
                                 fontSize = 11.sp,
-                                color = if (isBlockSelected) Color(0xFFEF5350) else Color(0xFFB0BEC5),
+                                color = if (isBlockSelected) Color(0xFFEF5350) else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = if (isBlockSelected) FontWeight.Bold else FontWeight.Normal
                             )
                         }
@@ -554,12 +569,12 @@ fun PostRideRatingDialog(
         },
         dismissButton = {
             TextButton(
-                onClick = onDismiss,
+                onClick = handleDismissOrSkip,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "Skip for Now",
-                    color = Color(0xFFA0A6B5),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
@@ -625,9 +640,9 @@ fun SafetyReportDialog(
         onDismissRequest = {
             if (!isSubmitting) onDismiss()
         },
-        containerColor = Color(0xFF1E2028),
-        titleContentColor = Color.White,
-        textContentColor = Color.White,
+        containerColor = MaterialTheme.colorScheme.surface,
+        titleContentColor = MaterialTheme.colorScheme.onSurface,
+        textContentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(22.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -657,12 +672,12 @@ fun SafetyReportDialog(
                         text = "Safety & Incident Report",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Directly escalated to 24/7 Safety Admin Team",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFA0A6B5),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
                 }
@@ -678,21 +693,21 @@ fun SafetyReportDialog(
                 // Reported User Info Header
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFF151720),
-                    border = BorderStroke(1.dp, Color(0xFF282C3A)),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text(
                             text = "Reporting User: ${reportedUserName.ifBlank { if (isReporterDriver) "Passenger" else "Driver Captain" }}",
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp
                         )
                         if (driverPlateNumber.isNotBlank()) {
                             Text(
                                 text = "Vehicle Plate: $driverPlateNumber",
-                                color = Color(0xFFA0A6B5),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
                             )
                         }
@@ -702,7 +717,7 @@ fun SafetyReportDialog(
                 Text(
                     text = "Select Issue Category:",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFA0A6B5),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold
                 )
 
@@ -717,10 +732,10 @@ fun SafetyReportDialog(
                             }
                         },
                         shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) Color(0xFFEF5350).copy(alpha = 0.15f) else Color(0xFF161822),
+                        color = if (isSelected) Color(0xFFEF5350).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
                         border = BorderStroke(
                             1.dp,
-                            if (isSelected) Color(0xFFEF5350) else Color(0xFF2B303F)
+                            if (isSelected) Color(0xFFEF5350) else MaterialTheme.colorScheme.outlineVariant
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -738,7 +753,7 @@ fun SafetyReportDialog(
                                 },
                                 colors = RadioButtonDefaults.colors(
                                     selectedColor = Color(0xFFEF5350),
-                                    unselectedColor = Color(0xFF6B7280)
+                                    unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             )
                             Spacer(modifier = Modifier.width(6.dp))
@@ -746,7 +761,7 @@ fun SafetyReportDialog(
                                 text = cat.label,
                                 fontSize = 12.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) Color.White else Color(0xFFB0B6C7)
+                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -756,7 +771,7 @@ fun SafetyReportDialog(
                 Text(
                     text = "Describe What Happened:",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFFA0A6B5),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.SemiBold
                 )
 
@@ -770,17 +785,17 @@ fun SafetyReportDialog(
                     placeholder = {
                         Text(
                             text = "Provide details about the incident for the security audit...",
-                            color = Color(0xFF7A8194),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
                     },
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF151720),
-                        unfocusedContainerColor = Color(0xFF151720),
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedBorderColor = Color(0xFFEF5350),
-                        unfocusedBorderColor = Color(0xFF313645),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                     ),
                     shape = RoundedCornerShape(12.dp),
                     minLines = 3,
@@ -802,14 +817,14 @@ fun SafetyReportDialog(
                         enabled = !isSubmitting,
                         colors = CheckboxDefaults.colors(
                             checkedColor = Color(0xFFEF5350),
-                            uncheckedColor = Color(0xFF7A8194)
+                            uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = "Block this user immediately from future rides",
                         fontSize = 11.sp,
-                        color = if (blockUserCheck) Color(0xFFEF5350) else Color(0xFFB0BEC5),
+                        color = if (blockUserCheck) Color(0xFFEF5350) else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (blockUserCheck) FontWeight.Bold else FontWeight.Normal
                     )
                 }
@@ -1006,8 +1021,8 @@ fun UniversalSafetyModalSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF181A22),
-        contentColor = Color.White,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         dragHandle = {
             Box(
@@ -1020,7 +1035,7 @@ fun UniversalSafetyModalSheet(
                     modifier = Modifier
                         .width(42.dp)
                         .height(4.dp)
-                        .background(Color.Gray.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
                 )
             }
         }
@@ -1058,12 +1073,12 @@ fun UniversalSafetyModalSheet(
                         text = "Safety & Emergency Center",
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 17.sp,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "24/7 Security Tools & Incident Protection",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFFA0A6B5),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
                 }
@@ -1073,7 +1088,7 @@ fun UniversalSafetyModalSheet(
             if (ridePin.isNotBlank()) {
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF1F2430),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     border = BorderStroke(1.5.dp, Color(0xFF00E676)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1104,7 +1119,7 @@ fun UniversalSafetyModalSheet(
                         Text(
                             text = if (isDriver) "Ask passenger for this PIN before starting the trip" else "Show this 4-digit PIN to captain before boarding vehicle",
                             fontSize = 11.sp,
-                            color = Color(0xFFA0A6B5),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
                         )
 
@@ -1116,8 +1131,8 @@ fun UniversalSafetyModalSheet(
                             ridePin.forEach { digit ->
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFF111319),
-                                    border = BorderStroke(1.5.dp, Color(0xFF3B4154)),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant),
                                     modifier = Modifier.size(width = 46.dp, height = 48.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
@@ -1125,7 +1140,7 @@ fun UniversalSafetyModalSheet(
                                             text = digit.toString(),
                                             fontSize = 22.sp,
                                             fontWeight = FontWeight.Black,
-                                            color = Color.White
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }
@@ -1138,8 +1153,8 @@ fun UniversalSafetyModalSheet(
             // 2. Identity Card
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF111319),
-                border = BorderStroke(1.dp, Color(0xFF262A37)),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1158,13 +1173,13 @@ fun UniversalSafetyModalSheet(
                             Text(
                                 text = partnerName.ifBlank { if (isDriver) "Passenger" else "Driver Captain" },
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 14.sp
                             )
                             if (vehicleMake.isNotBlank()) {
                                 Text(
                                     text = "$vehicleMake $vehicleModel • $vehiclePlate",
-                                    color = Color(0xFFA0A6B5),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp
                                 )
                             }
@@ -1195,8 +1210,8 @@ fun UniversalSafetyModalSheet(
             // 3. Audio Recording Toggle for Trip Safety
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = if (isAudioRecording) Color(0xFF3E1418) else Color(0xFF1E222D),
-                border = BorderStroke(1.dp, if (isAudioRecording) Color(0xFFEF5350) else Color(0xFF2C3242)),
+                color = if (isAudioRecording) Color(0xFFEF5350).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(1.dp, if (isAudioRecording) Color(0xFFEF5350) else MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -1212,14 +1227,14 @@ fun UniversalSafetyModalSheet(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = if (isAudioRecording) Color(0xFFEF5350) else Color(0xFF2C303B),
+                            color = if (isAudioRecording) Color(0xFFEF5350) else MaterialTheme.colorScheme.surface,
                             modifier = Modifier.size(40.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = if (isAudioRecording) Icons.Default.Mic else Icons.Default.MicNone,
                                     contentDescription = "Audio Recording",
-                                    tint = if (isAudioRecording) Color.White else Color(0xFFA0A6B5),
+                                    tint = if (isAudioRecording) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -1230,7 +1245,7 @@ fun UniversalSafetyModalSheet(
                                 Text(
                                     text = "Trip Audio Safety Record",
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 13.sp
                                 )
                                 if (isAudioRecording) {
@@ -1251,7 +1266,7 @@ fun UniversalSafetyModalSheet(
                             }
                             Text(
                                 text = if (isAudioRecording) "Encrypted & stored locally for safety" else "Record cabin audio during late-night rides",
-                                color = if (isAudioRecording) Color(0xFFFFCDD2) else Color(0xFFA0A6B5),
+                                color = if (isAudioRecording) Color(0xFFEF5350) else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
                             )
                         }
@@ -1268,7 +1283,7 @@ fun UniversalSafetyModalSheet(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = Color(0xFFEF5350),
                             uncheckedThumbColor = Color.Gray,
-                            uncheckedTrackColor = Color(0xFF2C3242)
+                            uncheckedTrackColor = MaterialTheme.colorScheme.outlineVariant
                         )
                     )
                 }

@@ -27,7 +27,8 @@ enum class AppScreen {
     WALLET,
     DRIVER_REGISTRATION,
     ADMIN_VERIFICATION,
-    GOOGLE_DRIVE_DOCUMENTS
+    GOOGLE_DRIVE_DOCUMENTS,
+    HISTORY
 }
 
 enum class UserMode {
@@ -146,6 +147,16 @@ class MainViewModel(
 
     fun updateDriverVerification(ver: com.example.data.model.DriverVerification) {
         _driverVerification.value = ver
+    }
+
+    suspend fun refreshDriverRideRequests(): List<com.example.data.model.RideRequest> {
+        val fresh = rideRequestRepo.fetchRideRequestsOnce()
+        _liveRideRequests.value = fresh
+        currentUser.value?.uid?.let { uid ->
+            fetchUserRecordFromDb(uid)
+            fetchDriverVerificationFromDb(uid)
+        }
+        return fresh
     }
 
     private var driverVerificationJob: kotlinx.coroutines.Job? = null

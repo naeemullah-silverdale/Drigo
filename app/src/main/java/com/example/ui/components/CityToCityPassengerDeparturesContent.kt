@@ -16,7 +16,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -54,7 +53,7 @@ fun CityToCityPassengerDeparturesContent(
 ) {
     val context = LocalContext.current
     val repo = remember { FirebaseRepository.getInstance(context) }
-    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList<PlannedDeparture>())
+    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList())
 
     val isDark = MaterialTheme.drigoColors.isDark
     val screenBg = if (isDark) Color(0xFF0F1116) else MaterialTheme.colorScheme.background
@@ -338,16 +337,8 @@ fun CityToCityPassengerDeparturesContent(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = "QUICK:",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textSecondary,
-                                    modifier = Modifier.padding(end = 4.dp)
-                                )
                                 quickCities.forEach { city ->
                                     val isSelected = toCity.equals(city, ignoreCase = true)
                                     Surface(
@@ -695,7 +686,6 @@ fun ModernPassengerDepartureCard(
 ) {
     val isDark = MaterialTheme.drigoColors.isDark
     val cardBg = if (isDark) Color(0xFF181B23) else MaterialTheme.colorScheme.surface
-    val routeBoxBg = if (isDark) Color(0xFF1F2330) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     val borderCol = if (isDark) Color(0xFF282C3A) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
     val textPrimary = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
     val textSecondary = if (isDark) Color(0xFFA0A6B5) else MaterialTheme.colorScheme.onSurfaceVariant
@@ -712,53 +702,7 @@ fun ModernPassengerDepartureCard(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Row 0: Top Header Badges (Screenshot 1: SUPER CAPTAIN, LADIES FRIENDLY, ECONOMY CHOICE, LAST 1 SEAT LEFT)
-            val headerBadges = remember(departure) {
-                val list = mutableListOf<Triple<String, Color, Color>>()
-                if (departure.driverBadges.any { it.contains("Super Captain", ignoreCase = true) }) {
-                    list.add(Triple("🚹 SUPER CAPTAIN", Color(0xFF1E88E5).copy(alpha = 0.15f), Color(0xFF29B6F6)))
-                }
-                if (departure.driverBadges.any { it.contains("Ladies Friendly", ignoreCase = true) }) {
-                    list.add(Triple("🚺 LADIES FRIENDLY", Color(0xFFFF4081).copy(alpha = 0.15f), Color(0xFFFF4081)))
-                }
-                if (departure.driverBadges.any { it.contains("Economy Choice", ignoreCase = true) }) {
-                    list.add(Triple("🌱 ECONOMY CHOICE", Color(0xFF7C4DFF).copy(alpha = 0.15f), Color(0xFFB388FF)))
-                }
-                if (availableSeats == 1) {
-                    list.add(Triple("🔴 LAST 1 SEAT LEFT!", Color(0xFFFF5252).copy(alpha = 0.15f), Color(0xFFFF5252)))
-                }
-                if (departure.approvalWindowText.isNotBlank()) {
-                    list.add(Triple("⏱ ${departure.approvalWindowText}", Color(0xFF00E676).copy(alpha = 0.12f), Color(0xFF00E676)))
-                }
-                list
-            }
-
-            if (headerBadges.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    headerBadges.forEach { (text, bg, textColor) ->
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = bg,
-                            border = BorderStroke(0.8.dp, textColor.copy(alpha = 0.4f))
-                        ) {
-                            Text(
-                                text = text,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = textColor,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Row 1: Captain Avatar, Info + Fare Display
+            // Row 1: Captain Info + Fare
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -769,10 +713,10 @@ fun ModernPassengerDepartureCard(
                     modifier = Modifier.weight(1f)
                 ) {
                     // Avatar with verified badge
-                    Box(modifier = Modifier.size(46.dp)) {
+                    Box(modifier = Modifier.size(44.dp)) {
                         Surface(
                             shape = CircleShape,
-                            color = if (departure.driverName.contains("Tariq", ignoreCase = true)) Color(0xFF5C6BC0) else if (departure.driverName.contains("Zubair", ignoreCase = true)) Color(0xFF26A69A) else Color(0xFF1E88E5),
+                            color = Color(0xFF1E88E5),
                             modifier = Modifier.fillMaxSize()
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -789,14 +733,7 @@ fun ModernPassengerDepartureCard(
                                 .size(14.dp)
                                 .background(Color(0xFF00E676), CircleShape)
                                 .align(Alignment.BottomEnd)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(10.dp).align(Alignment.Center)
-                            )
-                        }
+                        )
                     }
 
                     Spacer(modifier = Modifier.width(10.dp))
@@ -820,20 +757,20 @@ fun ModernPassengerDepartureCard(
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "★ ${departure.driverRating}",
+                                text = "${departure.driverRating} ★",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 color = Color(0xFFFFB300)
                             )
                             Text(
-                                text = " • ${if (departure.driverTotalTrips > 0) departure.driverTotalTrips else 1240} trips",
+                                text = " (${if (departure.driverTotalTrips > 0) departure.driverTotalTrips else 342} trips)",
                                 fontSize = 11.5.sp,
                                 color = textSecondary
                             )
                         }
 
                         Text(
-                            text = "${departure.driverVehicle} (${departure.driverPlateNumber})",
+                            text = "${departure.driverVehicle} • ${departure.driverVehicleType}",
                             fontSize = 11.5.sp,
                             color = textSecondary,
                             maxLines = 1,
@@ -844,342 +781,152 @@ fun ModernPassengerDepartureCard(
 
                 // Fare Display (Top Right)
                 Column(horizontalAlignment = Alignment.End) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        Text(
-                            text = "PKR ${"%,d".format(departure.farePerSeat)}",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 18.sp,
-                            color = Color(0xFF00E676)
-                        )
-                        Text(
-                            text = " / seat",
-                            fontSize = 11.sp,
-                            color = textSecondary
-                        )
-                    }
-
-                    if (departure.allowFullCarBuyout) {
-                        Text(
-                            text = "Buyout: PKR ${"%,d".format(departure.fullCarFare)}",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF29B6F6)
-                        )
-                    } else {
-                        Text(
-                            text = "Single seat only (no buyout)",
-                            fontSize = 10.sp,
-                            color = textSecondary
-                        )
-                    }
+                    Text(
+                        text = "PKR ${"%,d".format(departure.farePerSeat)}",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 18.sp,
+                        color = Color(0xFF00E676)
+                    )
+                    Text(
+                        text = "per seat",
+                        fontSize = 10.5.sp,
+                        color = textSecondary
+                    )
                 }
             }
 
-            // Row 2: Verification / Feature Badges (Verified Captain, Top Rated, Instant Booking)
+            HorizontalDivider(color = borderCol.copy(alpha = 0.5f), thickness = 0.8.dp)
+
+            // Row 2: Route, Hubs & Timing
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Schedule,
+                            contentDescription = null,
+                            tint = Color(0xFF00E676),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text(
+                            text = "${departure.departureTimeText} (${departure.departureDateText})",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = textPrimary
+                        )
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isDark) Color(0xFF232734) else MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = departure.corridorName.takeIf { it.isNotBlank() } ?: "M-2 Motorway",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = textSecondary,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                // Pickup Hub
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .background(Color(0xFF00E676), CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Pickup: ",
+                        fontSize = 11.5.sp,
+                        color = textSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "${departure.pickupCity} (${departure.pickupHub.takeIf { it.isNotBlank() } ?: "Main Hub"})",
+                        fontSize = 12.sp,
+                        color = textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Dropoff Hub
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .background(Color(0xFFFF5252), RoundedCornerShape(1.dp))
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Drop-off: ",
+                        fontSize = 11.5.sp,
+                        color = textSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "${departure.dropoffCity} (${departure.dropoffHub.takeIf { it.isNotBlank() } ?: "City Terminal"})",
+                        fontSize = 12.sp,
+                        color = textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            // Row 3: Seat Availability, Luggage & AC Badges
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // Seat status badge
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF00E676).copy(alpha = 0.12f),
-                    border = BorderStroke(0.8.dp, Color(0xFF00E676).copy(alpha = 0.4f))
+                    color = if (isFull) Color(0xFFD32F2F).copy(alpha = 0.18f) else Color(0xFF00C853).copy(alpha = 0.18f),
+                    border = BorderStroke(
+                        0.8.dp,
+                        if (isFull) Color(0xFFEF5350).copy(alpha = 0.4f) else Color(0xFF00E676).copy(alpha = 0.4f)
+                    )
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            imageVector = Icons.Default.EventSeat,
                             contentDescription = null,
-                            tint = Color(0xFF00E676),
-                            modifier = Modifier.size(11.dp)
+                            tint = if (isFull) Color(0xFFFF5252) else Color(0xFF00E676),
+                            modifier = Modifier.size(13.dp)
                         )
-                        Spacer(modifier = Modifier.width(3.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Verified Captain",
-                            fontSize = 10.5.sp,
+                            text = if (isFull) "Full (0 seats left)" else "$availableSeats of ${departure.totalSeats} seats left",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00E676)
+                            color = if (isFull) Color(0xFFFF5252) else Color(0xFF00E676)
                         )
                     }
                 }
 
-                if (departure.driverRating >= 4.8) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1E88E5).copy(alpha = 0.12f),
-                        border = BorderStroke(0.8.dp, Color(0xFF29B6F6).copy(alpha = 0.4f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = Color(0xFF29B6F6),
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "Top Rated",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF29B6F6)
-                            )
-                        }
-                    }
-                }
-
-                if (departure.isInstantBooking) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF00C853).copy(alpha = 0.18f)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Bolt,
-                                contentDescription = null,
-                                tint = Color(0xFF00E676),
-                                modifier = Modifier.size(11.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "Instant Booking",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00E676)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Row 3: Route & Timeline Box Container (Screenshot 1)
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = routeBoxBg,
-                border = BorderStroke(1.dp, borderCol.copy(alpha = 0.6f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Pickup Hub & Departure Time
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(9.dp)
-                                    .background(Color(0xFF00E676), CircleShape)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "DEPARTURE HUB",
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textSecondary,
-                                    letterSpacing = 0.4.sp
-                                )
-                                Text(
-                                    text = "${departure.pickupCity} (${departure.pickupHub.ifBlank { "G-9 Markaz Hub" }})",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = departure.departureTimeText,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = textPrimary
-                            )
-                            Text(
-                                text = "ON TIME",
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF00E676)
-                            )
-                        }
-                    }
-
-                    // Connecting vertical divider line
-                    HorizontalDivider(
-                        color = borderCol.copy(alpha = 0.4f),
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp),
-                        thickness = 0.8.dp
-                    )
-
-                    // Dropoff Hub & Estimated Arrival Time
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(9.dp)
-                                    .background(Color(0xFFFF5252), RoundedCornerShape(2.dp))
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "DESTINATION DROP-OFF",
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textSecondary,
-                                    letterSpacing = 0.4.sp
-                                )
-                                Text(
-                                    text = "${departure.dropoffCity} (${departure.dropoffHub.ifBlank { "DHA Phase 5 / Ring Rd" }})",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = departure.estimatedArrival.ifBlank { "~12:15 PM" },
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFFFF5252)
-                            )
-                            Text(
-                                text = "Est. Arrival",
-                                fontSize = 9.5.sp,
-                                color = textSecondary
-                            )
-                        }
-                    }
-
-                    // Info row inside route container: Distance & Toll Status
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Outlined.Navigation,
-                                contentDescription = null,
-                                tint = textSecondary,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = departure.corridorSubtitle.ifBlank { "375 km • ~4h 15m via M-2" },
-                                fontSize = 11.sp,
-                                color = textSecondary
-                            )
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF1E88E5).copy(alpha = 0.15f),
-                            border = BorderStroke(0.8.dp, Color(0xFF29B6F6).copy(alpha = 0.4f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = Color(0xFF29B6F6),
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = if (departure.tollsPreCleared) "TOLLS PRE-CLEARED" else "TOLLS INCLUDED",
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF29B6F6)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Row 4: Seat Availability Dots & Luggage Badges (Screenshot 1)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Dot seat availability indicator box
+                // Luggage Policy Badge
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isDark) Color(0xFF222634) else MaterialTheme.colorScheme.surfaceVariant,
-                    border = BorderStroke(0.8.dp, borderCol)
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isDark) Color(0xFF232734) else MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        // Render green dots for available, grey for booked
-                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            repeat(departure.totalSeats) { index ->
-                                val isSeatAvailable = index < availableSeats
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .background(
-                                            if (isSeatAvailable) Color(0xFF00E676) else Color.Gray.copy(alpha = 0.4f),
-                                            CircleShape
-                                        )
-                                )
-                            }
-                        }
-                        Text(
-                            text = if (isFull) "Full" else "$availableSeats of ${departure.totalSeats} Seats Open",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isFull) Color(0xFFFF5252) else textPrimary
-                        )
-                    }
-                }
-
-                // Bag Policy Badge
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isDark) Color(0xFF222634) else MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Luggage,
@@ -1187,44 +934,88 @@ fun ModernPassengerDepartureCard(
                             tint = textSecondary,
                             modifier = Modifier.size(13.dp)
                         )
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = departure.luggagePolicy.ifBlank { "2 Bags max / rider" },
+                            text = departure.luggagePolicy.takeIf { it.isNotBlank() } ?: "1 Medium Bag / Seat",
                             fontSize = 11.sp,
                             color = textSecondary
                         )
                     }
                 }
+
+                // AC / Climate Control
+                if (departure.isClimateControlled) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isDark) Color(0xFF232734) else MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AcUnit,
+                                contentDescription = null,
+                                tint = Color(0xFF4FC3F7),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "AC",
+                                fontSize = 11.sp,
+                                color = textSecondary
+                            )
+                        }
+                    }
+                }
+
+                // Buyout option badge
+                if (departure.allowFullCarBuyout) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFFF9800).copy(alpha = 0.15f),
+                        border = BorderStroke(0.8.dp, Color(0xFFFF9800).copy(alpha = 0.35f))
+                    ) {
+                        Text(
+                            text = "Buyout: PKR ${"%,d".format(departure.fullCarFare)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFFB74D),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                }
             }
 
-            // Row 5: Select & Send Offer Primary Button (Screenshot 1)
+            // Row 4: Primary Action Button (Screenshot 1)
             Button(
                 onClick = onSendOffer,
                 enabled = !isFull,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF006837),
-                    contentColor = Color.White,
+                    containerColor = Color(0xFF00E676),
+                    contentColor = Color.Black,
                     disabledContainerColor = Color(0xFF2A2D37),
                     disabledContentColor = Color(0xFF6B7280)
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(46.dp)
+                    .height(44.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = if (isFull) "Departure Full" else "Select & Send Offer",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
                     Icon(
-                        imageVector = Icons.Default.ArrowForward,
+                        imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isFull) "Departure Full" else "Send Offer / Book Seat",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
                     )
                 }
             }
