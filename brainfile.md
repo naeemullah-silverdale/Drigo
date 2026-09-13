@@ -77,8 +77,9 @@
 
 ## 🌿 5. GIT BRANCHES & COMMIT LOG
 
-- **Active Branch:** `main` (merged `feature/theme-manager-datastore`)
+- **Active Branch:** `fix/compilation-and-firebase-models`
 - **Recent Commit History:**
+  - `fix: resolve PlannedDeparture data model and FirebaseRepository compilation errors`
   - `374935b` - `feat: implement dynamic ThemeManager with DataStore, high-contrast themes, driver sheets theme adherence, and Drigo branding`
   - `5c21f7a` - `refactor: consume ThemeManager.themeMode StateFlow directly in MainActivity setContent for instant app-wide theme propagation`
   - `9b8d23e` - `fix: audit and align compose screen color tokens with MaterialTheme colorScheme and user theme preference`

@@ -54,7 +54,7 @@ fun CityToCityPassengerDeparturesContent(
 ) {
     val context = LocalContext.current
     val repo = remember { FirebaseRepository.getInstance(context) }
-    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList())
+    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList<PlannedDeparture>())
 
     val isDark = MaterialTheme.drigoColors.isDark
     val screenBg = if (isDark) Color(0xFF0F1116) else MaterialTheme.colorScheme.background
