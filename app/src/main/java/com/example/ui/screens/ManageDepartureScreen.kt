@@ -1798,49 +1798,26 @@ private fun PassengerOfferCard(
                     )
                 }
 
-                // Middle Button: Counter (if discount) or Message (if full fare)
-                if (offer.differencePkr < 0) {
-                    Button(
-                        onClick = onCounter,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LightMintBg,
-                            contentColor = DarkGreen
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MintGreen.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .weight(1.1f)
-                            .height(40.dp)
-                    ) {
-                        Text(
-                            text = "Counter",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-                } else {
-                    Button(
-                        onClick = onMessage,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LightMintBg,
-                            contentColor = DarkGreen
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MintGreen.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .weight(1.1f)
-                            .height(40.dp)
-                    ) {
-                        Text(
-                            text = "Message",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
+                // Counter Button (Always available to offer custom fare)
+                Button(
+                    onClick = onCounter,
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = LightMintBg,
+                        contentColor = DarkGreen
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MintGreen.copy(alpha = 0.4f)),
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .height(40.dp)
+                ) {
+                    Text(
+                        text = "Counter",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
                 }
 
                 // Accept Button

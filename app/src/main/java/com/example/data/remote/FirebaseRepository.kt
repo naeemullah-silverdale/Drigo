@@ -6355,79 +6355,78 @@ class FirebaseRepository private constructor(private val context: Context) {
 
 
     fun observeDepartureOffers(departureId: String): Flow<List<PlannedDepartureOffer>> = callbackFlow {
-
         val db = try {
-
             FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
-
         } catch (_: Exception) {
-
             try { FirebaseDatabase.getInstance() } catch (_: Exception) { null }
-
         }
 
+        fun buildMergedList(remoteList: List<PlannedDepartureOffer>): List<PlannedDepartureOffer> {
+            val locals = localDepartureOffers[departureId] ?: emptyList()
+            val localBookings = localDepartureBookings[departureId] ?: emptyList()
+            val merged = (remoteList + locals).toMutableList()
 
+            // Convert any booking without a matching offer into a synthetic offer
+            for (booking in localBookings) {
+                if (merged.none { it.id == booking.id || (it.passengerId == booking.passengerId && it.requestedSeats == booking.seatsBooked) }) {
+                    val perSeatFare = if (booking.seatsBooked > 0) booking.totalFarePkr / booking.seatsBooked else booking.totalFarePkr
+                    val dep = localPlannedDepartures[departureId]
+                    val askingFare = dep?.farePerSeat ?: perSeatFare
+                    val diff = perSeatFare - askingFare
+                    val tag = if (diff < 0) "OFFERED PKR ${-diff} LESS" else if (diff > 0) "OFFERED PKR $diff MORE" else "RIDER SEAT REQUEST"
+
+                    merged.add(
+                        PlannedDepartureOffer(
+                            id = booking.id,
+                            departureId = booking.departureId,
+                            passengerId = booking.passengerId,
+                            passengerName = booking.passengerName.ifBlank { "Rider" },
+                            passengerPhone = booking.passengerPhone.ifBlank { "+92 300 0000000" },
+                            passengerRating = booking.passengerRating,
+                            passengerRidesCompleted = 12,
+                            isVerified = true,
+                            bookingType = if (booking.isFullCar) "PRIVATE" else "SHARED",
+                            requestedSeats = booking.seatsBooked,
+                            luggageDetails = "Standard Luggage",
+                            pickupPoint = booking.pickupStop.ifBlank { "Selected Pickup Location" },
+                            dropoffPoint = dep?.dropoffCity ?: "Destination",
+                            standardAsking = askingFare,
+                            offeredFare = perSeatFare,
+                            differencePkr = diff,
+                            tagText = tag,
+                            isFullFare = diff >= 0,
+                            status = booking.status.ifBlank { "PENDING" },
+                            createdAt = booking.bookedAt
+                        )
+                    )
+                }
+            }
+            return merged.distinctBy { it.id }.filter { it.status != "DECLINED" }
+        }
 
         val listener = object : ValueEventListener {
-
             override fun onDataChange(snapshot: DataSnapshot) {
-
                 val list = mutableListOf<PlannedDepartureOffer>()
-
                 for (child in snapshot.children) {
-
                     val offer = child.toPlannedDepartureOffer()
-
                     list.add(offer)
-
                 }
-
-                if (list.isEmpty()) {
-
-                    val locals = localDepartureOffers[departureId] ?: emptyList()
-
-                    trySend(locals.filter { it.status != "DECLINED" })
-
-                } else {
-
-                    trySend(list.filter { it.status != "DECLINED" })
-
-                }
-
+                trySend(buildMergedList(list))
             }
-
-
 
             override fun onCancelled(error: DatabaseError) {
-
-                val locals = localDepartureOffers[departureId] ?: emptyList()
-
-                trySend(locals.filter { it.status != "DECLINED" })
-
+                trySend(buildMergedList(emptyList()))
             }
-
         }
-
-
 
         val queryRef = db?.getReference("planned_departure_offers")?.child(departureId)
-
         queryRef?.addValueEventListener(listener)
 
-
-
-        val locals = localDepartureOffers[departureId] ?: emptyList()
-
-        trySend(locals.filter { it.status != "DECLINED" })
-
-
+        trySend(buildMergedList(emptyList()))
 
         awaitClose {
-
             queryRef?.removeEventListener(listener)
-
         }
-
     }
 
 
@@ -6883,111 +6882,111 @@ class FirebaseRepository private constructor(private val context: Context) {
         return try {
 
             val booking = PlannedDepartureBooking(
-
                 id = "book_${UUID.randomUUID().toString().take(8)}",
-
                 departureId = departureId,
-
                 passengerId = passengerId,
-
                 passengerName = passengerName,
-
                 passengerPhone = passengerPhone,
-
                 passengerRating = 4.9,
-
                 seatsBooked = seatsBooked,
-
                 pickupStop = pickupStop,
-
                 isFullCar = isFullCar,
-
                 totalFarePkr = totalFarePkr,
-
-                status = "CONFIRMED",
-
+                status = "PENDING",
                 bookedAt = System.currentTimeMillis()
-
             )
 
             val bookingsList = localDepartureBookings.getOrPut(departureId) { mutableListOf() }
-
             bookingsList.add(booking)
 
-
-
             val dep = localPlannedDepartures[departureId]
+            val perSeatFare = if (seatsBooked > 0) totalFarePkr / seatsBooked else totalFarePkr
+            val standardAsking = dep?.farePerSeat ?: perSeatFare
+            val diff = perSeatFare - standardAsking
+            val tag = if (diff < 0) "OFFERED PKR ${-diff} LESS" else if (diff > 0) "OFFERED PKR $diff MORE" else "RIDER SEAT REQUEST"
+
+            val offer = PlannedDepartureOffer(
+                id = booking.id,
+                departureId = departureId,
+                passengerId = passengerId,
+                passengerName = passengerName.ifBlank { "Rider" },
+                passengerPhone = passengerPhone.ifBlank { "+92 300 0000000" },
+                passengerRating = 4.9,
+                passengerRidesCompleted = 12,
+                isVerified = true,
+                bookingType = if (isFullCar) "PRIVATE" else "SHARED",
+                requestedSeats = seatsBooked,
+                luggageDetails = "Standard Luggage",
+                pickupPoint = pickupStop.ifBlank { "Selected Pickup Location" },
+                dropoffPoint = dep?.dropoffCity ?: "Destination",
+                standardAsking = standardAsking,
+                offeredFare = perSeatFare,
+                differencePkr = diff,
+                tagText = tag,
+                isFullFare = diff >= 0,
+                status = "PENDING",
+                createdAt = System.currentTimeMillis()
+            )
+
+            val offersList = localDepartureOffers.getOrPut(departureId) { mutableListOf() }
+            offersList.add(offer)
 
             if (dep != null) {
-
-                val newBooked = dep.bookedSeatsCount + seatsBooked
-
-                val newAvailable = (dep.totalSeats - newBooked).coerceAtLeast(0)
-
-                val newStatus = if (newAvailable == 0 || isFullCar) "FULL" else "ACTIVE"
-
                 val updatedDep = dep.copy(
-
-                    bookedSeatsCount = newBooked,
-
-                    availableSeats = newAvailable,
-
-                    isFullCarBooked = isFullCar,
-
-                    status = newStatus
-
+                    offersReceivedCount = dep.offersReceivedCount + 1
                 )
-
                 localPlannedDepartures[departureId] = updatedDep
-
                 savePlannedDeparture(updatedDep)
-
             }
 
-
-
             try {
-
                 val db = try {
-
                     FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
-
                 } catch (_: Exception) {
-
                     FirebaseDatabase.getInstance()
-
                 }
 
                 val bookingMap = hashMapOf<String, Any>(
-
                     "id" to booking.id,
-
                     "departureId" to booking.departureId,
-
                     "passengerId" to booking.passengerId,
-
                     "passengerName" to booking.passengerName,
-
                     "passengerPhone" to booking.passengerPhone,
-
                     "passengerRating" to booking.passengerRating,
-
                     "seatsBooked" to booking.seatsBooked,
-
                     "pickupStop" to booking.pickupStop,
-
                     "isFullCar" to booking.isFullCar,
-
                     "totalFarePkr" to booking.totalFarePkr,
-
                     "status" to booking.status,
-
                     "bookedAt" to booking.bookedAt
-
                 )
 
                 db.getReference("planned_departure_bookings").child(departureId).child(booking.id).setValue(bookingMap).await()
 
+                val offerMap = hashMapOf<String, Any>(
+                    "id" to offer.id,
+                    "departureId" to offer.departureId,
+                    "passengerId" to offer.passengerId,
+                    "passengerName" to offer.passengerName,
+                    "passengerPhone" to offer.passengerPhone,
+                    "passengerRating" to offer.passengerRating,
+                    "passengerRidesCompleted" to offer.passengerRidesCompleted,
+                    "isVerified" to offer.isVerified,
+                    "bookingType" to offer.bookingType,
+                    "requestedSeats" to offer.requestedSeats,
+                    "luggageDetails" to offer.luggageDetails,
+                    "pickupPoint" to offer.pickupPoint,
+                    "dropoffPoint" to offer.dropoffPoint,
+                    "standardAsking" to offer.standardAsking,
+                    "offeredFare" to offer.offeredFare,
+                    "differencePkr" to offer.differencePkr,
+                    "tagText" to offer.tagText,
+                    "isFullFare" to offer.isFullFare,
+                    "status" to offer.status,
+                    "createdAt" to offer.createdAt
+                )
+
+                db.getReference("planned_departure_offers").child(departureId).child(offer.id).setValue(offerMap).await()
             } catch (_: Exception) {}
 
 
