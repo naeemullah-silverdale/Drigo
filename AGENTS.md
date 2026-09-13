@@ -25,10 +25,12 @@ Before inspecting files, writing code, executing commands, or answering technica
    - Selecting or updating `TO` must **NEVER** overwrite `FROM`.
    - Selecting or updating `FROM` must **NEVER** overwrite `TO`.
    - GPS/current location updates must **NEVER** overwrite explicit user-selected locations.
-3. **Mass-Market Android Compatibility**:
+3. **Mass-Market Android Compatibility & Universal Responsive UI**:
    - `minSdk = 23` (Android 6.0).
-   - Design primarily for compact budget devices (320dp–360dp available width, 2GB–4GB RAM).
-   - Use `dp` for layout dimensions and `sp` for typography. Never hardcode fixed pixel coordinates.
+   - Design primarily for compact budget devices (320dp–360dp available width, 2GB–4GB RAM) while remaining clean on tablets and large screens.
+   - Use `dp` for layout dimensions and `sp` for typography. Never hardcode fixed pixel coordinates or static offsets that overlap UI elements.
+   - **Zero-Overlap Guarantee**: NEVER allow floating action buttons (e.g. Recenter FAB) to overlap bottom sheet headers, drag handles, or text badges.
+   - **Adaptive Layouts**: Use `BoxWithConstraints`, flexible `weight()`, or `FlowRow` for action button rows so passenger names, titles, and fares are never truncated awkwardly or crowded by icon clusters.
    - Support device insets (`WindowInsets`), status bar, gesture navigation, and display cutouts.
 4. **Git Branching Discipline**:
    - **NEVER commit or push directly to `main`**.

@@ -545,9 +545,41 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
    - Integrated with `RealOsmMapView.onMapInteractionChange = { isInteracting -> isMapTouched = isInteracting }`.
    - **On Map Touch / Pan / Zoom**: The bottom sheet card smoothly glides down toward the bottom edge (`y = 440.dp`), exposing the full map in full screen with Driver car, Pickup A, and Destination B markers.
    - **On Untap / Release**: The sheet automatically slides back up (`y = 0.dp`) covering ~60% of the screen with ride details and action buttons.
-3. **Compilation & Push**:
-   - Verified compilation with `compile_applet` (0 errors).
-   - Committed (`ba7d215`) and pushed to `fix/driver-feed-radar-and-map-inspection`.
+---
+
+## 17. DIAGNOSTIC & FIX SPECIFICATION: RESPONSIVE ACTIVE RIDE UI OVERHAUL & ZERO-OVERLAP GUARANTEE (ALL SCREEN SIZES)
+
+### 🛑 Problem Diagnosis & Issue Verification (CONFIRMED)
+- **Issue Confirmed**: Yes! Verified in `DriverModeView.kt` and corroborated by user screenshot `image.png`.
+- **Identified Deficiencies**:
+  1. **Recenter FAB Overlap with Sheet Header**:
+     - The compass/recenter FAB (`driver_recenter_location_btn`) is positioned with a hardcoded `bottom = 300.dp` padding (line 3182).
+     - On 360dp width / compact height devices, this positions the green navigation FAB directly over the right side of the bottom sheet header text (`"Details^"`), causing severe visual clutter and accidental touch misfires.
+  2. **Passenger Header Row Crowding & Severe Truncation**:
+     - In `DriverModeView.kt` (lines 1932–2098), passenger avatar + name (`Newbr...`) + star rating (`★ 4.9`) + fare (`Fare: PKR 2014 ...`) are placed in a single rigid `Row` alongside 4 large circular action buttons (`GPS Navigate`, `Call`, `Chat`, `Share`).
+     - Because 4 action buttons consume ~156dp of horizontal space, only ~128dp remains for the passenger name and fare text on a 360dp device, forcing aggressive truncation (`Newbr...`, `Fare: PKR 2014 ...`).
+  3. **Top Navigation Banner ("Drive to ...") Clutter**:
+     - In `DriverModeView.kt` (lines 1533–1610), the turn-by-turn banner places the destination instruction, ETA, speed, and two action buttons (`Maps`, `Share`) in a cramped horizontal container.
+     - On compact screens, the main instruction truncates into `Drive to ...`, obscuring whether the driver is navigating to Pickup or Drop-off.
+  4. **Location Summary Card Truncation**:
+     - Pickup address (`Pickup: ... مر باغ, بخشى`) is truncated in the middle due to fixed row constraints and competing distance text (`0.5 km to Pickup`).
+
+### 📋 Planned Fix Action Items
+1. **Dynamic Zero-Overlap Recenter FAB Positioning**:
+   - Re-position the Recenter FAB (`driver_recenter_location_btn`) to anchor dynamically above the top edge of the active trip sheet or stack it safely in a dedicated top-right control column, ensuring **zero overlap** with the bottom sheet drag handle, badge, or "Details^" toggle button across all device heights.
+2. **2-Row Responsive Layout for Active Ride Passenger Panel**:
+   - Re-architect the passenger info section in `DriverModeView.kt`:
+     - **Row 1 (Passenger & Fare Info)**: Avatar + Passenger Name (full width with `Modifier.weight(1f)`) + Rating Badge (`★ 4.9`) + Prominent Green Fare Pill (`PKR 2,014`).
+     - **Row 2 (Action Controls Bar)**: Full-width clean action bar containing `Call`, `Chat`, `GPS Nav`, and `Share` evenly distributed using `Arrangement.SpaceEvenly` with clear touch targets.
+   - Eliminates horizontal text squishing and ensures names and fares are 100% legible on budget screens (320dp–360dp).
+3. **Responsive Top Navigation Banner**:
+   - Re-architect the top turn-by-turn banner using a responsive layout:
+     - Clear target label (`Heading to Pickup` vs `Heading to Drop-off`) with full location title on line 1.
+     - Sub-row displaying ETA, distance remaining, speed, and compact `Maps` / `Share` action buttons.
+4. **Adaptive Address Line Handling**:
+   - Allow up to 2 lines for pickup/destination titles with `TextOverflow.Ellipsis` and clean spacing so full street and landmark names are legible on compact phones.
+5. **No Code Changed Yet**: Awaiting user's explicit "apply the fix" command before modifying application code.
+
 
 
 
