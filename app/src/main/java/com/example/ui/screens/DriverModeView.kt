@@ -1370,23 +1370,20 @@ fun DriverModeView(
             }
         )
 
-        // Top Header Gradient Overlay & App Bar
-        Box(
+        // Top Header Solid Overlay & App Bar (Fixes map bleed-through bug)
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 3.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.95f else 0.98f),
-                            MaterialTheme.colorScheme.surface.copy(alpha = if (isDark) 0.80f else 0.85f),
-                            Color.Transparent
-                        )
-                    )
-                )
-                .statusBarsPadding()
-                .padding(horizontal = 10.dp, vertical = 8.dp)
                 .align(Alignment.TopCenter)
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
             BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                 val availableWidth = maxWidth
                 val isCompact = availableWidth < 365.dp
@@ -1540,6 +1537,7 @@ fun DriverModeView(
                 }
             }
         }
+    }
 
         // Active Trip Turn-by-Turn Navigation Bar (Item 2)
         if (activeDriverTrip != null && !isActiveTripSheetExpanded) {
@@ -3020,69 +3018,6 @@ fun DriverModeView(
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                            }
-                        }
-                    }
-
-                    // City to City Intercity Driver Action Banner
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = DrigoBrandPurple,
-                        shadowElevation = 2.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp, vertical = 4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DirectionsBus,
-                                    contentDescription = "City to City",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "City to City Intercity",
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = "Post departures & sell seats",
-                                        color = Color.White.copy(alpha = 0.85f),
-                                        fontSize = 11.sp
-                                    )
-                                }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Button(
-                                    onClick = { showPostPlannedRideScreen = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DrigoBrandPurple),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(32.dp)
-                                ) {
-                                    Text("+ Post Ride", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                                OutlinedButton(
-                                    onClick = { showPlannedDeparturesScreen = true },
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                    border = BorderStroke(1.dp, Color.White),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(32.dp)
-                                ) {
-                                    Text("My Rides", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
                             }
                         }
                     }

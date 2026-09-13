@@ -83,7 +83,12 @@
 
 ## 🌿 5. GIT BRANCHES & COMMIT LOG
 
-- **Active Branch:** `feature/firebase-dataconnect-sql`
+- **Active Branch:** `main`
+- **Planned Driver Mode UI Refinements & Fixes:**
+  1. **Map Bleed-Through Bug Fix:** Update top header container in `DriverModeView.kt` (lines 1374-1386) to use a solid background (`MaterialTheme.colorScheme.surface` / `Color.White`) with proper `statusBarsPadding()` instead of a transparent vertical gradient, preventing the underlying `RealOsmMapView` from bleeding through behind the status bar, hamburger menu button, Online switch pill, and settings button.
+  2. **City to City Intercity Banner Removal:** Remove the `City to City Intercity` purple banner `Surface` card (lines 3027-3086 in `DriverModeView.kt`) from the main ride requests list feed. All underlying Intercity feature logic, state management, screens (`ManageDepartureScreen`, `PlannedDeparturesScreen`, `CityToCityPassengerFlow`), bottom navigation "City to city" tab, and drawer entry points remain 100% intact.
+  3. **Radar View & Layout Polish:** With the banner removed, ensure the animated scanning radar container (`InDriveRadarView`) in the empty state seamlessly fills the available vertical space (`weight(1f)`), delivering a spacious, centered, and professional UI layout.
+
 - **Recent Commit History:**
   - `ebbe3fc` - `feat: integrate city-to-city intercity departure screens and entry points in driver and passenger views`
   - `cb39841` - `feat: add Firebase Data Connect SDK and manager for Cloud SQL integration (drigo-8b15c)`
