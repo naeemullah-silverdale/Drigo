@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Gradient Circle Badge -->
+    <path
+        android:pathData="M54,6 A48,48 0 1,0 54,102 A48,48 0 1,0 54,6">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="12"
+                android:startY="12"
+                android:endX="96"
+                android:endY="96"
+                android:type="linear">
+                <item android:color="#8B004F" android:offset="0.0" />
+                <item android:color="#B642F5" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Outer glowing ring accent -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#40FFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M54,10 A44,44 0 1,0 54,98 A44,44 0 1,0 54,10" />
+
+    <!-- Stylized White 'D' Location Pin Frame -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 C42,20 32,30 32,42 C32,56 48,74 52.5,78.8 C53.3,79.6 54.7,79.6 55.5,78.8 C60,74 76,56 76,42 C76,30 66,20 54,20 Z M54,58 C45.2,58 38,50.8 38,42 C38,33.2 45.2,26 54,26 C62.8,26 70,33.2 70,42 C70,50.8 62.8,58 54,58 Z" />
+
+    <!-- Bright Fuchsia / Magenta Inner Pulse Circle -->
+    <path
+        android:pathData="M54,30 A12,12 0 1,0 54,54 A12,12 0 1,0 54,30">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="42"
+                android:startY="30"
+                android:endX="66"
+                android:endY="54"
+                android:type="linear">
+                <item android:color="#FF00CC" android:offset="0.0" />
+                <item android:color="#8B004F" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Sleek White Ride Car Silhouette in Center of Pin -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,36 L50.5,33 C51,32.4 51.7,32 52.5,32 L55.5,32 C56.3,32 57,32.4 57.5,33 L60,36 L63.5,36 C64.3,36 65,36.7 65,37.5 L65,42.5 C65,43.3 64.3,44 63.5,44 L63,44 L63,45.5 C63,46.3 62.3,47 61.5,47 L60.5,47 C59.7,47 59,46.3 59,45.5 L59,44 L49,44 L49,45.5 C49,46.3 48.3,47 47.5,47 L46.5,47 C45.7,47 45,46.3 45,45.5 L45,44 L44.5,44 C43.7,44 43,43.3 43,42.5 L43,37.5 C43,36.7 43.7,36 44.5,36 Z M48.5,37.5 C48.8,37.5 49,37.3 49,37 C49,36.7 48.8,36.5 48.5,36.5 C48.2,36.5 48,36.7 48,37 C48,37.3 48.2,37.5 48.5,37.5 Z M59.5,37.5 C59.8,37.5 60,37.3 60,37 C60,36.7 59.8,36.5 59.5,36.5 C59.2,36.5 59,36.7 59,37 C59,37.3 59.2,37.5 59.5,37.5 Z M50.5,36 L57.5,36 L56,33.5 L52,33.5 Z" />
+
+    <!-- Green Active Driver / Passenger Pulse Beacon at the base -->
+    <path
+        android:fillColor="#00E676"
+        android:pathData="M54,82 A4,4 0 1,0 54,90 A4,4 0 1,0 54,82" />
+
+</vector>
