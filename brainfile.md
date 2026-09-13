@@ -85,7 +85,8 @@
 
 - **Active Branch:** `feature/firebase-dataconnect-sql`
 - **Recent Commit History:**
-  - `feat: add Firebase Data Connect SDK and manager for Cloud SQL integration (drigo-8b15c)`
+  - `ebbe3fc` - `feat: integrate city-to-city intercity departure screens and entry points in driver and passenger views`
+  - `cb39841` - `feat: add Firebase Data Connect SDK and manager for Cloud SQL integration (drigo-8b15c)`
   - `662f4f9` - `fix: resolve PlannedDeparture data model and FirebaseRepository compilation errors`
   - `374935b` - `feat: implement dynamic ThemeManager with DataStore, high-contrast themes, driver sheets theme adherence, and Drigo branding`
   - `5c21f7a` - `refactor: consume ThemeManager.themeMode StateFlow directly in MainActivity setContent for instant app-wide theme propagation`
