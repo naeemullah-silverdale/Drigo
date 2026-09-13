@@ -97,6 +97,10 @@ private fun com.google.firebase.database.DataSnapshot.getBooleanVal(key: String,
 
 class FirebaseRepository private constructor(private val context: Context) {
 
+    val dataConnectManager: FirebaseDataConnectManager by lazy {
+        FirebaseDataConnectManager.getInstance(context)
+    }
+
     companion object {
         private const val TAG = "FirebaseRepository"
         private const val TRIPS_COLLECTION = "trips"

@@ -35,10 +35,16 @@
 
 ### 📦 `FirebaseRepository` (`com.example.data.remote.FirebaseRepository`)
 - Singleton handling network and database interactions:
+  - Exposes `dataConnectManager` for Firebase Data Connect (Cloud SQL / PostgreSQL) queries/mutations (`drigo-8b15c`).
   - Driver & Passenger order queries (`listenToPassengerOrders`, `listenToDriverActiveTrip`)
   - Live location streaming (`updateDriverLocation`, `observeLiveDriverLocation`)
   - Rating system (`saveRideRating`, `hasUserRatedRide`)
   - Safety reports (`submitSafetyReport`)
+
+### 🔌 `FirebaseDataConnectManager` (`com.example.data.remote.FirebaseDataConnectManager`)
+- **Role:** Thread-safe singleton managing Firebase Data Connect (Cloud SQL / PostgreSQL) integration.
+- **Configured Service Connector:** `us-south1/drigo-8b15c-service/default`
+- **Exposed State:** `val isConnected: StateFlow<Boolean>`, `val lastSyncTimestamp: StateFlow<Long>`
 
 ### 🎨 `ThemeManager` (`com.example.util.ThemeManager`) & `ThemePreference` (`com.example.util.ThemePreference`)
 - **Role:** Centralized theme mode management for `LIGHT`, `DARK`, and `SYSTEM` modes.
@@ -77,9 +83,10 @@
 
 ## 🌿 5. GIT BRANCHES & COMMIT LOG
 
-- **Active Branch:** `fix/compilation-and-firebase-models`
+- **Active Branch:** `feature/firebase-dataconnect-sql`
 - **Recent Commit History:**
-  - `fix: resolve PlannedDeparture data model and FirebaseRepository compilation errors`
+  - `feat: add Firebase Data Connect SDK and manager for Cloud SQL integration (drigo-8b15c)`
+  - `662f4f9` - `fix: resolve PlannedDeparture data model and FirebaseRepository compilation errors`
   - `374935b` - `feat: implement dynamic ThemeManager with DataStore, high-contrast themes, driver sheets theme adherence, and Drigo branding`
   - `5c21f7a` - `refactor: consume ThemeManager.themeMode StateFlow directly in MainActivity setContent for instant app-wide theme propagation`
   - `9b8d23e` - `fix: audit and align compose screen color tokens with MaterialTheme colorScheme and user theme preference`

@@ -118,6 +118,7 @@ dependencies {
   implementation(libs.firebase.database)
   implementation(libs.firebase.storage)
   implementation(libs.firebase.auth)
+  implementation(libs.firebase.dataconnect)
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
