@@ -64,6 +64,12 @@ class MainViewModel(
         } catch (_: Exception) {}
     }
 
+    // Local DataStore Role Preference Manager
+    private val userRolePref by lazy { com.example.util.UserRolePreference(com.example.DrigoApplication.instance) }
+
+    private val _isRoleLoaded = MutableStateFlow(false)
+    val isRoleLoaded = _isRoleLoaded.asStateFlow()
+
     // Default mode is PASSENGER for new and logged-in users
     private val _userMode = MutableStateFlow(UserMode.PASSENGER)
     val userMode = _userMode.asStateFlow()
@@ -111,6 +117,17 @@ class MainViewModel(
     private var rideRequestsJob: kotlinx.coroutines.Job? = null
 
     init {
+        viewModelScope.launch {
+            try {
+                userRolePref.userModeFlow.collect { mode ->
+                    _userMode.value = mode
+                    _isRoleLoaded.value = true
+                }
+            } catch (_: Exception) {
+                _isRoleLoaded.value = true
+            }
+        }
+
         viewModelScope.launch {
             authRepo.authStateFlow().collect { user ->
                 _currentUser.value = user
@@ -239,14 +256,14 @@ class MainViewModel(
             override fun onDataChange(snapshot: DataSnapshot) {
                 val modeStr = snapshot.getValue(String::class.java)
                 if (modeStr == "DRIVER") {
-                    _userMode.value = UserMode.DRIVER
-                } else {
-                    _userMode.value = UserMode.PASSENGER
+                    setUserMode(UserMode.DRIVER)
+                } else if (modeStr == "PASSENGER") {
+                    setUserMode(UserMode.PASSENGER)
                 }
             }
 
             override fun onCancelled(error: DatabaseError) {
-                _userMode.value = UserMode.PASSENGER
+                // Keep local DataStore role preference if Firebase read fails/offline
             }
         })
     }
@@ -293,10 +310,22 @@ class MainViewModel(
 
     fun setUserMode(mode: UserMode) {
         _userMode.value = mode
+        viewModelScope.launch {
+            try {
+                userRolePref.setUserMode(mode)
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Failed to persist user mode in DataStore: ${e.message}")
+            }
+        }
         val uid = _currentUser.value?.uid ?: return
         viewModelScope.launch {
             try {
-                FirebaseDatabase.getInstance().getReference("users").child(uid).child("mode")
+                val db = try {
+                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                } catch (_: Exception) {
+                    FirebaseDatabase.getInstance()
+                }
+                db.getReference("users").child(uid).child("mode")
                     .setValue(mode.name).await()
             } catch (_: Exception) {
                 // Ignore sync errors

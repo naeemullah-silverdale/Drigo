@@ -9,8 +9,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
@@ -105,6 +107,7 @@ fun DrigoApp(viewModel: MainViewModel) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val userMode by viewModel.userMode.collectAsState()
+    val isRoleLoaded by viewModel.isRoleLoaded.collectAsState()
     val isDriverOnline by viewModel.isDriverOnline.collectAsState()
     val driverVerification by viewModel.driverVerification.collectAsState()
     val liveRideRequests by viewModel.liveRideRequests.collectAsState()
@@ -176,32 +179,43 @@ fun DrigoApp(viewModel: MainViewModel) {
                 )
             }
             AppScreen.HOME_PLACEHOLDER -> {
-                HomeScreen(
-                    user = currentUser,
-                    userMode = userMode,
-                    isDriverOnline = isDriverOnline,
-                    onToggleDriverOnline = {
-                        viewModel.toggleDriverOnline()
-                    },
-                    onSwitchUserMode = { mode ->
-                        viewModel.attemptSwitchUserMode(mode)
-                    },
-                    onSignOutClick = {
-                        viewModel.signOut()
-                    },
-                    onNavigateToWallet = {
-                        viewModel.navigateTo(AppScreen.WALLET)
-                    },
-                    onNavigateToGoogleDrive = {
-                        viewModel.navigateTo(AppScreen.GOOGLE_DRIVE_DOCUMENTS)
-                    },
-                    onNavigateToTripHistory = {
-                        viewModel.navigateTo(AppScreen.HISTORY)
-                    },
-                    driverVerification = driverVerification,
-                    liveRideRequests = liveRideRequests,
-                    onRefreshDriverRideRequests = { viewModel.refreshDriverRideRequests() }
-                )
+                if (!isRoleLoaded) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                } else {
+                    HomeScreen(
+                        user = currentUser,
+                        userMode = userMode,
+                        isDriverOnline = isDriverOnline,
+                        onToggleDriverOnline = {
+                            viewModel.toggleDriverOnline()
+                        },
+                        onSwitchUserMode = { mode ->
+                            viewModel.attemptSwitchUserMode(mode)
+                        },
+                        onSignOutClick = {
+                            viewModel.signOut()
+                        },
+                        onNavigateToWallet = {
+                            viewModel.navigateTo(AppScreen.WALLET)
+                        },
+                        onNavigateToGoogleDrive = {
+                            viewModel.navigateTo(AppScreen.GOOGLE_DRIVE_DOCUMENTS)
+                        },
+                        onNavigateToTripHistory = {
+                            viewModel.navigateTo(AppScreen.HISTORY)
+                        },
+                        driverVerification = driverVerification,
+                        liveRideRequests = liveRideRequests,
+                        onRefreshDriverRideRequests = { viewModel.refreshDriverRideRequests() }
+                    )
+                }
             }
             AppScreen.WALLET -> {
                 WalletScreen(

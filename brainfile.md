@@ -89,6 +89,11 @@
   2. **City to City Intercity Banner Removal:** Removed the `City to City Intercity` purple card banner from the main ride requests list feed in `DriverModeView.kt`. All underlying Intercity feature logic, state handlers, management screens (`ManageDepartureScreen`, `PlannedDeparturesScreen`), bottom navigation "City to city" tab, and drawer entry points remain 100% intact.
   3. **Radar View & Layout Polish:** The animated radar scanning view (`InDriveRadarView`) now expands cleanly to fill the full remaining vertical space (`weight(1f)`), delivering a spacious, uncluttered layout.
 
+- **Completed User Mode Persistence via DataStore:**
+  1. **DataStore Local Storage Setup:** Implemented `UserRolePreference.kt` (`com.example.util`) using `androidx.datastore.preferencesDataStore` to persist `UserMode` (`PASSENGER` or `DRIVER`) locally on device.
+  2. **Asynchronous Mode Persistence:** Updated `MainViewModel.setUserMode()` and `attemptSwitchUserMode()` to save selected `UserMode` to `UserRolePreference` asynchronously upon role toggle, while maintaining background sync to Firebase RTDB (`users/{uid}/mode`).
+  3. **App Launch & Reactive State Routing:** Observed `userModeFlow` from DataStore on startup in `MainViewModel` and exposed `isRoleLoaded` state. `MainActivity.kt` renders a smooth loading transition while DataStore initializes, preventing screen flickering and preserving role state across app restarts.
+
 - **Recent Commit History:**
   - `4c6dbd4` - `fix: remove intercity banner from driver main feed and make top header bar background solid`
   - `1d50c62` - `Merge fix/driver-feed-radar-and-map-inspection into main: restore driver feed radar, active trip flow, and integrate city to city feature`
