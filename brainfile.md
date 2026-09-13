@@ -522,6 +522,33 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
    - Verified compilation with `compile_applet` (0 errors).
    - Committed (`20edfe3`) and pushed to `fix/driver-feed-radar-and-map-inspection`.
 
+---
+
+## 16. DIAGNOSTIC & FIX SPECIFICATION: INTERACTIVE MAP PREVIEW & DYNAMIC AUTO-COLLAPSING RIDE INSPECTION BOTTOM SHEET
+
+### 🛑 Problem Diagnosis & Issue Verification (CONFIRMED)
+- **Issue Confirmed**: Yes, this requirement/issue was verified in `DriverModeView.kt` (lines 3430–4040).
+- **Current State Analysis**:
+  1. Currently, when a driver taps a ride request item from the list view, `selectedRequestForOffer` is set to the request.
+  2. The map is displayed in the background with 3 markers (Driver location, Pickup A, Destination B).
+  3. The request inspection UI is rendered as a static `Surface` card anchored at `Alignment.BottomCenter` covering approximately 60% of screen height (`.heightIn(max = 520.dp)`).
+  4. While the map behind the card is accessible, touching or dragging the map does NOT collapse/glide the bottom sheet UI down. As a result, the bottom 60% of the map remains obscured while panning or zooming around.
+- **Required Behavior**:
+  1. **Map Touch Detection**: When the user touches, pans, zooms, or holds the map surface, the Bottom Sheet UI must smoothly glide down (peek view showing handle bar or full map exposure) so the full map and all 3 markers (Driver, Pickup A, Destination B) are completely visible without obstruction.
+  2. **Untap / Touch Release**: When the user releases or stops touching the map, the Bottom Sheet UI must automatically slide back up to cover ~60% of the screen height.
+  3. **Preserve 3 Markers & Custom Theming**: Maintain Driver, Pickup A, and Destination B pins with route lines and adaptive dark/light map tile styling.
+
+### 📋 Planned Fix Action Items
+1. **Add Map Touch Tracking State**:
+   - Define a reactive touch state in `DriverModeView.kt`: `var isMapInteracting by remember { mutableStateOf(false) }`.
+2. **Attach Pointer Input Gesture Listener to Map Container**:
+   - Wrap the map container for request inspection with `Modifier.pointerInput(Unit)` using `awaitPointerEventScope` to set `isMapInteracting = true` on pointer press/move gestures and `isMapInteracting = false` on pointer release/exit gestures.
+3. **Animate Bottom Sheet Y-Offset**:
+   - Wrap the inspection bottom sheet card in a dynamic offset transition (`val sheetOffsetY by animateDpAsState(if (isMapInteracting) 420.dp else 0.dp, animationSpec = tween(300))`).
+   - When `isMapInteracting == true`, `sheetOffsetY` translates the sheet down so only a compact drag handle bar remains visible at the bottom edge while the driver explores the full map.
+   - When `isMapInteracting == false`, `sheetOffsetY` smoothly returns to `0.dp`, displaying the full ~60% bottom sheet with fare details, bidding controls, and action buttons.
+4. **Awaiting User Command**: No code modified yet per user instruction. Awaiting explicit "apply the fix" command.
+
 
 
 

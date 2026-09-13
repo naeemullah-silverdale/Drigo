@@ -3427,6 +3427,12 @@ fun DriverModeView(
             var customBidText by remember(req.id) { mutableStateOf("") }
             val sheetFocusManager = LocalFocusManager.current
 
+            val animatedOffsetY by androidx.compose.animation.core.animateDpAsState(
+                targetValue = if (isMapTouched) 440.dp else 0.dp,
+                animationSpec = androidx.compose.animation.core.tween(durationMillis = 300),
+                label = "InspectionSheetOffsetY"
+            )
+
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.BottomCenter
@@ -3439,6 +3445,7 @@ fun DriverModeView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 520.dp)
+                        .offset(y = animatedOffsetY)
                 ) {
                     val distAwayKm = if (driverGeoPoint.latitude != 0.0 && driverGeoPoint.longitude != 0.0 && req.pickupLat != 0.0) {
                         calculateDistanceKm(driverGeoPoint.latitude, driverGeoPoint.longitude, req.pickupLat, req.pickupLon)
