@@ -538,16 +538,16 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
   2. **Untap / Touch Release**: When the user releases or stops touching the map, the Bottom Sheet UI must automatically slide back up to cover ~60% of the screen height.
   3. **Preserve 3 Markers & Custom Theming**: Maintain Driver, Pickup A, and Destination B pins with route lines and adaptive dark/light map tile styling.
 
-### 📋 Planned Fix Action Items
-1. **Add Map Touch Tracking State**:
-   - Define a reactive touch state in `DriverModeView.kt`: `var isMapInteracting by remember { mutableStateOf(false) }`.
-2. **Attach Pointer Input Gesture Listener to Map Container**:
-   - Wrap the map container for request inspection with `Modifier.pointerInput(Unit)` using `awaitPointerEventScope` to set `isMapInteracting = true` on pointer press/move gestures and `isMapInteracting = false` on pointer release/exit gestures.
-3. **Animate Bottom Sheet Y-Offset**:
-   - Wrap the inspection bottom sheet card in a dynamic offset transition (`val sheetOffsetY by animateDpAsState(if (isMapInteracting) 420.dp else 0.dp, animationSpec = tween(300))`).
-   - When `isMapInteracting == true`, `sheetOffsetY` translates the sheet down so only a compact drag handle bar remains visible at the bottom edge while the driver explores the full map.
-   - When `isMapInteracting == false`, `sheetOffsetY` smoothly returns to `0.dp`, displaying the full ~60% bottom sheet with fare details, bidding controls, and action buttons.
-4. **Awaiting User Command**: No code modified yet per user instruction. Awaiting explicit "apply the fix" command.
+### 📋 Fix Implemented & Verified (COMPLETED)
+1. **Dynamic Animated Y-Offset for Bottom Sheet Card**:
+   - In `DriverModeView.kt` (`selectedRequestForOffer`), added `val animatedOffsetY by animateDpAsState(if (isMapInteracting) 440.dp else 0.dp, animationSpec = tween(300))`.
+2. **Seamless Touch-Driven Map Interaction**:
+   - Integrated with `RealOsmMapView.onMapInteractionChange = { isInteracting -> isMapTouched = isInteracting }`.
+   - **On Map Touch / Pan / Zoom**: The bottom sheet card smoothly glides down toward the bottom edge (`y = 440.dp`), exposing the full map in full screen with Driver car, Pickup A, and Destination B markers.
+   - **On Untap / Release**: The sheet automatically slides back up (`y = 0.dp`) covering ~60% of the screen with ride details and action buttons.
+3. **Compilation & Push**:
+   - Verified compilation with `compile_applet` (0 errors).
+   - Committed (`ba7d215`) and pushed to `fix/driver-feed-radar-and-map-inspection`.
 
 
 
