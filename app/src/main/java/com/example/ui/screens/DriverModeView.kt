@@ -63,6 +63,9 @@ import com.example.ui.components.PostRideRatingDialog
 import com.example.ui.components.SafetyReportDialog
 import com.example.ui.components.NotificationCenterSheet
 import com.example.ui.components.DriverLocationOffScreen
+import com.example.ui.screens.PlannedDeparturesScreen
+import com.example.ui.screens.PostPlannedRideScreen
+import com.example.ui.screens.ManageDepartureScreen
 import com.example.ui.screens.driver.DriverPerformanceScreen
 import com.example.ui.screens.driver.DriverTripHistoryScreen
 import com.example.ui.screens.driver.DriverRideRequestCard
@@ -363,6 +366,9 @@ fun DriverModeView(
 
     // Bottom Navigation & Performance Gamification System (Image 2)
     var selectedDriverTab by remember { mutableStateOf("REQUESTS") } // "REQUESTS", "PERFORMANCE", or "HISTORY"
+    var showPlannedDeparturesScreen by remember { mutableStateOf(false) }
+    var showPostPlannedRideScreen by remember { mutableStateOf(false) }
+    var selectedDepartureToManage by remember { mutableStateOf<String?>(null) }
     var driverRidesThisWeek by remember { mutableIntStateOf(10) }
     var driverPerformanceRating by remember { mutableDoubleStateOf(5.00) }
     var todayIncomePkr by remember { mutableIntStateOf(0) }
@@ -528,6 +534,9 @@ fun DriverModeView(
             showChangeVehicleDialog ||
             showTariffsSheet ||
             showFilterSheet ||
+            showPlannedDeparturesScreen ||
+            showPostPlannedRideScreen ||
+            selectedDepartureToManage != null ||
             selectedRequestForOffer != null ||
             selectedDriverTab != "REQUESTS"
 
@@ -546,6 +555,9 @@ fun DriverModeView(
             showChangeVehicleDialog -> showChangeVehicleDialog = false
             showTariffsSheet -> showTariffsSheet = false
             showFilterSheet -> showFilterSheet = false
+            selectedDepartureToManage != null -> selectedDepartureToManage = null
+            showPostPlannedRideScreen -> showPostPlannedRideScreen = false
+            showPlannedDeparturesScreen -> showPlannedDeparturesScreen = false
             selectedRequestForOffer != null -> selectedRequestForOffer = null
             selectedDriverTab != "REQUESTS" -> selectedDriverTab = "REQUESTS"
         }
@@ -3241,6 +3253,69 @@ fun DriverModeView(
                         }
                     }
 
+                    // City to City Intercity Driver Action Banner
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = DrigoBrandPurple,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DirectionsBus,
+                                    contentDescription = "City to City",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "City to City Intercity",
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = "Post departures & sell seats",
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = { showPostPlannedRideScreen = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = DrigoBrandPurple),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("+ Post Ride", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { showPlannedDeparturesScreen = true },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                    border = BorderStroke(1.dp, Color.White),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("My Rides", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
                     if (filteredRequests.isEmpty()) {
                         Box(
                             modifier = Modifier
@@ -3628,6 +3703,35 @@ fun DriverModeView(
                             )
                         }
                     }
+
+                    // City to City Intercity Tab
+                    Surface(
+                        onClick = { showPlannedDeparturesScreen = true },
+                        color = Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("driver_nav_city_tab")
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DirectionsBus,
+                                contentDescription = "City to city",
+                                tint = if (showPlannedDeparturesScreen) DrigoBrandPurple else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "City to city",
+                                fontSize = 12.sp,
+                                fontWeight = if (showPlannedDeparturesScreen) FontWeight.ExtraBold else FontWeight.Normal,
+                                color = if (showPlannedDeparturesScreen) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -3660,6 +3764,51 @@ fun DriverModeView(
                 completedTrips = activeDriverTripHistoryList,
                 onOpenDrawer = onOpenDrawer,
                 onBackClick = { selectedDriverTab = "REQUESTS" },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // City to City Planned Departures Screen Overlay (Driver)
+        if (showPlannedDeparturesScreen && activeDriverTrip == null) {
+            PlannedDeparturesScreen(
+                driverId = driverId.ifBlank { driverPhone },
+                driverName = driverName,
+                driverPhone = driverPhone,
+                onBackClick = { showPlannedDeparturesScreen = false },
+                onPostRideClick = {
+                    showPlannedDeparturesScreen = false
+                    showPostPlannedRideScreen = true
+                },
+                onManageDeparture = { departure ->
+                    selectedDepartureToManage = departure.id
+                },
+                onOpenSos = { showDriverReportIncident = true },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Post Planned Intercity Ride Screen Overlay (Driver)
+        if (showPostPlannedRideScreen && activeDriverTrip == null) {
+            PostPlannedRideScreen(
+                driverId = driverId.ifBlank { driverPhone },
+                driverName = driverName,
+                driverPhone = driverPhone,
+                onBackClick = { showPostPlannedRideScreen = false },
+                onPublishedSuccess = { departure ->
+                    showPostPlannedRideScreen = false
+                    selectedDepartureToManage = departure.id
+                },
+                onOpenSos = { showDriverReportIncident = true },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Manage Departure & Passengers Screen Overlay (Driver)
+        if (selectedDepartureToManage != null && activeDriverTrip == null) {
+            ManageDepartureScreen(
+                departureId = selectedDepartureToManage!!,
+                onBack = { selectedDepartureToManage = null },
+                onSosClick = { showDriverReportIncident = true },
                 modifier = Modifier.fillMaxSize()
             )
         }

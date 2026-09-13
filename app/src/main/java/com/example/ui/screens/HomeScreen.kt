@@ -65,6 +65,7 @@ import com.example.data.model.DriverOffer
 import com.example.data.remote.FirebaseRepository
 import com.example.ui.components.CityRideType
 import com.example.ui.components.CityToCityPassengerFlow
+import com.example.ui.components.CityToCityPassengerDeparturesContent
 import com.example.ui.components.CityToCityStep
 import com.example.ui.components.InDriveFixedBottomBar
 import com.example.ui.components.InDriveLimeGreen
@@ -887,6 +888,7 @@ fun HomeScreen(
     var cityScheduledDateTimeText by remember { mutableStateOf("Sun, 30 Aug 12:15 PM") }
     var cityPassengerCount by remember { mutableIntStateOf(1) }
     var cityComments by remember { mutableStateOf("") }
+    var showCityDeparturesScreen by remember { mutableStateOf(false) }
 
     // Driver Live Requests State
     var driverRideRequests by remember { mutableStateOf<List<RideRequest>>(emptyList()) }
@@ -1437,6 +1439,17 @@ fun HomeScreen(
                             label = { Text("Book a Ride", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
                             selected = true,
                             onClick = { scope.launch { drawerState.close() } },
+                            modifier = Modifier.padding(horizontal = 10.dp)
+                        )
+
+                        NavigationDrawerItem(
+                            icon = { Icon(Icons.Default.DirectionsBus, contentDescription = null, tint = DrigoBrandPurple) },
+                            label = { Text("City to City Departures", fontWeight = FontWeight.SemiBold, fontSize = 14.sp) },
+                            selected = false,
+                            onClick = {
+                                scope.launch { drawerState.close() }
+                                showCityDeparturesScreen = true
+                            },
                             modifier = Modifier.padding(horizontal = 10.dp)
                         )
 
@@ -2737,6 +2750,49 @@ fun HomeScreen(
                                                 .padding(horizontal = 16.dp),
                                             verticalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
+                                            // Prominent City to City Scheduled Departures Browse Card
+                                            if (selectedTopCategory == "city") {
+                                                Surface(
+                                                    onClick = { showCityDeparturesScreen = true },
+                                                    shape = RoundedCornerShape(16.dp),
+                                                    color = DrigoBrandPurple,
+                                                    shadowElevation = 3.dp,
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.DirectionsBus,
+                                                            contentDescription = "City to City",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(26.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(12.dp))
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = "Browse City to City Departures",
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color.White,
+                                                                fontSize = 14.sp
+                                                            )
+                                                            Text(
+                                                                text = "Find driver offers between cities, book seats or full car",
+                                                                color = Color.White.copy(alpha = 0.85f),
+                                                                fontSize = 11.sp
+                                                            )
+                                                        }
+                                                        Icon(
+                                                            imageVector = Icons.Default.ArrowForward,
+                                                            contentDescription = "Open",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
                                             // "Where To?" Search Entry Card
                                             Surface(
                                                 onClick = {
@@ -2965,6 +3021,17 @@ fun HomeScreen(
             notifications = notificationHistory,
             onDismiss = { showNotificationCenterSheet = false },
             onClearAll = { notifManager.clearNotificationHistory() }
+        )
+    }
+
+    // Passenger Full-Screen City to City Departures Screen Overlay
+    if (showCityDeparturesScreen) {
+        CityToCityPassengerDeparturesContent(
+            onBackClick = { showCityDeparturesScreen = false },
+            onSosClick = { showSafetySheet = true },
+            initialFromCity = selectedPickupLocation.title.ifBlank { "Islamabad" },
+            initialToCity = selectedDestinationLocation?.title?.ifBlank { "Lahore" } ?: "Lahore",
+            modifier = Modifier.fillMaxSize()
         )
     }
 
