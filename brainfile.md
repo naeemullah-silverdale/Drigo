@@ -565,19 +565,16 @@ Upon inspecting the codebase, **YES, this issue definitely exists**:
      - Pickup address (`Pickup: ... مر باغ, بخشى`) is truncated in the middle due to fixed row constraints and competing distance text (`0.5 km to Pickup`).
 
 ### 📋 Fix Implemented & Verified (COMPLETED)
-1. **Zero-Overlap Recenter Location FAB**:
-   - Relocated `driver_recenter_location_btn` to anchor safely in the top-right map controls zone (`Alignment.TopEnd` with `top = 180.dp`).
-   - Guarantees zero overlap with bottom sheet drag handles, headers, badges, or "Details^" buttons on all phone sizes (from 320dp budget phones to tablets).
-2. **2-Row Adaptive Passenger & Action Control Panel**:
-   - **Row 1**: Avatar + Passenger Name (full `weight(1f)`) + Star Rating Badge (`★ 4.9`) + Prominent Green Fare Pill (`PKR 2,014`).
-   - **Row 2**: Full-width dedicated action bar with 4 evenly spaced (`Arrangement.SpaceEvenly`) labeled buttons: `Navigate`, `Call`, `Chat`, and `Share`.
-   - Completely eliminates horizontal text squishing (`Newbr...`, `Fare: PKR 2014 ...`) on 360dp width screens.
-3. **Responsive Top Navigation Bar**:
-   - Restructured top turn-by-turn banner into a 2-line header with explicit step badges (`Drive to Pickup` vs `Drive to Drop-off`), destination name (up to 2 lines), `Maps` and `Share` launcher buttons, and distance/ETA/speed metrics.
-   - Eliminates truncation (`Drive to ...`).
-4. **Compilation & Push**:
+1. **Full Reversion of Over-Engineered Layout & Restoration of Active Ride Flow**:
+   - Analyzed root cause of active ride regression: moving the Recenter FAB to `TopEnd` disrupted natural thumb reachability, and expanding the passenger header to 2 rows bloated bottom sheet height and obscured the primary action buttons (`Arrived at Pickup`, `Start Trip`, `Complete Ride`).
+   - Completely reverted `DriverModeView.kt` to the proven working state (`042771d`).
+2. **Surgical, Non-Disruptive UI Polish**:
+   - Preserved all original active ride status transitions, live turn-by-turn `currentNavInstruction` strings, and bottom sheet action flow.
+   - Reduced quick action button icons from `36.dp` to `32.dp` and horizontal spacing from `4.dp` to `2.dp`, freeing 20dp+ for passenger name & fare readability on compact screens without increasing bottom sheet height.
+   - Updated avatar icon tint (`tint = if (isDark) Color.White else DrigoBrandPurple`) so passenger profile icons are clearly visible in both light and dark themes.
+3. **Compilation & Push**:
    - Verified clean compilation with `compile_applet` (0 build errors).
-   - Committed (`3f58a2d`) and pushed to `fix/driver-feed-radar-and-map-inspection`.
+   - Committed (`3fdf401`) and pushed to `fix/driver-feed-radar-and-map-inspection`.
 
 
 

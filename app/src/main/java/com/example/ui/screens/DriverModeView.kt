@@ -1532,152 +1532,138 @@ fun DriverModeView(
         // Active Trip Turn-by-Turn Navigation Bar (Item 2)
         if (activeDriverTrip != null && !isActiveTripSheetExpanded) {
             val trip = activeDriverTrip!!
-            val isHeadingToPickup = trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
                 border = BorderStroke(1.5.dp, DrigoBrandPurple),
                 shadowElevation = 8.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp)
-                    .padding(top = 80.dp)
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 96.dp)
                     .align(Alignment.TopCenter)
             ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        shape = CircleShape,
+                        color = DrigoBrandPurple,
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = DrigoBrandPurple,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (isHeadingToPickup) Icons.Default.Navigation else Icons.Default.DirectionsCar,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING) Icons.Default.Navigation else Icons.Default.DirectionsCar,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = currentNavInstruction,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "$distanceRemainingText • ${currentSpeedKmh.toInt()} km/h",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF00E676),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    // External GPS App Launcher Button (Google Maps / Waze)
+                    Surface(
+                        onClick = {
+                            val isHeadingToPickup = trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING
+                            val targetLat = if (isHeadingToPickup) trip.pickupLat else trip.destinationLat
+                            val targetLon = if (isHeadingToPickup) trip.pickupLon else trip.destinationLon
+                            val targetTitle = if (isHeadingToPickup) trip.pickupTitle else trip.destinationTitle
+                            launchExternalGpsNavigation(targetLat, targetLon, targetTitle)
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, Color(0xFF4FC3F7)),
+                        modifier = Modifier.padding(start = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Map,
+                                contentDescription = "Open in Google Maps",
+                                tint = Color(0xFF4FC3F7),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isHeadingToPickup) "Drive to Pickup" else "Drive to Drop-off",
+                                text = "Maps",
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = DrigoBrandPurple
-                            )
-                            Text(
-                                text = if (isHeadingToPickup) trip.pickupTitle.ifBlank { "Pickup Location" } else trip.destinationTitle.ifBlank { "Drop-off Location" },
-                                style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        // External GPS App Launcher Button (Google Maps / Waze)
-                        Surface(
-                            onClick = {
-                                val targetLat = if (isHeadingToPickup) trip.pickupLat else trip.destinationLat
-                                val targetLon = if (isHeadingToPickup) trip.pickupLon else trip.destinationLon
-                                val targetTitle = if (isHeadingToPickup) trip.pickupTitle else trip.destinationTitle
-                                launchExternalGpsNavigation(targetLat, targetLon, targetTitle)
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = BorderStroke(1.dp, Color(0xFF4FC3F7))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Map,
-                                    contentDescription = "Open in Google Maps",
-                                    tint = Color(0xFF4FC3F7),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Maps",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.width(4.dp))
-
-                        // Share Trip / Route Button
-                        Surface(
-                            onClick = {
-                                val destTitle = if (isHeadingToPickup) trip.pickupTitle else trip.destinationTitle
-                                val targetLat = if (isHeadingToPickup) trip.pickupLat else trip.destinationLat
-                                val targetLon = if (isHeadingToPickup) trip.pickupLon else trip.destinationLon
-                                val shareText = "I am on an active Drigo trip!\n\n" +
-                                        "📍 Pickup: ${trip.pickupTitle}\n" +
-                                        "🏁 Destination: ${trip.destinationTitle}\n" +
-                                        "⏱️ Distance/ETA: $distanceRemainingText\n" +
-                                        "💳 Fare: PKR ${trip.agreedFare}\n" +
-                                        (if (targetLat != 0.0 && targetLon != 0.0) "🗺️ Route: https://maps.google.com/?q=$targetLat,$targetLon\n\n" else "\n") +
-                                        "Drigo Captain Live Route"
-                                try {
-                                    val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(android.content.Intent.EXTRA_SUBJECT, "Drigo Trip Status & Route")
-                                        putExtra(android.content.Intent.EXTRA_TEXT, shareText)
-                                    }
-                                    val shareIntent = android.content.Intent.createChooser(sendIntent, "Share Route & ETA via")
-                                    context.startActivity(shareIntent)
-                                } catch (_: Exception) {
-                                    Toast.makeText(context, "Unable to share ride info", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            border = BorderStroke(1.dp, DrigoBrandPurple)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Share,
-                                    contentDescription = "Share Route",
-                                    tint = DrigoBrandPurple,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Share",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(2.dp))
+                    // Share Trip / Route Button
+                    Surface(
+                        onClick = {
+                            val isHeadingToPickup = trip.status == PassengerOrderStatus.ACCEPTED || trip.status == PassengerOrderStatus.DRIVER_COMING
+                            val destTitle = if (isHeadingToPickup) trip.pickupTitle else trip.destinationTitle
+                            val targetLat = if (isHeadingToPickup) trip.pickupLat else trip.destinationLat
+                            val targetLon = if (isHeadingToPickup) trip.pickupLon else trip.destinationLon
+                            val shareText = "I am on an active Drigo trip!\n\n" +
+                                    "📍 Pickup: ${trip.pickupTitle}\n" +
+                                    "🏁 Destination: ${trip.destinationTitle}\n" +
+                                    "⏱️ Distance/ETA: $distanceRemainingText\n" +
+                                    "💳 Fare: PKR ${trip.agreedFare}\n" +
+                                    (if (targetLat != 0.0 && targetLon != 0.0) "🗺️ Route: https://maps.google.com/?q=$targetLat,$targetLon\n\n" else "\n") +
+                                    "Drigo Captain Live Route"
 
-                    Text(
-                        text = "$distanceRemainingText • ${currentSpeedKmh.toInt()} km/h",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF00E676),
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(start = 40.dp)
-                    )
+                            try {
+                                val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Drigo Trip Status & Route")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                                }
+                                val shareIntent = android.content.Intent.createChooser(sendIntent, "Share Route & ETA via")
+                                context.startActivity(shareIntent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Unable to share ride info", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, DrigoBrandPurple),
+                        modifier = Modifier.padding(start = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Share Route",
+                                tint = DrigoBrandPurple,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Share",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1942,263 +1928,172 @@ fun DriverModeView(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Main Passenger & Fare Header (Row 1: Passenger Info & Fare, Row 2: Action Buttons)
-                    Column(
+                    // Main Passenger & Fare Header Row (Always Visible)
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Row 1: Passenger Avatar, Name, Rating & Prominent Fare Pill
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            shape = CircleShape,
+                            color = DrigoBrandPurple.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.6f)),
+                            modifier = Modifier.size(38.dp)
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = DrigoBrandPurple.copy(alpha = 0.2f),
-                                border = BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.6f)),
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = null,
-                                        tint = if (isDark) Color.White else DrigoBrandPurple,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFF2E7D32)
-                                    ) {
-                                        Text(
-                                            text = "★ 4.9",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = trip.paymentMethod.ifBlank { "Cash Payment" },
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = FontWeight.Medium
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = if (isDark) Color.White else DrigoBrandPurple,
+                                    modifier = Modifier.size(20.dp)
                                 )
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            // Prominent Fare Display Pill
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isDark) Color(0xFF1B382B) else Color(0xFFE8F5E9),
-                                border = BorderStroke(1.dp, Color(0xFF00E676))
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                    horizontalAlignment = Alignment.End
-                                ) {
-                                    Text(
-                                        text = "Fare",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Text(
-                                        text = "PKR $totalCashToCollect",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = if (isDark) Color(0xFF00E676) else Color(0xFF008744)
-                                    )
-                                }
                             }
                         }
 
-                        // Row 2: Action Controls Bar (Full width, evenly spaced)
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFF2E7D32)
+                                ) {
+                                    Text(
+                                        text = "★ 4.9",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Fare: PKR $totalCashToCollect • ${trip.paymentMethod.ifBlank { "Cash" }}",
+                                fontSize = 11.sp,
+                                color = if (isDark) Color(0xFF00E676) else Color(0xFF00A859),
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Quick Action Buttons Cluster
                         val passPhone = trip.passengerPhone.ifBlank { "+92 300 9876543" }
                         val passName = trip.passengerName.ifBlank { trip.passengerEmail.substringBefore("@").ifBlank { "Passenger" } }
                         val targetNavLat = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLat else trip.pickupLat
                         val targetNavLon = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationLon else trip.pickupLon
                         val targetNavTitle = if (trip.status == PassengerOrderStatus.IN_TRIP) trip.destinationTitle else trip.pickupTitle
 
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            // GPS Navigation
+                            IconButton(
+                                onClick = {
+                                    launchExternalGpsNavigation(targetNavLat, targetNavLon, targetNavTitle)
+                                },
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp, horizontal = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isDark) Color(0xFF0288D1) else MaterialTheme.colorScheme.primary)
                             ) {
-                                // GPS Navigation
-                                Surface(
-                                    onClick = {
-                                        launchExternalGpsNavigation(targetNavLat, targetNavLon, targetNavTitle)
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isDark) Color(0xFF0288D1) else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.weight(1f).padding(horizontal = 3.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Navigation,
-                                            contentDescription = "Navigate GPS",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Navigate",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.Navigation,
+                                    contentDescription = "Navigate GPS",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
 
-                                // Call
-                                Surface(
-                                    onClick = {
-                                        try {
-                                            val cleanPhone = passPhone.replace(" ", "")
-                                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
-                                            context.startActivity(intent)
-                                        } catch (_: Exception) {
-                                            Toast.makeText(context, "Calling $passName ($passPhone)", Toast.LENGTH_SHORT).show()
+                            // Call
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val cleanPhone = passPhone.replace(" ", "")
+                                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanPhone"))
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Calling $passName ($passPhone)", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isDark) Color(0xFF2C303E) else MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Call,
+                                    contentDescription = "Call Passenger",
+                                    tint = if (isDark) Color(0xFF00E676) else Color(0xFF00A859),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+
+                            // Chat
+                            IconButton(
+                                onClick = {
+                                    onOpenChat(
+                                        trip.id,
+                                        passName,
+                                        "Passenger",
+                                        passPhone,
+                                        trip.pickupTitle,
+                                        trip.destinationTitle
+                                    )
+                                },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(DrigoBrandPurple.copy(alpha = if (isDark) 0.35f else 0.85f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Chat,
+                                    contentDescription = "Chat",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+
+                            // Share Ride Status
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val shareMsg = "Drigo Ride Status Update:\n" +
+                                                "Passenger: $passName\n" +
+                                                "Pickup: ${trip.pickupTitle}\n" +
+                                                "Destination: ${trip.destinationTitle}\n" +
+                                                "Fare: PKR $totalCashToCollect\n" +
+                                                "Status: ${if (trip.status == PassengerOrderStatus.IN_TRIP) "Driving to Destination" else "Heading to Pickup"}"
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_SUBJECT, "Drigo Active Ride Status")
+                                            putExtra(Intent.EXTRA_TEXT, shareMsg)
                                         }
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (isDark) Color(0xFF2E7D32) else Color(0xFF1B5E20),
-                                    modifier = Modifier.weight(1f).padding(horizontal = 3.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Call,
-                                            contentDescription = "Call Passenger",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Call",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
+                                        context.startActivity(Intent.createChooser(shareIntent, "Share Ride Details"))
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Unable to share ride details", Toast.LENGTH_SHORT).show()
                                     }
-                                }
-
-                                // Chat
-                                Surface(
-                                    onClick = {
-                                        onOpenChat(
-                                            trip.id,
-                                            passName,
-                                            "Passenger",
-                                            passPhone,
-                                            trip.pickupTitle,
-                                            trip.destinationTitle
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = DrigoBrandPurple,
-                                    modifier = Modifier.weight(1f).padding(horizontal = 3.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Chat,
-                                            contentDescription = "Chat",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Chat",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
-
-                                // Share Ride Status
-                                Surface(
-                                    onClick = {
-                                        try {
-                                            val shareMsg = "Drigo Ride Status Update:\n" +
-                                                    "Passenger: $passName\n" +
-                                                    "Pickup: ${trip.pickupTitle}\n" +
-                                                    "Destination: ${trip.destinationTitle}\n" +
-                                                    "Fare: PKR $totalCashToCollect\n" +
-                                                    "Status: ${if (trip.status == PassengerOrderStatus.IN_TRIP) "Driving to Destination" else "Heading to Pickup"}"
-                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                type = "text/plain"
-                                                putExtra(Intent.EXTRA_SUBJECT, "Drigo Active Ride Status")
-                                                putExtra(Intent.EXTRA_TEXT, shareMsg)
-                                            }
-                                            context.startActivity(Intent.createChooser(shareIntent, "Share Ride Details"))
-                                        } catch (_: Exception) {
-                                            Toast.makeText(context, "Unable to share ride details", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                    modifier = Modifier.weight(1f).padding(horizontal = 3.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Share,
-                                            contentDescription = "Share Ride",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Share",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
+                                },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isDark) Color(0xFF37474F) else MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = "Share Ride",
+                                    tint = if (isDark) Color(0xFF4FC3F7) else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(15.dp)
+                                )
                             }
                         }
                     }
@@ -3284,9 +3179,9 @@ fun DriverModeView(
                     .fillMaxSize()
                     .padding(
                         end = 16.dp,
-                        top = if (activeDriverTrip != null) 180.dp else 150.dp
+                        bottom = if (activeDriverTrip != null) 300.dp else 240.dp
                     ),
-                contentAlignment = Alignment.TopEnd
+                contentAlignment = Alignment.BottomEnd
             ) {
                 Surface(
                     onClick = {
