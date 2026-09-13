@@ -83,7 +83,7 @@
 
 ## 🌿 5. GIT BRANCHES & COMMIT LOG
 
-- **Active Branch:** `main`
+- **Active Branch:** `feature/user-mode-datastore-persistence`
 - **Completed Driver Mode UI Refinements & Fixes:**
   1. **Map Bleed-Through Bug Fix:** Updated top header bar in `DriverModeView.kt` to use a solid `Surface` with `MaterialTheme.colorScheme.surface` and `statusBarsPadding()`, completely eliminating the map layer bleed-through behind the status bar, hamburger menu button, Online toggle pill, and gear button.
   2. **City to City Intercity Banner Removal:** Removed the `City to City Intercity` purple card banner from the main ride requests list feed in `DriverModeView.kt`. All underlying Intercity feature logic, state handlers, management screens (`ManageDepartureScreen`, `PlannedDeparturesScreen`), bottom navigation "City to city" tab, and drawer entry points remain 100% intact.
@@ -95,6 +95,7 @@
   3. **App Launch & Reactive State Routing:** Observed `userModeFlow` from DataStore on startup in `MainViewModel` and exposed `isRoleLoaded` state. `MainActivity.kt` renders a smooth loading transition while DataStore initializes, preventing screen flickering and preserving role state across app restarts.
 
 - **Recent Commit History:**
+  - `b7b793c` - `feat: implement UserRolePreference DataStore persistence and reactive role routing on launch`
   - `4c6dbd4` - `fix: remove intercity banner from driver main feed and make top header bar background solid`
   - `1d50c62` - `Merge fix/driver-feed-radar-and-map-inspection into main: restore driver feed radar, active trip flow, and integrate city to city feature`
   - `ebbe3fc` - `feat: integrate city-to-city intercity departure screens and entry points in driver and passenger views`
