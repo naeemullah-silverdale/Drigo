@@ -36,6 +36,7 @@ fun NotificationCenterSheet(
     notifications: List<InAppNotificationItem>,
     onDismiss: () -> Unit,
     onClearAll: () -> Unit,
+    onOpenSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     ModalBottomSheet(
@@ -114,19 +115,37 @@ fun NotificationCenterSheet(
                     )
                 }
 
-                if (notifications.isNotEmpty()) {
-                    TextButton(
-                        onClick = onClearAll,
-                        modifier = Modifier
-                            .height(36.dp)
-                            .testTag("clear_all_notifications_button")
-                    ) {
-                        Text(
-                            text = "Clear All",
-                            color = Color(0xFFFF5252),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onOpenSettings != null) {
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("notification_center_settings_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Notification Settings",
+                                tint = Color(0xFF8A93A4),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (notifications.isNotEmpty()) {
+                        TextButton(
+                            onClick = onClearAll,
+                            modifier = Modifier
+                                .height(36.dp)
+                                .testTag("clear_all_notifications_button")
+                        ) {
+                            Text(
+                                text = "Clear All",
+                                color = Color(0xFFFF5252),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
@@ -225,6 +244,8 @@ private fun NotificationHistoryCard(
         RideNotificationType.DRIVER_RIDE_ASSIGNED -> Color(0xFF7C4DFF)
         RideNotificationType.DRIVER_RIDE_CANCELLED -> Color(0xFFFF5252)
         RideNotificationType.DRIVER_SHARED_MATCH -> Color(0xFFFF4081)
+        RideNotificationType.CHAT_MESSAGE -> DrigoBrandPurple
+        RideNotificationType.PROMOTIONAL_ALERT -> Color(0xFFFF9800)
     }
 
     val icon = when (item.type) {
@@ -241,6 +262,8 @@ private fun NotificationHistoryCard(
         RideNotificationType.DRIVER_RIDE_ASSIGNED -> Icons.Default.AssignmentTurnedIn
         RideNotificationType.DRIVER_RIDE_CANCELLED -> Icons.Default.HighlightOff
         RideNotificationType.DRIVER_SHARED_MATCH -> Icons.Default.GroupAdd
+        RideNotificationType.CHAT_MESSAGE -> Icons.Default.Chat
+        RideNotificationType.PROMOTIONAL_ALERT -> Icons.Default.LocalOffer
     }
 
     val timeAgo = remember(item.timestamp) {

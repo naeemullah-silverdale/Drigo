@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -31,8 +32,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.PlannedDeparture
 import com.example.data.remote.FirebaseRepository
+import com.example.ui.components.IntercityMapWaypoint
+import com.example.ui.components.IntercityOsmMapView
+import com.example.ui.components.IntercityWaypointStatus
 import com.example.ui.theme.DrigoBrandPurple
 import kotlinx.coroutines.launch
+import org.osmdroid.util.GeoPoint
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -41,13 +46,14 @@ enum class CorridorOption(
     val distanceSubtitle: String,
     val tag: String,
     val distanceKm: Double,
-    val durationMinutes: Int
+    val durationMinutes: Int,
+    val tollEstimate: String = "PKR 1,100 M-Tag Pre-cleared"
 ) {
-    MOTORWAY_M2("Via M-2 Motorway", "375 km • 4h 15m", "Recommended", 375.0, 255),
-    GT_ROAD("Via GT Road", "290 km • 6h 10m", "Slower Route", 290.0, 370),
-    MOTORWAY_M1("Via M-1 Motorway", "155 km • 1h 45m", "Fast Route", 155.0, 105),
-    MOTORWAY_M3("Via M-3 Motorway", "180 km • 2h 10m", "Recommended", 180.0, 130),
-    MOTORWAY_M9("Via M-9 Super Highway", "160 km • 2h 00m", "Express", 160.0, 120)
+    MOTORWAY_M2("Via M-2 Motorway", "375 km • 4h 15m", "Recommended", 375.0, 255, "PKR 1,100 M-Tag"),
+    GT_ROAD("Via GT Road (N-5)", "290 km • 6h 10m", "Slower Route", 290.0, 370, "PKR 240 Tolls"),
+    MOTORWAY_M1("Via M-1 Motorway", "155 km • 1h 45m", "Fast Route", 155.0, 105, "PKR 450 M-Tag"),
+    MOTORWAY_M3("Via M-3 Motorway", "180 km • 2h 10m", "Recommended", 180.0, 130, "PKR 550 M-Tag"),
+    MOTORWAY_M9("Via M-9 Super Highway", "160 km • 2h 00m", "Express", 160.0, 120, "PKR 350 M-Tag")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,6 +62,11 @@ fun PostPlannedRideScreen(
     driverId: String,
     driverName: String,
     driverPhone: String,
+    driverRating: Double = 5.0,
+    driverTotalTrips: Int = 0,
+    driverVehicle: String = "",
+    driverPlateNumber: String = "",
+    driverVehicleType: String = "Sedan",
     onBackClick: () -> Unit,
     onPublishedSuccess: (PlannedDeparture) -> Unit,
     onOpenSos: () -> Unit = {},
@@ -64,8 +75,6 @@ fun PostPlannedRideScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val repo = remember { FirebaseRepository.getInstance(context) }
-
-    BackHandler(onBack = onBackClick)
 
     // Form State
     var pickupCity by remember { mutableStateOf("Islamabad") }
@@ -82,6 +91,14 @@ fun PostPlannedRideScreen(
 
     var selectedCorridor by remember { mutableStateOf(CorridorOption.MOTORWAY_M2) }
     var tollsPreCleared by remember { mutableStateOf(true) }
+    var showMapPreview by remember { mutableStateOf(false) }
+
+    LaunchedEffect(driverId) {
+        android.util.Log.d(
+            "DrigoPostPlannedRide",
+            "PostPlannedRideScreen initialized: driverId='$driverId', driverName='$driverName', driverPhone='$driverPhone', driverVehicle='$driverVehicle', Corridor=${selectedCorridor.title}"
+        )
+    }
 
     // Date & Time
     val calendar = remember { Calendar.getInstance() }
@@ -92,8 +109,12 @@ fun PostPlannedRideScreen(
         val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 1) }
         SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(cal.time)
     }
+    val dayAfterDateStr = remember {
+        val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 2) }
+        SimpleDateFormat("EEE, d MMM", Locale.getDefault()).format(cal.time)
+    }
 
-    var selectedDateLabel by remember { mutableStateOf("Tomorrow, 25 Oct") }
+    var selectedDateLabel by remember { mutableStateOf("Tomorrow, $tomorrowDateStr") }
     var selectedTimeLabel by remember { mutableStateOf("09:30 AM") }
     var flexWindowMins by remember { mutableIntStateOf(15) }
 
@@ -101,15 +122,31 @@ fun PostPlannedRideScreen(
     var farePerSeat by remember { mutableIntStateOf(1900) }
     var totalSeats by remember { mutableIntStateOf(4) }
     var allowFullCarBuyout by remember { mutableStateOf(true) }
-    var fullCarFare by remember { mutableIntStateOf(7500) }
+    val calculatedBuyoutFare = remember(farePerSeat, totalSeats) {
+        // 5% bundle discount for full car buyout
+        (farePerSeat * totalSeats * 0.95).toInt().coerceAtLeast(1000)
+    }
+    var fullCarFare by remember { mutableIntStateOf(7200) }
 
-    // Policies
+    LaunchedEffect(calculatedBuyoutFare) {
+        fullCarFare = calculatedBuyoutFare
+    }
+
+    // Policies & Amenities
     var isInstantBooking by remember { mutableStateOf(true) }
     var allowCounterOffers by remember { mutableStateOf(true) }
     var isLadiesOnly by remember { mutableStateOf(false) }
+    var hasAirConditioning by remember { mutableStateOf(true) }
+    var hasLuggageSpace by remember { mutableStateOf(true) }
+    var isSmokeFree by remember { mutableStateOf(true) }
+    var hasMTagFastPay by remember { mutableStateOf(true) }
 
     var isPublishing by remember { mutableStateOf(false) }
     var showCityChangeDialog by remember { mutableStateOf<String?>(null) } // "PICKUP" or "DROPOFF"
+
+    BackHandler(enabled = !isPublishing) {
+        onBackClick()
+    }
 
     Scaffold(
         modifier = modifier
@@ -125,12 +162,12 @@ fun PostPlannedRideScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
                         onClick = onBackClick,
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -141,29 +178,13 @@ fun PostPlannedRideScreen(
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    // Drigo Logo / Tag Pill
-                    Surface(
-                        shape = RoundedCornerShape(100.dp),
-                        color = DrigoBrandPurple.copy(alpha = 0.12f),
-                        border = BorderStroke(0.8.dp, DrigoBrandPurple.copy(alpha = 0.3f)),
-                        modifier = Modifier.padding(end = 8.dp)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 4.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Drigo • Intercity",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = DrigoBrandPurple
-                            )
-                        }
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Post Planned Ride",
+                            text = "Publish Departure",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface,
@@ -171,11 +192,11 @@ fun PostPlannedRideScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "$pickupCity → $dropoffCity",
+                            text = "$pickupCity ➔ $dropoffCity",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF00C853),
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -187,30 +208,30 @@ fun PostPlannedRideScreen(
                         shape = RoundedCornerShape(100.dp),
                         color = Color(0xFFFFEBEE),
                         border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
-                        modifier = Modifier.padding(end = 8.dp)
+                        modifier = Modifier.padding(end = 6.dp)
                     ) {
                         Text(
                             text = "SOS",
                             color = Color(0xFFD32F2F),
                             fontWeight = FontWeight.Black,
                             fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
 
                     // Avatar
                     Surface(
                         shape = CircleShape,
-                        color = DrigoBrandPurple.copy(alpha = 0.15f),
+                        color = DrigoBrandPurple.copy(alpha = 0.12f),
                         border = BorderStroke(1.5.dp, Color(0xFF00C853)),
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.Person,
                                 contentDescription = "Profile",
                                 tint = DrigoBrandPurple,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
@@ -227,8 +248,44 @@ fun PostPlannedRideScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
+                    // Estimated Earnings Preview Bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = Color(0xFF00C853),
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Est. Gross Revenue:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = "PKR ${farePerSeat * totalSeats}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF00796B)
+                        )
+                    }
+
                     Button(
                         onClick = {
                             if (isPublishing) return@Button
@@ -236,11 +293,13 @@ fun PostPlannedRideScreen(
                             scope.launch {
                                 val departure = PlannedDeparture(
                                     driverId = driverId,
-                                    driverName = driverName.ifBlank { "Captain Farhan" },
-                                    driverPhone = driverPhone.ifBlank { "+92 300 1234567" },
-                                    driverRating = 4.92,
-                                    driverVehicle = "Toyota Corolla (White)",
-                                    driverPlateNumber = "LEA-18-4921",
+                                    driverName = driverName.ifBlank { "Driver" },
+                                    driverPhone = driverPhone,
+                                    driverRating = driverRating,
+                                    driverTotalTrips = driverTotalTrips,
+                                    driverVehicle = driverVehicle.ifBlank { "Toyota Corolla" },
+                                    driverPlateNumber = driverPlateNumber.ifBlank { "LEB-4521" },
+                                    driverVehicleType = driverVehicleType,
                                     pickupCity = pickupCity,
                                     pickupHub = pickupHub,
                                     pickupStopDetails = pickupStopDetails,
@@ -268,6 +327,8 @@ fun PostPlannedRideScreen(
                                     isInstantBooking = isInstantBooking,
                                     allowCounterOffers = allowCounterOffers,
                                     isLadiesOnly = isLadiesOnly,
+                                    isClimateControlled = hasAirConditioning,
+                                    luggagePolicy = if (hasLuggageSpace) "Standard (1 bag/seat)" else "Light Backpack Only",
                                     status = "ACTIVE"
                                 )
 
@@ -283,37 +344,39 @@ fun PostPlannedRideScreen(
                             }
                         },
                         enabled = !isPublishing,
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFF00C853),
                             contentColor = Color.White
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .height(48.dp)
                             .testTag("publish_departure_button")
                     ) {
                         if (isPublishing) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(22.dp),
                                 color = Color.White,
-                                strokeWidth = 2.5.dp
+                                strokeWidth = 2.dp
                             )
                         } else {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
+                                Icon(Icons.Default.RocketLaunch, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "Publish Departure →",
                                     fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 17.sp
+                                    fontSize = 15.sp
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -324,11 +387,11 @@ fun PostPlannedRideScreen(
                             imageVector = Icons.Default.Lock,
                             contentDescription = null,
                             tint = Color(0xFF64748B),
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(11.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Free cancellation or edits up to 2 hours before $selectedTimeLabel departure.",
+                            text = "Free edits & cancellation up to 2 hours before departure.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF64748B),
                             fontSize = 10.5.sp,
@@ -345,8 +408,9 @@ fun PostPlannedRideScreen(
                 .padding(innerPadding)
                 .background(Color(0xFFF6F8FB))
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Step Header Banner
             Surface(
@@ -354,37 +418,98 @@ fun PostPlannedRideScreen(
                 color = Color(0xFF0F172A),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color(0xFF00C853),
-                        modifier = Modifier.size(28.dp)
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF00C853),
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "1",
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "1",
-                                fontWeight = FontWeight.Black,
+                                text = "Step 1 of 2: Configure Departure Plan",
+                                fontWeight = FontWeight.Bold,
                                 color = Color.White,
-                                fontSize = 14.sp
+                                fontSize = 13.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Motorway Corridor & Capacity Matrix",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Departure Plan & Seats",
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            fontSize = 14.5.sp
-                        )
-                        Text(
-                            text = "Intercity Motorway Corridor Configuration",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 11.sp
-                        )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Responsive Telemetry Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.White.copy(alpha = 0.08f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Speed, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(11.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Express M-2", fontSize = 9.5.sp, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.White.copy(alpha = 0.08f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(11.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("NHMP Verified", fontSize = 9.5.sp, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.White.copy(alpha = 0.08f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.QrCode, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(11.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("M-Tag Ready", fontSize = 9.5.sp, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            }
+                        }
                     }
                 }
             }
@@ -393,17 +518,18 @@ fun PostPlannedRideScreen(
             // CARD 1: TRIP CORRIDOR & ROUTE
             // =========================================================================
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = Color.White,
-                shadowElevation = 2.dp,
+                shadowElevation = 1.5.dp,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(14.dp)
                 ) {
+                    // Header Row with robust flex wrapping
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -412,128 +538,243 @@ fun PostPlannedRideScreen(
                         Text(
                             text = "Trip Corridor & Route",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = Color(0xFF0F172A)
+                            fontSize = 14.5.sp,
+                            color = Color(0xFF0F172A),
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Surface(
-                            shape = RoundedCornerShape(100.dp),
+                            shape = RoundedCornerShape(6.dp),
                             color = Color(0xFFE8F5E9),
-                            border = BorderStroke(0.5.dp, Color(0xFF81C784))
+                            border = BorderStroke(0.8.dp, Color(0xFF81C784))
                         ) {
                             Text(
-                                text = "• High Demand Route",
-                                fontSize = 10.5.sp,
+                                text = "🔥 High Demand",
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF2E7D32),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Pickup Origin block
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top
+                    // Route Nodes Container with clean connected timeline
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Box(
+                        Column(
                             modifier = Modifier
-                                .padding(top = 2.dp)
-                                .size(16.dp)
-                                .background(Color(0xFF00C853), CircleShape)
-                                .border(2.dp, Color.White, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "PICKUP ORIGIN",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF64748B),
-                                letterSpacing = 0.5.sp
-                            )
-                            Text(
-                                text = "$pickupCity • $pickupHub",
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                            Text(
-                                text = "📍 $pickupStopDetails",
-                                fontSize = 12.sp,
-                                color = Color(0xFF64748B)
-                            )
-                        }
-                        TextButton(
-                            onClick = { showCityChangeDialog = "PICKUP" },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                .fillMaxWidth()
+                                .padding(10.dp)
                         ) {
-                            Text(
-                                text = "Change",
-                                color = DrigoBrandPurple,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.5.sp
-                            )
+                            // Pickup Origin block
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .background(Color(0xFF00C853), CircleShape)
+                                            .border(2.dp, Color.White, CircleShape)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .width(2.dp)
+                                            .height(30.dp)
+                                            .background(Color(0xFFCBD5E1))
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "PICKUP ORIGIN",
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF64748B),
+                                            letterSpacing = 0.5.sp
+                                        )
+                                        Text(
+                                            text = "Change",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DrigoBrandPurple,
+                                            modifier = Modifier
+                                                .clickable { showCityChangeDialog = "PICKUP" }
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "$pickupCity • $pickupHub",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "📍 $pickupStopDetails",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF64748B),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Dropoff Destination block
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .background(Color(0xFFD32F2F), RoundedCornerShape(3.dp))
+                                            .border(2.dp, Color.White, RoundedCornerShape(3.dp))
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "DROPOFF DESTINATION",
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF64748B),
+                                            letterSpacing = 0.5.sp
+                                        )
+                                        Text(
+                                            text = "Change",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DrigoBrandPurple,
+                                            modifier = Modifier
+                                                .clickable { showCityChangeDialog = "DROPOFF" }
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "$dropoffCity • $dropoffHub",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "⚑ $dropoffStopDetails",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF64748B),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
                         }
                     }
 
-                    // Vertical connector line
-                    Box(
+                    // Optional Interactive Map Preview toggle
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
                         modifier = Modifier
-                            .padding(start = 7.dp)
-                            .height(16.dp)
-                            .width(2.dp)
-                            .background(Color(0xFFCBD5E1))
-                    )
-
-                    // Dropoff Destination block
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top
+                            .fillMaxWidth()
+                            .clickable { showMapPreview = !showMapPreview }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 2.dp)
-                                .size(16.dp)
-                                .background(Color(0xFFD32F2F), RoundedCornerShape(3.dp))
-                                .border(2.dp, Color.White, RoundedCornerShape(3.dp))
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Icon(Icons.Default.Map, contentDescription = null, tint = DrigoBrandPurple, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "DROPOFF DESTINATION",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF64748B),
-                                letterSpacing = 0.5.sp
-                            )
-                            Text(
-                                text = "$dropoffCity • $dropoffHub",
-                                fontSize = 14.5.sp,
+                                text = if (showMapPreview) "Hide Live Highway Map" else "Preview Highway Route on Map",
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                            Text(
-                                text = "⚑ $dropoffStopDetails",
-                                fontSize = 12.sp,
-                                color = Color(0xFF64748B)
+                                color = DrigoBrandPurple,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        TextButton(
-                            onClick = { showCityChangeDialog = "DROPOFF" },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "Change",
-                                color = DrigoBrandPurple,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.5.sp
-                            )
+                        Icon(
+                            imageVector = if (showMapPreview) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = DrigoBrandPurple,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showMapPreview) {
+                        Column(modifier = Modifier.padding(top = 6.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Color(0xFFCBD5E1)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                            ) {
+                                IntercityOsmMapView(
+                                    modifier = Modifier.fillMaxSize(),
+                                    waypoints = listOf(
+                                        IntercityMapWaypoint(
+                                            stopNumber = 1,
+                                            title = pickupCity,
+                                            subtitle = pickupHub,
+                                            point = GeoPoint(pickupLat, pickupLon),
+                                            status = IntercityWaypointStatus.ACTIVE_NEXT,
+                                            isPickup = true
+                                        ),
+                                        IntercityMapWaypoint(
+                                            stopNumber = 2,
+                                            title = dropoffCity,
+                                            subtitle = dropoffHub,
+                                            point = GeoPoint(dropoffLat, dropoffLon),
+                                            status = IntercityWaypointStatus.UPCOMING,
+                                            isPickup = false
+                                        )
+                                    ),
+                                    routePoints = listOf(
+                                        GeoPoint(pickupLat, pickupLon),
+                                        GeoPoint(32.4833, 73.1333), // Bhera rest stop
+                                        GeoPoint(31.8500, 73.5000), // Sukheke rest stop
+                                        GeoPoint(dropoffLat, dropoffLon)
+                                    )
+                                )
+                            }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Select Preferred Corridor
                     Row(
@@ -543,7 +784,7 @@ fun PostPlannedRideScreen(
                     ) {
                         Text(
                             text = "Select Preferred Corridor",
-                            fontSize = 12.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF334155)
                         )
@@ -553,8 +794,8 @@ fun PostPlannedRideScreen(
                             border = BorderStroke(0.5.dp, Color(0xFF93C5FD))
                         ) {
                             Text(
-                                text = "E-Tag FastPay Supported",
-                                fontSize = 9.5.sp,
+                                text = "M-Tag FastPay",
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF1D4ED8),
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -562,13 +803,13 @@ fun PostPlannedRideScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Option A: Motorway M-2
                     val isM2Selected = selectedCorridor == CorridorOption.MOTORWAY_M2
                     Surface(
                         onClick = { selectedCorridor = CorridorOption.MOTORWAY_M2 },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = if (isM2Selected) Color(0xFFF0FDF4) else Color(0xFFF8FAFC),
                         border = BorderStroke(
                             if (isM2Selected) 1.5.dp else 1.dp,
@@ -579,31 +820,34 @@ fun PostPlannedRideScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
+                                .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
                                 selected = isM2Selected,
                                 onClick = { selectedCorridor = CorridorOption.MOTORWAY_M2 },
-                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF00C853))
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF00C853)),
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     Text(
                                         text = "Via M-2 Motorway",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 13.5.sp,
+                                        fontSize = 13.sp,
                                         color = Color(0xFF0F172A)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
                                         color = Color(0xFF00C853).copy(alpha = 0.15f)
                                     ) {
                                         Text(
                                             text = "Recommended",
-                                            fontSize = 9.sp,
+                                            fontSize = 8.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF047857),
                                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -611,21 +855,23 @@ fun PostPlannedRideScreen(
                                     }
                                 }
                                 Text(
-                                    text = "375 km • 4h 15m (Fast & Safe Toll Highway)",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF64748B)
+                                    text = "375 km • 4h 15m (Fast Toll Highway • PKR 1,100)",
+                                    fontSize = 10.5.sp,
+                                    color = Color(0xFF64748B),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     // Option B: GT Road
                     val isGtSelected = selectedCorridor == CorridorOption.GT_ROAD
                     Surface(
                         onClick = { selectedCorridor = CorridorOption.GT_ROAD },
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = if (isGtSelected) Color(0xFFF0FDF4) else Color(0xFFF8FAFC),
                         border = BorderStroke(
                             if (isGtSelected) 1.5.dp else 1.dp,
@@ -636,31 +882,34 @@ fun PostPlannedRideScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
+                                .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
                                 selected = isGtSelected,
                                 onClick = { selectedCorridor = CorridorOption.GT_ROAD },
-                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF00C853))
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF00C853)),
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
                                     Text(
                                         text = "Via GT Road (N-5)",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 13.5.sp,
+                                        fontSize = 13.sp,
                                         color = Color(0xFF0F172A)
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         shape = RoundedCornerShape(4.dp),
                                         color = Color(0xFF64748B).copy(alpha = 0.15f)
                                     ) {
                                         Text(
-                                            text = "Slower Route",
-                                            fontSize = 9.sp,
+                                            text = "Slower",
+                                            fontSize = 8.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF475569),
                                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -668,9 +917,11 @@ fun PostPlannedRideScreen(
                                     }
                                 }
                                 Text(
-                                    text = "290 km • 6h 10m (Multiple City Crossings)",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF64748B)
+                                    text = "290 km • 6h 10m (City Crossings • PKR 240)",
+                                    fontSize = 10.5.sp,
+                                    color = Color(0xFF64748B),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -682,16 +933,16 @@ fun PostPlannedRideScreen(
             // CARD 2: SCHEDULE DEPARTURE
             // =========================================================================
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = Color.White,
-                shadowElevation = 2.dp,
+                shadowElevation = 1.5.dp,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(14.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -701,7 +952,7 @@ fun PostPlannedRideScreen(
                         Text(
                             text = "Schedule Departure",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
+                            fontSize = 14.5.sp,
                             color = Color(0xFF0F172A)
                         )
                         Surface(
@@ -713,19 +964,19 @@ fun PostPlannedRideScreen(
                             border = BorderStroke(1.dp, Color(0xFFCBD5E1))
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.AccessTime,
                                     contentDescription = null,
                                     tint = Color(0xFF00897B),
-                                    modifier = Modifier.size(12.dp)
+                                    modifier = Modifier.size(11.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
                                 Text(
-                                    text = "±${flexWindowMins}m Flex Window ⌄",
-                                    fontSize = 11.sp,
+                                    text = "±${flexWindowMins}m ⌄",
+                                    fontSize = 10.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color(0xFF00897B)
                                 )
@@ -733,12 +984,12 @@ fun PostPlannedRideScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Date Selector Row
                     Text(
                         text = "SELECT DEPARTURE DATE",
-                        fontSize = 10.sp,
+                        fontSize = 9.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF64748B),
                         letterSpacing = 0.5.sp
@@ -748,13 +999,13 @@ fun PostPlannedRideScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         // Today Chip
                         val isToday = selectedDateLabel.startsWith("Today")
                         Surface(
                             onClick = { selectedDateLabel = "Today, $todayDateStr" },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = if (isToday) Color(0xFF00C853).copy(alpha = 0.12f) else Color(0xFFF8FAFC),
                             border = BorderStroke(
                                 if (isToday) 1.5.dp else 1.dp,
@@ -763,12 +1014,13 @@ fun PostPlannedRideScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = "Today, $todayDateStr",
-                                fontSize = 12.sp,
+                                text = "Today",
+                                fontSize = 11.5.sp,
                                 fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isToday) Color(0xFF047857) else Color(0xFF334155),
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(vertical = 10.dp)
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                maxLines = 1
                             )
                         }
 
@@ -776,52 +1028,90 @@ fun PostPlannedRideScreen(
                         val isTomorrow = selectedDateLabel.startsWith("Tomorrow")
                         Surface(
                             onClick = { selectedDateLabel = "Tomorrow, $tomorrowDateStr" },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = if (isTomorrow) Color(0xFF00C853).copy(alpha = 0.12f) else Color(0xFFF8FAFC),
                             border = BorderStroke(
                                 if (isTomorrow) 1.5.dp else 1.dp,
                                 if (isTomorrow) Color(0xFF00C853) else Color(0xFFE2E8F0)
                             ),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1.2f)
                         ) {
                             Text(
-                                text = "Tomorrow, 25 Oct",
-                                fontSize = 12.sp,
+                                text = "Tomorrow",
+                                fontSize = 11.5.sp,
                                 fontWeight = if (isTomorrow) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isTomorrow) Color(0xFF047857) else Color(0xFF334155),
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(vertical = 10.dp)
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                maxLines = 1
+                            )
+                        }
+
+                        // Day After Chip
+                        val isDayAfter = selectedDateLabel.contains(dayAfterDateStr)
+                        Surface(
+                            onClick = { selectedDateLabel = dayAfterDateStr },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isDayAfter) Color(0xFF00C853).copy(alpha = 0.12f) else Color(0xFFF8FAFC),
+                            border = BorderStroke(
+                                if (isDayAfter) 1.5.dp else 1.dp,
+                                if (isDayAfter) Color(0xFF00C853) else Color(0xFFE2E8F0)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Next Day",
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isDayAfter) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isDayAfter) Color(0xFF047857) else Color(0xFF334155),
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                maxLines = 1
                             )
                         }
 
                         // Custom Calendar Button
                         Surface(
                             onClick = {
-                                selectedDateLabel = "26 Oct • Next Day"
-                                Toast.makeText(context, "Date set for 26 Oct", Toast.LENGTH_SHORT).show()
+                                val now = Calendar.getInstance()
+                                DatePickerDialog(
+                                    context,
+                                    { _, year, month, dayOfMonth ->
+                                        val pickedCal = Calendar.getInstance().apply {
+                                            set(Calendar.YEAR, year)
+                                            set(Calendar.MONTH, month)
+                                            set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                                        }
+                                        val sdf = SimpleDateFormat("EEE, d MMM", Locale.getDefault())
+                                        selectedDateLabel = sdf.format(pickedCal.time)
+                                    },
+                                    now.get(Calendar.YEAR),
+                                    now.get(Calendar.MONTH),
+                                    now.get(Calendar.DAY_OF_MONTH)
+                                ).show()
                             },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = Color(0xFFF8FAFC),
                             border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.size(42.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.CalendarMonth,
                                     contentDescription = "Custom Date",
                                     tint = Color(0xFF475569),
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Departure Time Selector
                     Text(
                         text = "SELECT DEPARTURE TIME",
-                        fontSize = 10.sp,
+                        fontSize = 9.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF64748B),
                         letterSpacing = 0.5.sp
@@ -829,23 +1119,22 @@ fun PostPlannedRideScreen(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Preset time chips
                     val timePresets = listOf(
-                        "08:00 AM" to "Morning Rush",
-                        "09:30 AM" to "Prime Booking",
-                        "02:30 PM" to "Afternoon",
-                        "06:00 PM" to "Evening"
+                        "08:00 AM" to "Morning",
+                        "09:30 AM" to "Prime",
+                        "02:30 PM" to "Noon"
                     )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        timePresets.take(3).forEach { (time, note) ->
+                        timePresets.forEach { (time, note) ->
                             val isSelected = selectedTimeLabel == time
                             Surface(
                                 onClick = { selectedTimeLabel = time },
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 color = if (isSelected) Color(0xFF00C853).copy(alpha = 0.12f) else Color(0xFFF8FAFC),
                                 border = BorderStroke(
                                     if (isSelected) 1.5.dp else 1.dp,
@@ -854,50 +1143,83 @@ fun PostPlannedRideScreen(
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Column(
-                                    modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
                                         text = time,
-                                        fontSize = 12.5.sp,
+                                        fontSize = 11.5.sp,
                                         fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
-                                        color = if (isSelected) Color(0xFF047857) else Color(0xFF0F172A)
+                                        color = if (isSelected) Color(0xFF047857) else Color(0xFF0F172A),
+                                        maxLines = 1
                                     )
                                     Text(
                                         text = note,
-                                        fontSize = 9.sp,
-                                        color = if (isSelected) Color(0xFF047857) else Color(0xFF64748B)
+                                        fontSize = 8.5.sp,
+                                        color = if (isSelected) Color(0xFF047857) else Color(0xFF64748B),
+                                        maxLines = 1
                                     )
                                 }
                             }
                         }
+
+                        // Custom Time Picker Button
+                        Surface(
+                            onClick = {
+                                val now = Calendar.getInstance()
+                                TimePickerDialog(
+                                    context,
+                                    { _, hourOfDay, minute ->
+                                        val amPm = if (hourOfDay < 12) "AM" else "PM"
+                                        val formattedHour = if (hourOfDay == 0 || hourOfDay == 12) 12 else hourOfDay % 12
+                                        selectedTimeLabel = String.format(Locale.getDefault(), "%02d:%02d %s", formattedHour, minute, amPm)
+                                    },
+                                    now.get(Calendar.HOUR_OF_DAY),
+                                    now.get(Calendar.MINUTE),
+                                    false
+                                ).show()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFF8FAFC),
+                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.AccessTime,
+                                    contentDescription = "Custom Time",
+                                    tint = Color(0xFF475569),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Info Callout Box
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(8.dp),
                         color = Color(0xFFEFF6FF),
                         border = BorderStroke(0.5.dp, Color(0xFFBFDBFE)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.padding(10.dp),
+                            modifier = Modifier.padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = null,
                                 tint = Color(0xFF2563EB),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Pickup Window: ±${flexWindowMins}m around $selectedTimeLabel (allows accommodating nearby passenger stops along route)",
-                                fontSize = 11.5.sp,
+                                text = "Departure Window: $selectedDateLabel at $selectedTimeLabel (±${flexWindowMins}m check-in window)",
+                                fontSize = 10.5.sp,
                                 color = Color(0xFF1E40AF),
-                                lineHeight = 16.sp
+                                lineHeight = 14.sp
                             )
                         }
                     }
@@ -905,19 +1227,19 @@ fun PostPlannedRideScreen(
             }
 
             // =========================================================================
-            // CARD 3: SEAT FARE & BUYOUT
+            // CARD 3: CAR CABIN & SEAT MATRIX VISUALIZER
             // =========================================================================
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = Color.White,
-                shadowElevation = 2.dp,
+                shadowElevation = 1.5.dp,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(14.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -925,9 +1247,9 @@ fun PostPlannedRideScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Seat Fare & Buyout",
+                            text = "Seat Fare & Vehicle Cabin",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
+                            fontSize = 14.5.sp,
                             color = Color(0xFF0F172A)
                         )
                         Surface(
@@ -937,34 +1259,34 @@ fun PostPlannedRideScreen(
                         ) {
                             Text(
                                 text = "M-2 Tolls Included",
-                                fontSize = 10.5.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF047857),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Benchmark banner
                     Surface(
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         color = Color(0xFFF1F5F9),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "📈 Corridor Market Benchmark: PKR 1,800 – 2,100",
-                            fontSize = 11.5.sp,
+                            text = "📈 Corridor Benchmark: PKR 1,800 – 2,100 / seat",
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF475569),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Fare per seat Row
+                    // Fare per seat Stepper Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -973,97 +1295,97 @@ fun PostPlannedRideScreen(
                         Column {
                             Text(
                                 text = "FARE PER SEAT",
-                                fontSize = 10.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFF64748B),
                                 letterSpacing = 0.5.sp
                             )
                             Text(
                                 text = "PKR $farePerSeat",
-                                fontSize = 22.sp,
+                                fontSize = 20.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFF00796B)
                             )
                         }
 
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // -100 button
                             Surface(
                                 onClick = { if (farePerSeat > 500) farePerSeat -= 100 },
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(6.dp),
                                 color = Color(0xFFF1F5F9),
                                 border = BorderStroke(1.dp, Color(0xFFCBD5E1))
                             ) {
                                 Text(
                                     text = "-100",
-                                    fontSize = 13.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF334155),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                 )
                             }
 
                             // +100 button
                             Surface(
                                 onClick = { farePerSeat += 100 },
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(6.dp),
                                 color = Color(0xFF00C853).copy(alpha = 0.15f),
                                 border = BorderStroke(1.dp, Color(0xFF00C853))
                             ) {
                                 Text(
                                     text = "+100",
-                                    fontSize = 13.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF047857),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Available Seats Row
+                    // Available Seats Row & Matrix
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
-                                text = "AVAILABLE SEATS",
-                                fontSize = 10.sp,
+                                text = "OFFERED SEATS",
+                                fontSize = 9.5.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFF64748B),
                                 letterSpacing = 0.5.sp
                             )
                             Text(
-                                text = "$totalSeats passenger seats",
-                                fontSize = 13.sp,
+                                text = "$totalSeats seats available",
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF0F172A)
                             )
                         }
 
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             (1..4).forEach { count ->
                                 val isSelected = totalSeats == count
                                 Surface(
                                     onClick = { totalSeats = count },
-                                    shape = RoundedCornerShape(8.dp),
+                                    shape = RoundedCornerShape(6.dp),
                                     color = if (isSelected) Color(0xFF00C853) else Color(0xFFF1F5F9),
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Text(
                                             text = "$count",
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp,
+                                            fontSize = 12.sp,
                                             color = if (isSelected) Color.White else Color(0xFF334155)
                                         )
                                     }
@@ -1072,11 +1394,11 @@ fun PostPlannedRideScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     HorizontalDivider(color = Color(0xFFE2E8F0))
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Allow Full-Car Buyout Switch
+                    // Allow Full-Car Buyout Switch & Calculated Discount
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -1085,20 +1407,39 @@ fun PostPlannedRideScreen(
                             imageVector = Icons.Default.DirectionsCar,
                             contentDescription = null,
                             tint = Color(0xFF00796B),
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "Full-Car Buyout",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFFFEF3C7)
+                                ) {
+                                    Text(
+                                        text = "5% Off",
+                                        fontSize = 8.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E),
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
                             Text(
-                                text = "Allow Full-Car Buyout",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = Color(0xFF0F172A)
-                            )
-                            Text(
-                                text = "Single rider pays PKR $fullCarFare for entire car",
-                                fontSize = 11.5.sp,
-                                color = Color(0xFF64748B)
+                                text = "Single rider books all $totalSeats seats for PKR $fullCarFare",
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Switch(
@@ -1114,38 +1455,182 @@ fun PostPlannedRideScreen(
             }
 
             // =========================================================================
-            // CARD 4: CAPTAIN RIDE POLICIES (FROM 3RD SCREENSHOT)
+            // CARD 4: VEHICLE DETAILS & ONBOARD AMENITIES
             // =========================================================================
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = Color.White,
-                shadowElevation = 2.dp,
+                shadowElevation = 1.5.dp,
                 border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Vehicle & Amenities",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.5.sp,
+                            color = Color(0xFF0F172A)
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFF0FDF4),
+                            border = BorderStroke(0.8.dp, Color(0xFF86EFAC))
+                        ) {
+                            Text(
+                                text = "✓ Verified Captain",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF166534),
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Vehicle Profile Badge
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF00796B).copy(alpha = 0.12f),
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = Color(0xFF00796B), modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (driverVehicle.isNotBlank()) driverVehicle else "Toyota Corolla GLi",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF0F172A),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${if (driverPlateNumber.isNotBlank()) driverPlateNumber else "LEB-4521"} • $driverVehicleType",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF64748B),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFFFEF3C7)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(11.dp))
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text("5.0", fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFF92400E))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Responsive 2x2 Amenity Checklist Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AmenityToggleChip(
+                            label = "AC On",
+                            icon = Icons.Default.AcUnit,
+                            isSelected = hasAirConditioning,
+                            onToggle = { hasAirConditioning = !hasAirConditioning },
+                            modifier = Modifier.weight(1f)
+                        )
+                        AmenityToggleChip(
+                            label = "Luggage",
+                            icon = Icons.Default.Luggage,
+                            isSelected = hasLuggageSpace,
+                            onToggle = { hasLuggageSpace = !hasLuggageSpace },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        AmenityToggleChip(
+                            label = "No Smoking",
+                            icon = Icons.Default.SmokeFree,
+                            isSelected = isSmokeFree,
+                            onToggle = { isSmokeFree = !isSmokeFree },
+                            modifier = Modifier.weight(1f)
+                        )
+                        AmenityToggleChip(
+                            label = "M-Tag",
+                            icon = Icons.Default.Speed,
+                            isSelected = hasMTagFastPay,
+                            onToggle = { hasMTagFastPay = !hasMTagFastPay },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            // =========================================================================
+            // CARD 5: CAPTAIN RIDE POLICIES
+            // =========================================================================
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color.White,
+                shadowElevation = 1.5.dp,
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
                 ) {
                     Text(
                         text = "Captain Ride Policies",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
+                        fontSize = 14.5.sp,
                         color = Color(0xFF0F172A)
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Booking Type Segmented Options
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // Instant Booking
                         Surface(
                             onClick = { isInstantBooking = true },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             color = if (isInstantBooking) Color(0xFFF0FDF4) else Color(0xFFF8FAFC),
                             border = BorderStroke(
                                 if (isInstantBooking) 1.5.dp else 1.dp,
@@ -1154,21 +1639,22 @@ fun PostPlannedRideScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Column(
-                                modifier = Modifier.padding(10.dp)
+                                modifier = Modifier.padding(8.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = "⚡ Instant",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
+                                        fontSize = 12.sp,
                                         color = if (isInstantBooking) Color(0xFF047857) else Color(0xFF0F172A)
                                     )
                                 }
                                 Text(
-                                    text = "Auto-confirms verified passenger bookings",
-                                    fontSize = 10.5.sp,
+                                    text = "Auto-confirms bookings",
+                                    fontSize = 10.sp,
                                     color = Color(0xFF64748B),
-                                    lineHeight = 14.sp
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -1176,7 +1662,7 @@ fun PostPlannedRideScreen(
                         // Driver Approval
                         Surface(
                             onClick = { isInstantBooking = false },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             color = if (!isInstantBooking) Color(0xFFF0FDF4) else Color(0xFFF8FAFC),
                             border = BorderStroke(
                                 if (!isInstantBooking) 1.5.dp else 1.dp,
@@ -1185,29 +1671,30 @@ fun PostPlannedRideScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Column(
-                                modifier = Modifier.padding(10.dp)
+                                modifier = Modifier.padding(8.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = "👤 Approval",
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
+                                        fontSize = 12.sp,
                                         color = if (!isInstantBooking) Color(0xFF047857) else Color(0xFF0F172A)
                                     )
                                 }
                                 Text(
-                                    text = "Review passenger rating before accepting",
-                                    fontSize = 10.5.sp,
+                                    text = "Review riders first",
+                                    fontSize = 10.sp,
                                     color = Color(0xFF64748B),
-                                    lineHeight = 14.sp
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     HorizontalDivider(color = Color(0xFFE2E8F0))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Toggle 1: Allow Fare Counter-Offers
                     Row(
@@ -1218,20 +1705,22 @@ fun PostPlannedRideScreen(
                             imageVector = Icons.Default.PriceChange,
                             contentDescription = null,
                             tint = Color(0xFF1976D2),
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(20.dp)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Allow Fare Counter-Offers",
+                                text = "Fare Counter-Offers",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
+                                fontSize = 13.sp,
                                 color = Color(0xFF0F172A)
                             )
                             Text(
-                                text = "Riders can negotiate within ± PKR 300 of your price",
-                                fontSize = 11.5.sp,
-                                color = Color(0xFF64748B)
+                                text = "Riders can negotiate within ± PKR 300",
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Switch(
@@ -1244,9 +1733,9 @@ fun PostPlannedRideScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     HorizontalDivider(color = Color(0xFFE2E8F0))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Toggle 2: Ladies Only Corridor
                     Row(
@@ -1256,34 +1745,36 @@ fun PostPlannedRideScreen(
                         Surface(
                             shape = CircleShape,
                             color = Color(0xFFFCE4EC),
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(24.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     text = "♀",
                                     fontWeight = FontWeight.Black,
                                     color = Color(0xFFE91E63),
-                                    fontSize = 16.sp
+                                    fontSize = 14.sp
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 Text(
-                                    text = "Ladies Only Corridor",
+                                    text = "Ladies Only",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.sp,
                                     color = Color(0xFF0F172A)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
                                     color = Color(0xFFFCE4EC)
                                 ) {
                                     Text(
                                         text = "Verified",
-                                        fontSize = 9.sp,
+                                        fontSize = 8.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color(0xFFC2185B),
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -1291,9 +1782,11 @@ fun PostPlannedRideScreen(
                                 }
                             }
                             Text(
-                                text = "Exclusive for verified female passengers only",
-                                fontSize = 11.5.sp,
-                                color = Color(0xFF64748B)
+                                text = "Exclusive for verified female passengers",
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Switch(
@@ -1331,14 +1824,15 @@ fun PostPlannedRideScreen(
             title = {
                 Text(
                     text = if (isPickupPicker) "Select Pickup Hub" else "Select Dropoff Hub",
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
                 )
             },
             text = {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 350.dp)
+                        .heightIn(max = 320.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -1356,14 +1850,14 @@ fun PostPlannedRideScreen(
                                 }
                                 showCityChangeDialog = null
                             },
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             color = Color(0xFFF8FAFC),
                             border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(text = city, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text(text = hub, fontSize = 11.5.sp, color = Color(0xFF64748B))
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(text = city, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                                Text(text = hub, fontSize = 11.sp, color = Color(0xFF64748B))
                             }
                         }
                     }
@@ -1375,5 +1869,48 @@ fun PostPlannedRideScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun AmenityToggleChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isSelected: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onToggle,
+        shape = RoundedCornerShape(8.dp),
+        color = if (isSelected) Color(0xFF00C853).copy(alpha = 0.12f) else Color(0xFFF8FAFC),
+        border = BorderStroke(
+            if (isSelected) 1.2.dp else 1.dp,
+            if (isSelected) Color(0xFF00C853) else Color(0xFFCBD5E1)
+        ),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (isSelected) Color(0xFF047857) else Color(0xFF64748B),
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = label,
+                fontSize = 11.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Color(0xFF047857) else Color(0xFF475569),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }

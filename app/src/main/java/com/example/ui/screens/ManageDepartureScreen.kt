@@ -31,11 +31,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.IntercityRouteOptimizer
+import com.example.data.model.IntercityManifestUiState
 import com.example.data.model.PlannedDeparture
 import com.example.data.model.PlannedDepartureBooking
 import com.example.data.model.PlannedDepartureOffer
 import com.example.data.remote.FirebaseRepository
+import com.example.ui.components.PassengerList
+import com.example.ui.components.PassengerOfferCard
 import com.example.ui.theme.DrigoBrandPurple
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 private val MintGreen = Color(0xFF00C853)
@@ -50,36 +57,131 @@ private val DarkRed = Color(0xFFD32F2F)
 @Composable
 fun ManageDepartureScreen(
     departureId: String,
+    initialDeparture: PlannedDeparture? = null,
     onBack: () -> Unit,
+    initialTab: Int = 0,
     onSosClick: () -> Unit = {},
+    onStartActiveRide: (PlannedDeparture) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val repo = remember { FirebaseRepository.getInstance(context) }
 
-    // Live departure observation
-    var departure by remember { mutableStateOf(repo.getDepartureById(departureId) ?: PlannedDeparture(id = departureId)) }
-    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList())
+    LaunchedEffect(departureId, initialDeparture) {
+        initialDeparture?.let { repo.cachePlannedDeparture(it) }
+        android.util.Log.d("DrigoManageDeparture", "ManageDepartureScreen initialized for departureId='$departureId', initialTab=$initialTab, initialRoute=${initialDeparture?.pickupCity}->${initialDeparture?.dropoffCity}")
+    }
+
+    // Live departure observation (specific ID observer + fallback)
+    val liveDepartureFromRepo by remember(departureId) { repo.observeDepartureById(departureId) }.collectAsState(initial = initialDeparture ?: repo.getDepartureById(departureId))
+    var departure by remember(departureId) {
+        mutableStateOf(
+            initialDeparture
+                ?: repo.getDepartureById(departureId)
+                ?: PlannedDeparture(id = departureId)
+        )
+    }
+
+    LaunchedEffect(liveDepartureFromRepo) {
+        liveDepartureFromRepo?.let {
+            departure = it
+            android.util.Log.d("DrigoManageDeparture", "Live departure updated for id='$departureId': Route=${it.pickupCity}->${it.dropoffCity}, Status=${it.status}, Fare=PKR ${it.farePerSeat}, Offers=${it.offersReceivedCount}")
+        }
+    }
+
+    val allDepartures by remember { repo.observeAllPlannedDepartures() }.collectAsState(initial = emptyList())
     LaunchedEffect(allDepartures, departureId) {
         val found = allDepartures.find { it.id == departureId } ?: repo.getDepartureById(departureId)
-        if (found != null) {
+        if (found != null && (departure.pickupCity.isBlank() || departure.farePerSeat == 0)) {
+            android.util.Log.d("DrigoManageDeparture", "Loaded departure from allDepartures for id='$departureId': Route=${found.pickupCity}->${found.dropoffCity}")
             departure = found
         }
     }
 
     // Live bookings & offers
-    val bookings by repo.observeDepartureBookings(departureId).collectAsState(initial = emptyList())
-    val offers by repo.observeDepartureOffers(departureId).collectAsState(initial = emptyList())
+    val bookings by remember(departureId) { repo.observeDepartureBookings(departureId) }.collectAsState(initial = emptyList())
+    val offers by remember(departureId) { repo.observeDepartureOffers(departureId) }.collectAsState(initial = emptyList())
 
-    // Tabs: 0 -> Departure Details, 1 -> Passenger Offers
-    var selectedTab by remember { mutableIntStateOf(0) }
+    // Merged list of confirmed bookings and accepted passenger offers
+    val confirmedRiders = remember(bookings, offers) {
+        val list = mutableListOf<PlannedDepartureBooking>()
+        list.addAll(bookings)
+        val acceptedOffers = offers.filter { it.status.equals("ACCEPTED", true) }
+        for (offer in acceptedOffers) {
+            if (list.none { (it.passengerId.isNotBlank() && it.passengerId == offer.passengerId) || it.id == offer.id || it.id == "bk_${offer.id}" }) {
+                list.add(
+                    PlannedDepartureBooking(
+                        id = if (offer.id.isNotBlank()) "bk_${offer.id}" else java.util.UUID.randomUUID().toString(),
+                        departureId = departureId,
+                        passengerId = offer.passengerId,
+                        passengerName = offer.passengerName,
+                        passengerPhone = offer.passengerPhone,
+                        passengerRating = offer.passengerRating,
+                        seatsBooked = offer.requestedSeats.coerceAtLeast(1),
+                        pickupStop = offer.pickupPoint,
+                        pickupLat = offer.pickupLat,
+                        pickupLon = offer.pickupLon,
+                        dropoffStop = offer.dropoffPoint,
+                        dropoffLat = offer.dropoffLat,
+                        dropoffLon = offer.dropoffLon,
+                        isFullCar = (offer.bookingType == "PRIVATE"),
+                        totalFarePkr = offer.offeredFare,
+                        status = "CONFIRMED",
+                        bookedAt = offer.createdAt
+                    )
+                )
+            }
+        }
+        list
+    }
+
+    LaunchedEffect(bookings.size, confirmedRiders.size) {
+        android.util.Log.d("DrigoManageDeparture", "Received ${bookings.size} direct bookings, total ${confirmedRiders.size} confirmed riders for departureId='$departureId'")
+    }
+
+    LaunchedEffect(offers.size) {
+        android.util.Log.d("DrigoManageDeparture", "Received ${offers.size} passenger offers for departureId='$departureId'")
+        offers.forEachIndexed { idx, off ->
+            android.util.Log.d("DrigoManageDeparture", "  [$idx] Offer ID=${off.id}, Rider=${off.passengerName}, Seats=${off.requestedSeats}, Offered=PKR ${off.offeredFare}, Status=${off.status}")
+        }
+    }
+
+    // Live Intercity Manifest State (Geographically sorted Pickups heading to highway & Drop-offs from highway exit)
+    var manifestState by remember {
+        mutableStateOf(
+            IntercityManifestUiState(
+                departureId = departureId,
+                originCity = departure.pickupCity,
+                destinationCity = departure.dropoffCity
+            )
+        )
+    }
+
+    LaunchedEffect(departure, confirmedRiders, offers) {
+        try {
+            val acceptedOffers = offers.filter { it.status.equals("ACCEPTED", true) }
+            android.util.Log.d("DrigoManageDeparture", "Generating optimized manifest with ${confirmedRiders.size} confirmed riders and ${acceptedOffers.size} accepted offers...")
+            val result = IntercityRouteOptimizer.generateOptimizedManifest(
+                departure = departure,
+                confirmedBookings = confirmedRiders,
+                acceptedOffers = acceptedOffers
+            )
+            manifestState = result
+            android.util.Log.d("DrigoManageDeparture", "Manifest generated successfully: Total Stops=${result.allOrderedStops.size}, Distance=${result.totalDistanceKm}km, Duration=${result.totalDurationMinutes}m, Earnings=PKR ${result.totalManifestEarningsPkr}")
+        } catch (e: Exception) {
+            android.util.Log.e("DrigoManageDeparture", "Manifest generation error for departureId='$departureId': ${e.message}", e)
+        }
+    }
+
+    // Tabs: 0 -> Departure Details, 1 -> Passenger Offers, 2 -> Route Manifest
+    var selectedTab by remember { mutableIntStateOf(if (initialTab in 0..2) initialTab else 0) }
 
     // Editable states in Quick Adjustments
-    var selectedDateText by remember(departure) { mutableStateOf(departure.departureDateText) }
-    var selectedTimeText by remember(departure) { mutableStateOf(departure.departureTimeText) }
-    var currentFarePerSeat by remember(departure) { mutableIntStateOf(departure.farePerSeat) }
-    var isFlexWindowEnabled by remember(departure) { mutableStateOf(departure.flexWindowMins > 0) }
+    var selectedDateText by remember(departure.departureDateText) { mutableStateOf(departure.departureDateText) }
+    var selectedTimeText by remember(departure.departureTimeText) { mutableStateOf(departure.departureTimeText) }
+    var currentFarePerSeat by remember(departure.farePerSeat) { mutableIntStateOf(departure.farePerSeat) }
+    var isFlexWindowEnabled by remember(departure.flexWindowMins) { mutableStateOf(departure.flexWindowMins > 0) }
 
     // Dialog states
     var showDatePickerDialog by remember { mutableStateOf(false) }
@@ -268,7 +370,7 @@ fun ManageDepartureScreen(
                 }
             }
 
-            // Segmented Tabs: Departure Details & Passenger Offers
+            // Segmented Tabs: Departure Details, Passenger Offers & Route Manifest
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -291,10 +393,10 @@ fun ManageDepartureScreen(
                             .weight(1f)
                             .height(38.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp)) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 2.dp)) {
                             Text(
-                                text = "Departure Details",
-                                fontSize = 12.sp,
+                                text = "Details",
+                                fontSize = 11.5.sp,
                                 fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
                                 color = if (selectedTab == 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -318,27 +420,73 @@ fun ManageDepartureScreen(
                             horizontalArrangement = Arrangement.Center,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(horizontal = 4.dp)
+                                .padding(horizontal = 2.dp)
                         ) {
                             Text(
-                                text = "Passenger Offers",
-                                fontSize = 12.sp,
+                                text = "Offers",
+                                fontSize = 11.5.sp,
                                 fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
                                 color = if (selectedTab == 1) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             if (offers.isNotEmpty()) {
-                                Spacer(modifier = Modifier.width(5.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Surface(
                                     shape = CircleShape,
                                     color = MintGreen,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(17.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Text(
                                             text = offers.size.toString(),
-                                            fontSize = 10.sp,
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Route Manifest Tab
+                    val totalStopsCount = manifestState.phase1Pickups.size + manifestState.phase2Dropoffs.size
+                    Surface(
+                        onClick = { selectedTab = 2 },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (selectedTab == 2) MaterialTheme.colorScheme.surface else Color.Transparent,
+                        shadowElevation = if (selectedTab == 2) 2.dp else 0.dp,
+                        modifier = Modifier
+                            .weight(1.1f)
+                            .height(38.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 2.dp)
+                        ) {
+                            Text(
+                                text = "Manifest",
+                                fontSize = 11.5.sp,
+                                fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selectedTab == 2) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (totalStopsCount > 0) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = DarkGreen,
+                                    modifier = Modifier.height(17.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 4.dp)) {
+                                        Text(
+                                            text = "$totalStopsCount",
+                                            fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White
                                         )
@@ -363,6 +511,74 @@ fun ManageDepartureScreen(
                             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
+                            // BANNER: Pending Passenger Offers Alert (Prominent 1-tap view)
+                            if (offers.isNotEmpty()) {
+                                item {
+                                    Surface(
+                                        onClick = { selectedTab = 1 },
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                                        shadowElevation = 2.dp,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(36.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.LocalOffer,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column {
+                                                    Text(
+                                                        text = "${offers.size} Pending Passenger ${if (offers.size == 1) "Offer" else "Offers"}",
+                                                        fontSize = 14.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                                    )
+                                                    Text(
+                                                        text = "Tap to review, accept, decline, or counter",
+                                                        fontSize = 11.5.sp,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.primary
+                                            ) {
+                                                Text(
+                                                    text = "Review",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // CARD 1: Scheduled Departure & Route Details
                             item {
                                 Card(
@@ -532,7 +748,7 @@ fun ManageDepartureScreen(
                                                         )
                                                         Spacer(modifier = Modifier.width(8.dp))
                                                         Text(
-                                                            text = "~12:15 PM",
+                                                            text = calculateEstimatedArrival(selectedTimeText, 270),
                                                             fontSize = 12.sp,
                                                             fontWeight = FontWeight.SemiBold,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -986,200 +1202,83 @@ fun ManageDepartureScreen(
                                 }
                             }
 
-                            // CARD 3: CONFIRMED PASSENGERS
+                            // CARD 3: CONFIRMED PASSENGERS (Material 3 Realtime List)
                             item {
-                                Card(
-                                    shape = RoundedCornerShape(18.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.padding(14.dp)) {
-                                        // Header
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "CONFIRMED PASSENGERS",
-                                                fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f, fill = false)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-
-                                            val totalEarnings = bookings.sumOf { it.totalFarePkr }
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Surface(
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    color = MaterialTheme.colorScheme.surfaceVariant
-                                                ) {
-                                                    Text(
-                                                        text = "${bookings.size} BOOKED",
-                                                        fontSize = 9.5.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                                                        maxLines = 1
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text(
-                                                    text = "PKR %,d total".format(if (totalEarnings > 0) totalEarnings else (departure.totalSeats - departure.availableSeats) * departure.farePerSeat),
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = DarkGreen,
-                                                    maxLines = 1
-                                                )
-                                            }
+                                PassengerList(
+                                    confirmedRiders = confirmedRiders,
+                                    totalCapacitySeats = departure.availableSeats + confirmedRiders.sumOf { it.seatsBooked },
+                                    onViewRouteManifest = { selectedTab = 2 },
+                                    stopNumberProvider = { booking, index ->
+                                        val pickupWp = manifestState.phase1Pickups.find {
+                                            it.bookingId == booking.id || it.passengerName.equals(booking.passengerName, true)
                                         }
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-
-                                        if (bookings.isEmpty()) {
-                                            Text(
-                                                text = "No passenger has booked a seat yet.",
-                                                fontSize = 12.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(vertical = 6.dp)
-                                            )
-                                        } else {
-                                            bookings.forEachIndexed { index, booking ->
-                                                if (index > 0) {
-                                                    HorizontalDivider(
-                                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                                                        modifier = Modifier.padding(vertical = 8.dp)
-                                                    )
-                                                }
-
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        modifier = Modifier.weight(1f)
-                                                    ) {
-                                                        // Avatar Initials Circle
-                                                        Surface(
-                                                            shape = CircleShape,
-                                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                                            modifier = Modifier.size(36.dp)
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Text(
-                                                                    text = booking.passengerName.take(2).uppercase(),
-                                                                    fontSize = 12.sp,
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                                                )
-                                                            }
-                                                        }
-
-                                                        Spacer(modifier = Modifier.width(8.dp))
-
-                                                        Column(modifier = Modifier.weight(1f, fill = false)) {
-                                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                                Text(
-                                                                    text = booking.passengerName,
-                                                                    fontSize = 12.5.sp,
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                                    maxLines = 1,
-                                                                    overflow = TextOverflow.Ellipsis
-                                                                )
-                                                                Spacer(modifier = Modifier.width(4.dp))
-                                                                Icon(
-                                                                    imageVector = Icons.Default.Star,
-                                                                    contentDescription = null,
-                                                                    tint = Color(0xFFFFB300),
-                                                                    modifier = Modifier.size(12.dp)
-                                                                )
-                                                                Text(
-                                                                    text = "%.1f".format(booking.passengerRating),
-                                                                    fontSize = 10.5.sp,
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                                    maxLines = 1
-                                                                )
-                                                            }
-                                                            Text(
-                                                                text = "${booking.seatsBooked} Seat • Pickup: ${booking.pickupStop}",
-                                                                fontSize = 10.5.sp,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis
-                                                            )
-                                                        }
-                                                    }
-
-                                                    Spacer(modifier = Modifier.width(6.dp))
-
-                                                    // Action Icons: Call & Chat
-                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        Surface(
-                                                            onClick = {
-                                                                try {
-                                                                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${booking.passengerPhone}"))
-                                                                    context.startActivity(intent)
-                                                                } catch (_: Exception) {
-                                                                    Toast.makeText(context, "Calling ${booking.passengerName} (${booking.passengerPhone})", Toast.LENGTH_SHORT).show()
-                                                                }
-                                                            },
-                                                            shape = CircleShape,
-                                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                                            modifier = Modifier.size(34.dp)
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.Call,
-                                                                    contentDescription = "Call",
-                                                                    tint = MaterialTheme.colorScheme.onSurface,
-                                                                    modifier = Modifier.size(15.dp)
-                                                                )
-                                                            }
-                                                        }
-
-                                                        Surface(
-                                                            onClick = {
-                                                                try {
-                                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${booking.passengerPhone}"))
-                                                                    context.startActivity(intent)
-                                                                } catch (_: Exception) {
-                                                                    Toast.makeText(context, "Messaging ${booking.passengerName}", Toast.LENGTH_SHORT).show()
-                                                                }
-                                                            },
-                                                            shape = CircleShape,
-                                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                                            modifier = Modifier.size(34.dp)
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.ChatBubbleOutline,
-                                                                    contentDescription = "Message",
-                                                                    tint = MaterialTheme.colorScheme.onSurface,
-                                                                    modifier = Modifier.size(15.dp)
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                        if (pickupWp != null) "Stop ${pickupWp.stopNumber}" else "Stop ${index + 1}"
+                                    },
+                                    onCall = { booking ->
+                                        try {
+                                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${booking.passengerPhone}"))
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {
+                                            Toast.makeText(context, "Calling ${booking.passengerName} (${booking.passengerPhone})", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    onMessage = { booking ->
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${booking.passengerPhone}"))
+                                            context.startActivity(intent)
+                                        } catch (_: Exception) {
+                                            Toast.makeText(context, "Messaging ${booking.passengerName}", Toast.LENGTH_SHORT).show()
                                         }
                                     }
-                                }
+                                )
                             }
 
                             // CARD 4: SAVE CHANGES & CANCEL DEPARTURE ACTIONS (Screenshot 4)
                             item {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    // Start Ride Button
+                                    val isTripActive = departure.status.equals("ACTIVE", true)
+                                    Button(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                repo.startIntercityRide(
+                                                    departure = departure,
+                                                    confirmedBookings = confirmedRiders,
+                                                    acceptedOffers = offers.filter { it.status.equals("ACCEPTED", true) }
+                                                )
+                                                onStartActiveRide(departure.copy(status = "ACTIVE"))
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (isTripActive) Color(0xFF00C853) else Color(0xFF0F172A),
+                                            contentColor = Color.White
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(52.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isTripActive) Icons.Default.Navigation else Icons.Default.PlayArrow,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = if (isTripActive) "Start Ride • In Progress" else "Start Ride",
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+
                                     // Save Changes Button (Vibrant Green)
                                     Button(
                                         onClick = {
@@ -1301,7 +1400,7 @@ fun ManageDepartureScreen(
                         } else {
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
+                                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 40.dp),
                                 verticalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
                                 items(offers, key = { it.id }) { offer ->
@@ -1330,10 +1429,113 @@ fun ManageDepartureScreen(
                                             } catch (_: Exception) {
                                                 Toast.makeText(context, "Messaging ${offer.passengerName}", Toast.LENGTH_SHORT).show()
                                             }
+                                        },
+                                        onCall = {
+                                            try {
+                                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${offer.passengerPhone}"))
+                                                context.startActivity(intent)
+                                            } catch (_: Exception) {
+                                                Toast.makeText(context, "Calling ${offer.passengerName} (${offer.passengerPhone})", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     )
                                 }
                             }
+                        }
+                    }
+
+                    2 -> {
+                        // ROUTE MANIFEST / INTERCITY MANIFEST TAB
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // Quick Action: Launch Live Highway Radar & Active Manifest (Attachment 2)
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        if (!departure.status.equals("ACTIVE", true)) {
+                                            repo.updatePlannedDepartureStatus(departureId, "ACTIVE")
+                                        }
+                                        onStartActiveRide(departure.copy(status = "ACTIVE"))
+                                    }
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF00C853),
+                                    contentColor = Color.White
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Navigation,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Launch Live Highway Radar & Manifest",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            IntercityManifestContent(
+                                manifestState = manifestState,
+                                departure = departure,
+                                onRecalculateRoute = {
+                                    coroutineScope.launch {
+                                        manifestState = manifestState.copy(isOptimizingRoute = true)
+                                        manifestState = IntercityRouteOptimizer.generateOptimizedManifest(
+                                            departure = departure,
+                                            confirmedBookings = bookings,
+                                            acceptedOffers = offers.filter { it.status.equals("ACCEPTED", true) }
+                                        )
+                                    }
+                                },
+                                offers = offers,
+                                onAcceptOffer = { offer ->
+                                    coroutineScope.launch {
+                                        repo.acceptDepartureOffer(departureId, offer.id)
+                                        Toast.makeText(context, "Offer from ${offer.passengerName} accepted!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onDeclineOffer = { offer ->
+                                    coroutineScope.launch {
+                                        repo.declineDepartureOffer(departureId, offer.id)
+                                        Toast.makeText(context, "Offer declined.", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onCounterOffer = { offer ->
+                                    counterOfferTarget = offer
+                                    counterPriceInput = (offer.offeredFare + 100).toString()
+                                },
+                                onMessagePassenger = { offer ->
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${offer.passengerPhone}"))
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Messaging ${offer.passengerName}", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onCallPassenger = { offer ->
+                                    try {
+                                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${offer.passengerPhone}"))
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Calling ${offer.passengerName} (${offer.passengerPhone})", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
                         }
                     }
                 }
@@ -1363,7 +1565,7 @@ fun ManageDepartureScreen(
                     onClick = {
                         showCancelConfirmDialog = false
                         coroutineScope.launch {
-                            repo.cancelPlannedDeparture(departureId)
+                            repo.cancelPlannedDeparture(departureId, departure.driverId)
                             Toast.makeText(context, "Departure cancelled successfully", Toast.LENGTH_SHORT).show()
                             onBack()
                         }
@@ -1438,13 +1640,18 @@ fun ManageDepartureScreen(
 
     // Quick Date Selection Dialog
     if (showDatePickerDialog) {
-        val dateOptions = listOf(
-            "Today, 24 Oct",
-            "Tomorrow, 25 Oct",
-            "Saturday, 26 Oct",
-            "Sunday, 27 Oct",
-            "Monday, 28 Oct"
-        )
+        val dateOptions = remember {
+            val sdf = SimpleDateFormat("EEE, d MMM", Locale.getDefault())
+            (0..4).map { offset ->
+                val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, offset) }
+                val prefix = when (offset) {
+                    0 -> "Today, "
+                    1 -> "Tomorrow, "
+                    else -> ""
+                }
+                "$prefix${sdf.format(cal.time)}"
+            }
+        }
         AlertDialog(
             onDismissRequest = { showDatePickerDialog = false },
             title = {
@@ -1552,318 +1759,18 @@ fun ManageDepartureScreen(
 }
 
 /**
- * Passenger Offer Card matching Screenshot 3
+ * Calculates the estimated arrival time based on departure time string and corridor duration minutes.
  */
-@Composable
-private fun PassengerOfferCard(
-    offer: PlannedDepartureOffer,
-    onAccept: () -> Unit,
-    onDecline: () -> Unit,
-    onCounter: () -> Unit,
-    onMessage: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            1.5.dp,
-            if (offer.isFullFare) MintGreen.copy(alpha = 0.5f) else AmberTag.copy(alpha = 0.5f)
-        ),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column {
-            // Top Right Badge Tag (e.g. OFFERED PKR 200 LESS / FULL FARE OFFER)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(topEnd = 18.dp, bottomStart = 12.dp),
-                    color = if (offer.isFullFare) MintGreen else AmberTag
-                ) {
-                    Text(
-                        text = offer.tagText.uppercase(),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
-                    )
-                }
-            }
-
-            // Passenger Row: Avatar + Name + Verified Badge + Rating/Completed Rides
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Passenger Avatar
-                Surface(
-                    shape = CircleShape,
-                    color = DrigoBrandPurple.copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DrigoBrandPurple.copy(alpha = 0.3f)),
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = offer.passengerName.take(2).uppercase(),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DrigoBrandPurple
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(modifier = Modifier.weight(1f, fill = false)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = offer.passengerName,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (offer.isVerified) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = LightMintBg
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(5.dp)
-                                            .clip(CircleShape)
-                                            .background(MintGreen)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Text(
-                                        text = "Verified",
-                                        fontSize = 8.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = DarkGreen,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(2.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Color(0xFFFFB300),
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text(
-                            text = "%.1f • %d rides".format(offer.passengerRating, offer.passengerRidesCompleted),
-                            fontSize = 10.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            // Offer Details Box
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Requested Seats:",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "${offer.requestedSeats} Seats (${offer.luggageDetails})",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Pickup Point:",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = offer.pickupPoint,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Standard Asking:",
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "PKR %,d".format(offer.standardAsking),
-                            fontSize = 11.5.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                        modifier = Modifier.padding(vertical = 3.dp)
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Passenger Offer:",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = DarkGreen
-                        )
-                        Text(
-                            text = "PKR %,d".format(offer.offeredFare),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = DarkGreen
-                        )
-                    }
-                }
-            }
-
-            // Action Buttons Row: Decline | Counter/Message | Accept
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // Decline Button
-                OutlinedButton(
-                    onClick = onDecline,
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(40.dp)
-                ) {
-                    Text(
-                        text = "Decline",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
-                    )
-                }
-
-                // Middle Button: Counter (if discount) or Message (if full fare)
-                if (offer.differencePkr < 0) {
-                    Button(
-                        onClick = onCounter,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LightMintBg,
-                            contentColor = DarkGreen
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MintGreen.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .weight(1.1f)
-                            .height(40.dp)
-                    ) {
-                        Text(
-                            text = "Counter",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-                } else {
-                    Button(
-                        onClick = onMessage,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = LightMintBg,
-                            contentColor = DarkGreen
-                        ),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, MintGreen.copy(alpha = 0.4f)),
-                        modifier = Modifier
-                            .weight(1.1f)
-                            .height(40.dp)
-                    ) {
-                        Text(
-                            text = "Message",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                // Accept Button
-                Button(
-                    onClick = onAccept,
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MintGreen,
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .height(40.dp)
-                ) {
-                    Text(
-                        text = "Accept",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
-                }
-            }
+private fun calculateEstimatedArrival(departureTime: String, durationMinutes: Int = 270): String {
+    return try {
+        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+        val date = sdf.parse(departureTime.trim()) ?: return "~$departureTime"
+        val cal = Calendar.getInstance().apply {
+            time = date
+            add(Calendar.MINUTE, durationMinutes)
         }
+        "~" + sdf.format(cal.time)
+    } catch (_: Exception) {
+        "~$departureTime"
     }
 }

@@ -1525,8 +1525,8 @@ fun CityParcelDeliveryGraphic(modifier: Modifier = Modifier) {
 @Composable
 fun PassengerScheduledDeparturesSheet(
     onDismiss: () -> Unit,
-    initialFromCity: String = "Islamabad",
-    initialToCity: String = "Lahore"
+    initialFromCity: String = "All Routes",
+    initialToCity: String = "All Routes"
 ) {
     val isDark = MaterialTheme.drigoColors.isDark
     val sheetBg = if (isDark) Color(0xFF14161C) else MaterialTheme.colorScheme.surface
@@ -1555,7 +1555,7 @@ private fun LegacyPassengerScheduledDeparturesSheet(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val repo = remember { FirebaseRepository.getInstance(context) }
     val scope = rememberCoroutineScope()
-    val allDepartures by repo.observeAllPlannedDepartures().collectAsState(initial = emptyList())
+    val allDepartures by remember { repo.observeAllPlannedDepartures() }.collectAsState(initial = emptyList())
 
     val isDark = MaterialTheme.drigoColors.isDark
     val sheetBg = if (isDark) Color(0xFF14161C) else MaterialTheme.colorScheme.surface
@@ -1571,7 +1571,14 @@ private fun LegacyPassengerScheduledDeparturesSheet(onDismiss: () -> Unit) {
 
     val filteredDepartures = remember(allDepartures, searchQuery) {
         allDepartures.filter { dep ->
-            dep.status.equals("ACTIVE", ignoreCase = true) &&
+            val cleanStatus = dep.status.trim()
+            val isCancelled = cleanStatus.equals("CANCELLED", ignoreCase = true) || cleanStatus.contains("CANCEL", ignoreCase = true)
+            val isCompleted = cleanStatus.equals("COMPLETED", ignoreCase = true) || cleanStatus.contains("COMPLET", ignoreCase = true)
+            val isActive = cleanStatus.equals("ACTIVE", ignoreCase = true) ||
+                    cleanStatus.equals("SCHEDULED", ignoreCase = true) ||
+                    cleanStatus.equals("OPEN", ignoreCase = true) ||
+                    cleanStatus.isBlank()
+            !isCancelled && !isCompleted && isActive &&
                     (searchQuery.isBlank() ||
                             dep.corridorName.contains(searchQuery, ignoreCase = true) ||
                             dep.pickupCity.contains(searchQuery, ignoreCase = true) ||
@@ -2332,9 +2339,10 @@ private fun PassengerMakeOfferDialog(
                         }
                         isSubmitting = true
                         scope.launch {
+                            val safeUserId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "passenger_user"
                             val result = repo.submitDepartureOffer(
                                 departureId = departure.id,
-                                passengerId = "pass_${System.currentTimeMillis().toString().takeLast(6)}",
+                                passengerId = safeUserId,
                                 passengerName = passengerName.trim(),
                                 passengerPhone = passengerPhone.trim(),
                                 requestedSeats = requestedSeats,

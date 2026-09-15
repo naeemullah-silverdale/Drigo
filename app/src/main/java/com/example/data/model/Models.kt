@@ -686,44 +686,44 @@ data class BlockedUserEntity(
 data class PlannedDeparture(
     val id: String = UUID.randomUUID().toString(),
     val driverId: String = "",
-    val driverName: String = "Captain Farhan",
-    val driverPhone: String = "+92 300 1234567",
-    val driverRating: Double = 4.92,
-    val driverTotalTrips: Int = 1240,
-    val driverVehicle: String = "Toyota Corolla (White)",
-    val driverPlateNumber: String = "LEA-18-4921",
-    val driverVehicleType: String = "AC Sedan",
+    val driverName: String = "",
+    val driverPhone: String = "",
+    val driverRating: Double = 5.0,
+    val driverTotalTrips: Int = 0,
+    val driverVehicle: String = "",
+    val driverPlateNumber: String = "",
+    val driverVehicleType: String = "Sedan",
     val driverAvatarUrl: String? = null,
-    val driverBadges: List<String> = listOf("Verified Captain • Top Rated", "Instant Booking"),
-    val pickupCity: String = "Islamabad",
-    val pickupHub: String = "G-9 Markaz Hub",
-    val pickupStopDetails: String = "Near Karachi Company Taxi Stand",
-    val pickupLat: Double = 33.6844,
-    val pickupLon: Double = 73.0479,
-    val dropoffCity: String = "Lahore",
-    val dropoffHub: String = "DHA Phase 5 / Ring Road",
-    val dropoffStopDetails: String = "Via Thokar Interchange Exit",
-    val dropoffLat: Double = 31.5204,
-    val dropoffLon: Double = 74.3587,
-    val corridorName: String = "Via M-2 Motorway",
-    val corridorSubtitle: String = "375 km • ~4h 15m via M-2",
-    val distanceKm: Double = 375.0,
-    val durationMinutes: Int = 255,
-    val estimatedArrival: String = "~12:15 PM",
-    val tollsPreCleared: Boolean = true,
-    val departureDateText: String = "Tomorrow, 25 Oct",
-    val departureTimeText: String = "08:00 AM",
+    val driverBadges: List<String> = emptyList(),
+    val pickupCity: String = "",
+    val pickupHub: String = "",
+    val pickupStopDetails: String = "",
+    val pickupLat: Double = 0.0,
+    val pickupLon: Double = 0.0,
+    val dropoffCity: String = "",
+    val dropoffHub: String = "",
+    val dropoffStopDetails: String = "",
+    val dropoffLat: Double = 0.0,
+    val dropoffLon: Double = 0.0,
+    val corridorName: String = "",
+    val corridorSubtitle: String = "",
+    val distanceKm: Double = 0.0,
+    val durationMinutes: Int = 0,
+    val estimatedArrival: String = "",
+    val tollsPreCleared: Boolean = false,
+    val departureDateText: String = "",
+    val departureTimeText: String = "",
     val flexWindowMins: Int = 15,
-    val pickupWindowText: String = "07:45 AM – 08:15 AM",
-    val farePerSeat: Int = 1900,
+    val pickupWindowText: String = "",
+    val farePerSeat: Int = 0,
     val totalSeats: Int = 4,
     val availableSeats: Int = 4,
-    val allowFullCarBuyout: Boolean = true,
-    val fullCarFare: Int = 7500,
+    val allowFullCarBuyout: Boolean = false,
+    val fullCarFare: Int = 0,
     val isInstantBooking: Boolean = true,
     val allowCounterOffers: Boolean = true,
     val isLadiesOnly: Boolean = false,
-    val luggagePolicy: String = "2 Bags max / rider",
+    val luggagePolicy: String = "",
     val isClimateControlled: Boolean = true,
     val approvalWindowText: String = "",
     val offersReceivedCount: Int = 0,
@@ -739,11 +739,16 @@ data class PlannedDepartureBooking(
     val passengerId: String = "",
     val passengerName: String = "",
     val passengerPhone: String = "",
-    val passengerRating: Double = 4.9,
+    val passengerRating: Double = 5.0,
     val seatsBooked: Int = 1,
-    val pickupStop: String = "G-9/4 Stop",
+    val pickupStop: String = "",
+    val pickupLat: Double = 0.0,
+    val pickupLon: Double = 0.0,
+    val dropoffStop: String = "",
+    val dropoffLat: Double = 0.0,
+    val dropoffLon: Double = 0.0,
     val isFullCar: Boolean = false,
-    val totalFarePkr: Int = 1900,
+    val totalFarePkr: Int = 0,
     val status: String = "CONFIRMED", // "CONFIRMED", "PENDING_APPROVAL", "CANCELLED"
     val bookedAt: Long = System.currentTimeMillis()
 )
@@ -752,21 +757,25 @@ data class PlannedDepartureOffer(
     val id: String = UUID.randomUUID().toString(),
     val departureId: String = "",
     val passengerId: String = "",
-    val passengerName: String = "Bilal Tariq",
-    val passengerPhone: String = "+92 301 9876543",
-    val passengerRating: Double = 4.9,
-    val passengerRidesCompleted: Int = 42,
+    val passengerName: String = "",
+    val passengerPhone: String = "",
+    val passengerRating: Double = 5.0,
+    val passengerRidesCompleted: Int = 0,
     val passengerAvatarUrl: String? = null,
-    val isVerified: Boolean = true,
+    val isVerified: Boolean = false,
     val bookingType: String = "SHARED", // "SHARED" or "PRIVATE"
-    val requestedSeats: Int = 2,
-    val luggageDetails: String = "1 Suitcase + 1 Backpack included",
-    val pickupPoint: String = "Karachi Company Gate 2",
-    val dropoffPoint: String = "Lahore DHA Phase 5 / Ring Road Exit",
-    val standardAsking: Int = 3800,
-    val offeredFare: Int = 3600,
-    val differencePkr: Int = -200, // < 0 means discounted, 0 means full fare, > 0 means bonus
-    val tagText: String = "OFFERED PKR 200 LESS",
+    val requestedSeats: Int = 1,
+    val luggageDetails: String = "",
+    val pickupPoint: String = "",
+    val pickupLat: Double = 0.0,
+    val pickupLon: Double = 0.0,
+    val dropoffPoint: String = "",
+    val dropoffLat: Double = 0.0,
+    val dropoffLon: Double = 0.0,
+    val standardAsking: Int = 0,
+    val offeredFare: Int = 0,
+    val differencePkr: Int = 0, // < 0 means discounted, 0 means full fare, > 0 means bonus
+    val tagText: String = "",
     val isFullFare: Boolean = false,
     val note: String = "",
     val paymentMethod: String = "Cash on Boarding",
@@ -774,5 +783,97 @@ data class PlannedDepartureOffer(
     val counterOfferPkr: Int? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+/**
+ * Route phases for intercity manifest optimization.
+ */
+enum class IntercityWaypointPhase {
+    PICKUP,           // Phase 1: Local passenger pickups heading toward highway
+    HIGHWAY_TRANSIT,  // Corridor transit (e.g. M-2 Motorway)
+    DROPOFF           // Phase 2: Local passenger dropoffs after exiting highway
+}
+
+enum class IntercityWaypointType {
+    DRIVER_START,
+    PASSENGER_PICKUP,
+    HIGHWAY_ENTRY,
+    HIGHWAY_CORRIDOR,
+    HIGHWAY_EXIT,
+    PASSENGER_DROPOFF,
+    FINAL_DESTINATION
+}
+
+/**
+ * Individual ordered stop / waypoint on the optimized intercity manifest route.
+ */
+data class IntercityWaypoint(
+    val id: String = UUID.randomUUID().toString(),
+    val stopNumber: Int = 1, // Stop 1, Stop 2, Stop 3...
+    val phase: IntercityWaypointPhase = IntercityWaypointPhase.PICKUP,
+    val type: IntercityWaypointType = IntercityWaypointType.PASSENGER_PICKUP,
+    val title: String = "",
+    val addressDetails: String = "",
+    val city: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val passengerId: String = "",
+    val passengerName: String = "",
+    val passengerPhone: String = "",
+    val passengerRating: Double = 4.9,
+    val seatsCount: Int = 1,
+    val farePkr: Int = 0,
+    val bookingId: String = "",
+    val isCompleted: Boolean = false,
+    val isDriverOrigin: Boolean = false,
+    val isHighwayPoint: Boolean = false,
+    val isDestinationTerminal: Boolean = false,
+    val estimatedArrivalText: String = "",
+    val distanceKmFromPrevious: Double = 0.0,
+    val note: String = ""
+)
+
+/**
+ * UI State Model for the Intercity Manifest screen.
+ */
+data class IntercityManifestUiState(
+    val departureId: String = "",
+    val originCity: String = "Islamabad",
+    val destinationCity: String = "Lahore",
+    val corridorName: String = "Via M-2 Motorway",
+    val highwayEntryHub: String = "Islamabad Toll Plaza (M-2 Entry)",
+    val highwayExitHub: String = "Thokar Niaz Baig Interchange (M-2 Exit)",
+    val driverStartWaypoint: IntercityWaypoint? = null,
+    val phase1Pickups: List<IntercityWaypoint> = emptyList(),
+    val highwayCorridorWaypoint: IntercityWaypoint? = null,
+    val phase2Dropoffs: List<IntercityWaypoint> = emptyList(),
+    val destinationTerminalWaypoint: IntercityWaypoint? = null,
+    val allOrderedStops: List<IntercityWaypoint> = emptyList(),
+    val totalDistanceKm: Double = 375.0,
+    val totalDurationMinutes: Int = 255,
+    val totalBookedSeats: Int = 0,
+    val totalManifestEarningsPkr: Int = 0,
+    val isOptimizingRoute: Boolean = false,
+    val routingMethod: String = "OSRM Geographic Driving Route"
+)
+
+/**
+ * Live execution state for active City-to-City departures shared in real-time between Driver and Passengers.
+ */
+data class IntercityActiveRideState(
+    val departureId: String = "",
+    val status: String = "ACTIVE", // "ACTIVE", "COMPLETED", "CANCELLED"
+    val subStatus: String = "DRIVER_COMING", // "DRIVER_COMING", "DRIVER_ARRIVED", "BOARDING", "RIDE_IN_PROGRESS", "COMPLETED"
+    val statusDisplayMessage: String = "Driver is Coming",
+    val currentBoardingIndex: Int = 0,
+    val totalPassengersToBoard: Int = 0,
+    val boardedPassengerIds: List<String> = emptyList(),
+    val completedAt: Long = 0L,
+    val driverLat: Double = 33.6938,
+    val driverLon: Double = 73.0317,
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    val isCompleted: Boolean get() = status == "COMPLETED" || subStatus == "COMPLETED"
+}
+
 
 

@@ -49,7 +49,11 @@ enum class RideNotificationType(
     DRIVER_OFFER_ACCEPTED("driver_radar_alerts", "Offer Accepted", true),
     DRIVER_RIDE_ASSIGNED("driver_radar_alerts", "Ride Assigned", true),
     DRIVER_RIDE_CANCELLED("driver_radar_alerts", "Ride Cancelled", true),
-    DRIVER_SHARED_MATCH("driver_radar_alerts", "Shared Ride Match", true)
+    DRIVER_SHARED_MATCH("driver_radar_alerts", "Shared Ride Match", true),
+
+    // General, Communication & Marketing
+    CHAT_MESSAGE("passenger_ride_updates", "Chat Message", false),
+    PROMOTIONAL_ALERT("passenger_ride_updates", "Special Offer", false)
 }
 
 /**
@@ -218,6 +222,14 @@ class RideNotificationManager private constructor(private val appContext: Contex
         // 1. Maintain recent notification history (capped at 50 items)
         _notificationHistory.value = (listOf(item) + _notificationHistory.value).take(50)
 
+        // Check user notification preferences toggle before presenting banner, sound or system push
+        if (!NotificationPreferencesManager.isNotificationAllowed(type)) {
+            Log.d("RideNotificationManager", "Notification suppressed by user preferences: ${type.name}")
+            return
+        }
+
+        val prefs = NotificationPreferencesManager.preferences.value
+
         // 2. Trigger In-App notification banner
         _inAppNotification.value = item
         dismissJob?.cancel()
@@ -228,21 +240,23 @@ class RideNotificationManager private constructor(private val appContext: Contex
             }
         }
 
-        // 3. Trigger haptic vibration for in-app heads-up feedback
-        try {
-            val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-            if (vibrator != null && vibrator.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(120, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(120)
+        // 3. Trigger haptic vibration for in-app heads-up feedback (if vibration enabled in preferences)
+        if (prefs.vibrationEnabled) {
+            try {
+                val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                if (vibrator != null && vibrator.hasVibrator()) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator.vibrate(android.os.VibrationEffect.createOneShot(120, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator.vibrate(120)
+                    }
                 }
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
 
-        // 4. Voice announcement strictly for active ride updates (deduped)
-        if (speakAnnouncement) {
+        // 4. Voice announcement strictly for active ride updates (deduped, if enabled in preferences)
+        if (speakAnnouncement && prefs.voiceAnnouncementsEnabled) {
             try {
                 val effectiveRideId = rideId ?: "active_event_${type.name}"
                 val statusString = when (type) {
@@ -283,6 +297,11 @@ class RideNotificationManager private constructor(private val appContext: Contex
 
     private fun showSystemNotification(item: InAppNotificationItem) {
         try {
+            // Check user preferences
+            if (!NotificationPreferencesManager.isNotificationAllowed(item.type)) {
+                return
+            }
+
             // Check Android 13+ POST_NOTIFICATIONS permission
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS)
@@ -309,6 +328,14 @@ class RideNotificationManager private constructor(private val appContext: Contex
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            val prefs = NotificationPreferencesManager.preferences.value
+            val defaultFlags = when {
+                prefs.soundEnabled && prefs.vibrationEnabled -> NotificationCompat.DEFAULT_ALL
+                prefs.soundEnabled -> NotificationCompat.DEFAULT_SOUND
+                prefs.vibrationEnabled -> NotificationCompat.DEFAULT_VIBRATE
+                else -> 0
+            }
+
             val builder = NotificationCompat.Builder(appContext, item.type.channelId)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setColor(if (item.type.isDriverEvent) 0xFF00E676.toInt() else 0xFF6C47FF.toInt())
@@ -317,7 +344,7 @@ class RideNotificationManager private constructor(private val appContext: Contex
                 .setStyle(NotificationCompat.BigTextStyle().bigText(item.message))
                 .setSubText(item.subText ?: item.type.categoryName)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setDefaults(defaultFlags)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
 
@@ -354,6 +381,30 @@ class RideNotificationManager private constructor(private val appContext: Contex
             actionLabel = "Track Driver",
             rideId = rideId,
             farePkr = farePkr,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyDepartureOfferAccepted(
+        driverName: String,
+        routeText: String,
+        farePkr: Int,
+        seats: Int = 1,
+        departureId: String,
+        vehicleInfo: String = "",
+        onAction: (() -> Unit)? = null
+    ) {
+        val seatText = if (seats > 1) "$seats seats" else "1 seat"
+        val vehiclePart = if (vehicleInfo.isNotBlank()) " in $vehicleInfo" else ""
+        postNotification(
+            type = RideNotificationType.PASSENGER_DRIVER_ACCEPTED,
+            title = "Offer Accepted! Ride Confirmed",
+            message = "$driverName accepted your offer of PKR $farePkr for $routeText ($seatText$vehiclePart)",
+            subText = "City to City • Confirmed Booking",
+            actionLabel = "View Ride",
+            rideId = departureId,
+            farePkr = farePkr,
+            speakAnnouncement = true,
             onActionClick = onAction
         )
     }
@@ -487,6 +538,31 @@ class RideNotificationManager private constructor(private val appContext: Contex
             actionLabel = "Accept Match",
             rideId = rideId,
             farePkr = extraFare,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyChatMessage(senderName: String, messageText: String, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.CHAT_MESSAGE,
+            title = "Message from $senderName",
+            message = messageText,
+            subText = "Trip Chat",
+            actionLabel = "Reply",
+            rideId = rideId,
+            speakAnnouncement = false,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyPromotionalAlert(title: String, description: String, promoCode: String? = null, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.PROMOTIONAL_ALERT,
+            title = title,
+            message = if (promoCode != null) "$description (Use code: $promoCode)" else description,
+            subText = "Drigo Offer",
+            actionLabel = if (promoCode != null) "Apply Code" else "View Details",
+            speakAnnouncement = false,
             onActionClick = onAction
         )
     }

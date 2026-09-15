@@ -109,7 +109,7 @@ fun TripHistoryScreen(
     var driverReportTargetItem by remember { mutableStateOf<DriverHistoryItem?>(null) }
 
     // Passenger trips flow from Firebase (Firestore + RTDB)
-    val passengerOrders by repo.listenToPassengerOrders(userId, userEmail).collectAsState(initial = emptyList())
+    val passengerOrders by remember(userId, userEmail) { repo.listenToPassengerOrders(userId, userEmail) }.collectAsState(initial = emptyList())
     val pastPassengerOrders = remember(passengerOrders) {
         passengerOrders.filter {
             it.status == PassengerOrderStatus.COMPLETED || it.status == PassengerOrderStatus.CANCELLED
@@ -117,8 +117,8 @@ fun TripHistoryScreen(
     }
 
     // Driver trips and verification flow from Firebase
-    val driverTrips by repo.observeDriverTripHistory(userId, userPhone).collectAsState(initial = emptyList())
-    val driverVerification by repo.listenToDriverVerification(userId).collectAsState(initial = null)
+    val driverTrips by remember(userId, userPhone) { repo.observeDriverTripHistory(userId, userPhone) }.collectAsState(initial = emptyList())
+    val driverVerification by remember(userId) { repo.listenToDriverVerification(userId) }.collectAsState(initial = null)
 
     val isRegisteredDriver = remember(driverVerification, driverTrips, initialUserMode) {
         val verStatus = driverVerification?.status?.trim()?.uppercase() ?: ""

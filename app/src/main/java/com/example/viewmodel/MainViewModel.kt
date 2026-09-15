@@ -64,6 +64,12 @@ class MainViewModel(
         } catch (_: Exception) {}
     }
 
+    // Local DataStore Role Preference Manager
+    private val userRolePref by lazy { com.example.util.UserRolePreference(com.example.DrigoApplication.instance) }
+
+    private val _isRoleLoaded = MutableStateFlow(false)
+    val isRoleLoaded = _isRoleLoaded.asStateFlow()
+
     // Default mode is PASSENGER for new and logged-in users
     private val _userMode = MutableStateFlow(UserMode.PASSENGER)
     val userMode = _userMode.asStateFlow()
@@ -111,6 +117,17 @@ class MainViewModel(
     private var rideRequestsJob: kotlinx.coroutines.Job? = null
 
     init {
+        viewModelScope.launch {
+            try {
+                userRolePref.userModeFlow.collect { mode ->
+                    _userMode.value = mode
+                    _isRoleLoaded.value = true
+                }
+            } catch (_: Exception) {
+                _isRoleLoaded.value = true
+            }
+        }
+
         viewModelScope.launch {
             authRepo.authStateFlow().collect { user ->
                 _currentUser.value = user
@@ -239,14 +256,14 @@ class MainViewModel(
             override fun onDataChange(snapshot: DataSnapshot) {
                 val modeStr = snapshot.getValue(String::class.java)
                 if (modeStr == "DRIVER") {
-                    _userMode.value = UserMode.DRIVER
-                } else {
-                    _userMode.value = UserMode.PASSENGER
+                    setUserMode(UserMode.DRIVER)
+                } else if (modeStr == "PASSENGER") {
+                    setUserMode(UserMode.PASSENGER)
                 }
             }
 
             override fun onCancelled(error: DatabaseError) {
-                _userMode.value = UserMode.PASSENGER
+                // Keep local DataStore role preference if Firebase read fails/offline
             }
         })
     }
@@ -293,10 +310,22 @@ class MainViewModel(
 
     fun setUserMode(mode: UserMode) {
         _userMode.value = mode
+        viewModelScope.launch {
+            try {
+                userRolePref.setUserMode(mode)
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Failed to persist user mode in DataStore: ${e.message}")
+            }
+        }
         val uid = _currentUser.value?.uid ?: return
         viewModelScope.launch {
             try {
-                FirebaseDatabase.getInstance().getReference("users").child(uid).child("mode")
+                val db = try {
+                    FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
+                } catch (_: Exception) {
+                    FirebaseDatabase.getInstance()
+                }
+                db.getReference("users").child(uid).child("mode")
                     .setValue(mode.name).await()
             } catch (_: Exception) {
                 // Ignore sync errors
@@ -628,6 +657,48 @@ class MainViewModel(
         firebaseRepo.deleteGoogleDriveFileRecord(safeUserId, fileId)
 
         return driveRes
+    }
+
+    // ================= CITY TO CITY DIAGNOSTIC & DEBUG LOGGING =================
+    private val _cityToCityDiagnosticLogs = MutableStateFlow<List<String>>(emptyList())
+    val cityToCityDiagnosticLogs = _cityToCityDiagnosticLogs.asStateFlow()
+
+    fun logCityToCityEvent(tag: String, message: String, error: Throwable? = null) {
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
+        val logEntry = if (error != null) {
+            "[$timestamp] [$tag] ERROR: $message (Exception: ${error.javaClass.simpleName} - ${error.message})"
+        } else {
+            "[$timestamp] [$tag] INFO: $message"
+        }
+        
+        if (error != null) {
+            android.util.Log.e("DrigoCityToCityDebug", logEntry, error)
+        } else {
+            android.util.Log.d("DrigoCityToCityDebug", logEntry)
+        }
+
+        val updated = (_cityToCityDiagnosticLogs.value + logEntry).takeLast(100)
+        _cityToCityDiagnosticLogs.value = updated
+    }
+
+    fun logDataTransformation(source: String, inputType: String, outputType: String, status: String, details: String = "") {
+        val detailStr = if (details.isNotBlank()) " | Details: $details" else ""
+        logCityToCityEvent(
+            tag = "DataTransform",
+            message = "Transform from $source [$inputType -> $outputType] Status: $status$detailStr"
+        )
+    }
+
+    fun logMapInitialization(component: String, lat: Double, lon: Double, status: String, error: Throwable? = null) {
+        logCityToCityEvent(
+            tag = "MapInit",
+            message = "Component: $component, Coordinates: ($lat, $lon), Status: $status",
+            error = error
+        )
+    }
+
+    fun clearCityToCityLogs() {
+        _cityToCityDiagnosticLogs.value = emptyList()
     }
 
     override fun onCleared() {

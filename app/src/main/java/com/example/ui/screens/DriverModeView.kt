@@ -57,6 +57,7 @@ import com.example.data.UserLocationData
 import com.example.data.RouteResult
 import com.example.data.RouteService
 import com.example.data.model.*
+import com.example.viewmodel.UserMode
 import com.example.data.remote.FirebaseRepository
 import com.example.data.remote.RideManager
 import com.example.service.DriverLocationService
@@ -70,10 +71,12 @@ import com.example.ui.components.RealOsmMapView
 import com.example.ui.components.PostRideRatingDialog
 import com.example.ui.components.SafetyReportDialog
 import com.example.ui.components.NotificationCenterSheet
+import com.example.ui.components.NotificationSettingsSheet
 import com.example.ui.components.DriverLocationOffScreen
 import com.example.ui.screens.PlannedDeparturesScreen
 import com.example.ui.screens.PostPlannedRideScreen
 import com.example.ui.screens.ManageDepartureScreen
+import com.example.ui.screens.DriverIntercityActiveManifestScreen
 import com.example.ui.screens.driver.DriverPerformanceScreen
 import com.example.ui.screens.driver.DriverTripHistoryScreen
 import com.example.ui.screens.driver.DriverRideRequestCard
@@ -137,7 +140,7 @@ fun DriverModeView(
 
     // Driver identification and live verification data
     val driverId = remember(user?.uid) { user?.uid ?: "driver_${System.currentTimeMillis().toString().takeLast(6)}" }
-    val realTimeDriverVerification by repo.listenToDriverVerification(driverId).collectAsState(initial = driverVerification)
+    val realTimeDriverVerification by remember(driverId) { repo.listenToDriverVerification(driverId) }.collectAsState(initial = driverVerification)
     val activeVerification = realTimeDriverVerification ?: driverVerification
 
     val driverName = remember(activeVerification?.name, user?.displayName, user?.email) {
@@ -413,6 +416,9 @@ fun DriverModeView(
     var showPlannedDeparturesScreen by remember { mutableStateOf(false) }
     var showPostPlannedRideScreen by remember { mutableStateOf(false) }
     var selectedDepartureToManage by remember { mutableStateOf<String?>(null) }
+    var selectedDepartureObject by remember { mutableStateOf<PlannedDeparture?>(null) }
+    var selectedDepartureInitialTab by remember { mutableIntStateOf(0) }
+    var activeIntercityDepartureForDriver by remember { mutableStateOf<PlannedDeparture?>(null) }
     var driverRidesThisWeek by remember { mutableIntStateOf(10) }
     var driverPerformanceRating by remember { mutableDoubleStateOf(5.00) }
     var todayIncomePkr by remember { mutableIntStateOf(0) }
@@ -442,6 +448,7 @@ fun DriverModeView(
     // Tariff Sheets & Dialogs
     var showTariffsSheet by remember { mutableStateOf(false) }
     var showChangeVehicleDialog by remember { mutableStateOf(false) }
+    var showNotificationSettingsSheet by remember { mutableStateOf(false) }
 
     // Performance Sheets & Dialogs
     var showTierBenefitsSheet by remember { mutableStateOf(false) }
@@ -565,13 +572,7 @@ fun DriverModeView(
     // Cancellation (Item 4)
     var showCancelTripDialog by remember { mutableStateOf(false) }
 
-    // City-to-City Planned Departures & Post Ride Flow
-    var showPlannedDeparturesView by remember { mutableStateOf(false) }
-    var showPostPlannedRideView by remember { mutableStateOf(false) }
-
-    val hasDriverSubOverlay = showPostPlannedRideView ||
-            showPlannedDeparturesView ||
-            showDriverReportIncident ||
+    val hasDriverSubOverlay = showDriverReportIncident ||
             showCancelTripDialog ||
             showPinVerificationDialog ||
             showSafetySosSheet ||
@@ -587,13 +588,21 @@ fun DriverModeView(
             showPlannedDeparturesScreen ||
             showPostPlannedRideScreen ||
             selectedDepartureToManage != null ||
+            activeIntercityDepartureForDriver != null ||
             selectedRequestForOffer != null ||
             selectedDriverTab != "REQUESTS"
 
     BackHandler(enabled = hasDriverSubOverlay) {
         when {
-            showPostPlannedRideView -> showPostPlannedRideView = false
-            showPlannedDeparturesView -> showPlannedDeparturesView = false
+            activeIntercityDepartureForDriver != null -> {
+                activeIntercityDepartureForDriver = null
+            }
+            selectedDepartureToManage != null -> {
+                selectedDepartureToManage = null
+                selectedDepartureObject = null
+            }
+            showPostPlannedRideScreen -> showPostPlannedRideScreen = false
+            showPlannedDeparturesScreen -> showPlannedDeparturesScreen = false
             showDriverReportIncident -> showDriverReportIncident = false
             showCancelTripDialog -> showCancelTripDialog = false
             showPinVerificationDialog -> showPinVerificationDialog = false
@@ -607,9 +616,6 @@ fun DriverModeView(
             showChangeVehicleDialog -> showChangeVehicleDialog = false
             showTariffsSheet -> showTariffsSheet = false
             showFilterSheet -> showFilterSheet = false
-            selectedDepartureToManage != null -> selectedDepartureToManage = null
-            showPostPlannedRideScreen -> showPostPlannedRideScreen = false
-            showPlannedDeparturesScreen -> showPlannedDeparturesScreen = false
             selectedRequestForOffer != null -> selectedRequestForOffer = null
             selectedDriverTab != "REQUESTS" -> selectedDriverTab = "REQUESTS"
         }
@@ -727,7 +733,7 @@ fun DriverModeView(
 
     // Driver Wallet - Synchronized with My Wallet screen (single source of truth)
     val walletUserId = user?.uid ?: "guest_user"
-    val driverWallet by repo.listenToUserWallet(walletUserId, "DRIVER").collectAsState(
+    val driverWallet by remember(walletUserId) { repo.listenToUserWallet(walletUserId, "DRIVER") }.collectAsState(
         initial = WalletEntity(
             userId = walletUserId,
             walletId = "wal_$walletUserId",
@@ -2945,13 +2951,13 @@ fun DriverModeView(
                                 Surface(
                                     onClick = {
                                         if (cat.equals("City to city", ignoreCase = true)) {
-                                            showPlannedDeparturesView = true
+                                            showPlannedDeparturesScreen = true
                                         } else {
                                             selectedCategoryFilter = if (isSelected) "All" else cat
                                         }
                                     },
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (isSelected || (cat.equals("City to city", ignoreCase = true) && showPlannedDeparturesView)) DrigoBrandPurple else MaterialTheme.colorScheme.surfaceVariant,
+                                    color = if (isSelected || (cat.equals("City to city", ignoreCase = true) && showPlannedDeparturesScreen)) DrigoBrandPurple else MaterialTheme.colorScheme.surfaceVariant,
                                     border = BorderStroke(1.dp, if (isSelected) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant),
                                     modifier = Modifier.height(36.dp)
                                 ) {
@@ -2963,7 +2969,7 @@ fun DriverModeView(
                                             text = cat,
                                             fontSize = 12.5.sp,
                                             fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                                            color = if (isSelected || (cat.equals("City to city", ignoreCase = true) && showPlannedDeparturesView)) Color.White else MaterialTheme.colorScheme.onSurface
+                                            color = if (isSelected || (cat.equals("City to city", ignoreCase = true) && showPlannedDeparturesScreen)) Color.White else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }
@@ -3367,49 +3373,168 @@ fun DriverModeView(
             )
         }
 
+        // ================= CITY TO CITY PLANNED DEPARTURES (WITH ERROR BOUNDARY & DEBUG LOGS) =================
+
         // City to City Planned Departures Screen Overlay (Driver)
         if (showPlannedDeparturesScreen && activeDriverTrip == null) {
-            PlannedDeparturesScreen(
-                driverId = driverId.ifBlank { driverPhone },
-                driverName = driverName,
-                driverPhone = driverPhone,
-                onBackClick = { showPlannedDeparturesScreen = false },
-                onPostRideClick = {
+            CityToCityErrorBoundary(
+                screenName = "Planned Departures List",
+                onDismiss = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Dismissing PlannedDeparturesScreen from error boundary")
                     showPlannedDeparturesScreen = false
-                    showPostPlannedRideScreen = true
                 },
-                onManageDeparture = { departure ->
-                    selectedDepartureToManage = departure.id
-                },
-                onOpenSos = { showDriverReportIncident = true },
-                modifier = Modifier.fillMaxSize()
-            )
+                onRetry = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Retrying PlannedDeparturesScreen")
+                    showPlannedDeparturesScreen = false
+                    showPlannedDeparturesScreen = true
+                }
+            ) {
+                PlannedDeparturesScreen(
+                    driverId = driverId.ifBlank { driverPhone },
+                    driverName = driverName,
+                    driverPhone = driverPhone,
+                    onBackClick = {
+                        android.util.Log.d("DrigoDriverCityToCity", "User clicked back on PlannedDeparturesScreen")
+                        showPlannedDeparturesScreen = false
+                    },
+                    onPostRideClick = {
+                        android.util.Log.d("DrigoDriverCityToCity", "Navigating from PlannedDeparturesScreen to PostPlannedRideScreen")
+                        showPlannedDeparturesScreen = false
+                        showPostPlannedRideScreen = true
+                    },
+                    onManageDeparture = { departure ->
+                        android.util.Log.d("DrigoDriverCityToCity", "Navigating from PlannedDeparturesScreen to ManageDepartureScreen for id=${departure.id}")
+                        repo.cachePlannedDeparture(departure)
+                        selectedDepartureObject = departure
+                        selectedDepartureToManage = departure.id
+                        selectedDepartureInitialTab = 0
+                    },
+                    onStartActiveRide = { departure ->
+                        android.util.Log.d("DrigoDriverCityToCity", "Navigating to DriverIntercityActiveManifestScreen for departure id=${departure.id}")
+                        repo.cachePlannedDeparture(departure)
+                        activeIntercityDepartureForDriver = departure
+                    },
+                    onOpenSos = {
+                        android.util.Log.d("DrigoDriverCityToCity", "Opening SOS from PlannedDeparturesScreen")
+                        showDriverReportIncident = true
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // Post Planned Intercity Ride Screen Overlay (Driver)
         if (showPostPlannedRideScreen && activeDriverTrip == null) {
-            PostPlannedRideScreen(
-                driverId = driverId.ifBlank { driverPhone },
-                driverName = driverName,
-                driverPhone = driverPhone,
-                onBackClick = { showPostPlannedRideScreen = false },
-                onPublishedSuccess = { departure ->
+            CityToCityErrorBoundary(
+                screenName = "Post Scheduled Departure",
+                onDismiss = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Dismissing PostPlannedRideScreen from error boundary")
                     showPostPlannedRideScreen = false
-                    selectedDepartureToManage = departure.id
                 },
-                onOpenSos = { showDriverReportIncident = true },
-                modifier = Modifier.fillMaxSize()
-            )
+                onRetry = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Retrying PostPlannedRideScreen")
+                    showPostPlannedRideScreen = false
+                    showPostPlannedRideScreen = true
+                }
+            ) {
+                val activeVehicleStr = listOfNotNull(
+                    driverVehicleMake.takeIf { it.isNotBlank() },
+                    driverVehicleModel.takeIf { it.isNotBlank() }
+                ).joinToString(" ").ifBlank { "Car" }
+                PostPlannedRideScreen(
+                    driverId = driverId.ifBlank { driverPhone },
+                    driverName = driverName,
+                    driverPhone = driverPhone,
+                    driverRating = driverPerformanceRating,
+                    driverTotalTrips = 0,
+                    driverVehicle = activeVehicleStr,
+                    driverPlateNumber = driverVehicleNumber,
+                    driverVehicleType = if (selectedVehicleCategoryType.contains("Bike", true) || selectedVehicleCategoryType.contains("Motorcycle", true)) "Motorcycle" else "AC Sedan",
+                    onBackClick = {
+                        android.util.Log.d("DrigoDriverCityToCity", "User clicked back on PostPlannedRideScreen")
+                        showPostPlannedRideScreen = false
+                    },
+                    onPublishedSuccess = { departure ->
+                        android.util.Log.d("DrigoDriverCityToCity", "Successfully published departure id=${departure.id}, opening management")
+                        repo.cachePlannedDeparture(departure)
+                        showPostPlannedRideScreen = false
+                        selectedDepartureObject = departure
+                        selectedDepartureToManage = departure.id
+                        selectedDepartureInitialTab = 0
+                    },
+                    onOpenSos = {
+                        android.util.Log.d("DrigoDriverCityToCity", "Opening SOS from PostPlannedRideScreen")
+                        showDriverReportIncident = true
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // Manage Departure & Passengers Screen Overlay (Driver)
         if (selectedDepartureToManage != null && activeDriverTrip == null) {
-            ManageDepartureScreen(
-                departureId = selectedDepartureToManage!!,
-                onBack = { selectedDepartureToManage = null },
-                onSosClick = { showDriverReportIncident = true },
-                modifier = Modifier.fillMaxSize()
-            )
+            val depId = selectedDepartureToManage ?: ""
+            CityToCityErrorBoundary(
+                screenName = "Manage Departure ($depId)",
+                onDismiss = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Dismissing ManageDepartureScreen from error boundary")
+                    selectedDepartureToManage = null
+                },
+                onRetry = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Retrying ManageDepartureScreen for id=$depId")
+                    val currentId = selectedDepartureToManage
+                    selectedDepartureToManage = null
+                    selectedDepartureToManage = currentId
+                }
+            ) {
+                ManageDepartureScreen(
+                    departureId = depId,
+                    initialDeparture = selectedDepartureObject,
+                    initialTab = selectedDepartureInitialTab,
+                    onBack = {
+                        android.util.Log.d("DrigoDriverCityToCity", "User closed ManageDepartureScreen")
+                        selectedDepartureToManage = null
+                        selectedDepartureObject = null
+                    },
+                    onStartActiveRide = { departure ->
+                        android.util.Log.d("DrigoDriverCityToCity", "Starting active intercity ride for id=${departure.id}")
+                        repo.cachePlannedDeparture(departure)
+                        activeIntercityDepartureForDriver = departure
+                    },
+                    onSosClick = {
+                        android.util.Log.d("DrigoDriverCityToCity", "Opening SOS from ManageDepartureScreen")
+                        showDriverReportIncident = true
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        // Active Driver Intercity Manifest Screen Overlay (City to City Active Ride)
+        if (activeIntercityDepartureForDriver != null && activeDriverTrip == null) {
+            val dep = activeIntercityDepartureForDriver!!
+            CityToCityErrorBoundary(
+                screenName = "Driver Intercity Active Manifest (${dep.id})",
+                onDismiss = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Dismissing DriverIntercityActiveManifestScreen")
+                    activeIntercityDepartureForDriver = null
+                },
+                onRetry = {
+                    android.util.Log.d("DrigoDriverCityToCity", "Retrying DriverIntercityActiveManifestScreen")
+                }
+            ) {
+                DriverIntercityActiveManifestScreen(
+                    departure = dep,
+                    onBack = {
+                        android.util.Log.d("DrigoDriverCityToCity", "User exited DriverIntercityActiveManifestScreen")
+                        activeIntercityDepartureForDriver = null
+                    },
+                    onSosClick = {
+                        showDriverReportIncident = true
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         // ================= DIALOGS & BOTTOM SHEETS =================
@@ -4408,7 +4533,26 @@ fun DriverModeView(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showFilterSheet = false
+                            val intent = android.content.Intent(context, com.example.SettingsActivity::class.java)
+                            context.startActivity(intent)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("driver_notification_settings_btn")
+                    ) {
+                        Icon(imageVector = Icons.Default.Notifications, contentDescription = null, tint = DrigoBrandPurple, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Notification Toggles & Alerts", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     Button(
                         onClick = { showFilterSheet = false },
@@ -4423,6 +4567,14 @@ fun DriverModeView(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
+        }
+
+        // Notification Settings Bottom Sheet
+        if (showNotificationSettingsSheet) {
+            NotificationSettingsSheet(
+                userMode = UserMode.DRIVER,
+                onDismiss = { showNotificationSettingsSheet = false }
+            )
         }
 
         // 3. Driver SOS & Emergency Center Dialog (Item 4)
@@ -5654,32 +5806,6 @@ fun DriverModeView(
                 }
             )
         }
-
-        // ================= CITY TO CITY: MY PLANNED DEPARTURES & POST RIDE OVERLAYS =================
-        if (showPostPlannedRideView) {
-            PostPlannedRideScreen(
-                driverId = driverId,
-                driverName = driverName,
-                driverPhone = driverPhone,
-                onBackClick = { showPostPlannedRideView = false },
-                onPublishedSuccess = {
-                    showPostPlannedRideView = false
-                    showPlannedDeparturesView = true
-                },
-                onOpenSos = { showSafetySosSheet = true },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else if (showPlannedDeparturesView) {
-            PlannedDeparturesScreen(
-                driverId = driverId,
-                driverName = driverName,
-                driverPhone = driverPhone,
-                onBackClick = { showPlannedDeparturesView = false },
-                onPostRideClick = { showPostPlannedRideView = true },
-                onOpenSos = { showSafetySosSheet = true },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
     }
 }
 
@@ -5790,6 +5916,140 @@ fun InDriveRadarView(
                 color = Color.White
             )
         }
+    }
+}
+
+/**
+ * Robust Error Boundary container for City to City screens.
+ * Catches initialization, map rendering, and data transformation failures,
+ * preventing driver mode from crashing while offering interactive recovery options.
+ */
+@Composable
+fun CityToCityErrorBoundary(
+    screenName: String,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    var caughtError by remember { mutableStateOf<Throwable?>(null) }
+
+    if (caughtError != null) {
+        val err = caughtError!!
+        LaunchedEffect(err) {
+            android.util.Log.e("DrigoCityToCityDebug", "Caught error in $screenName: ${err.message}", err)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0F172A).copy(alpha = 0.95f))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(20.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 8.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFFFFEBEE),
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFFD32F2F),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "City to City Error",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 17.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "Unable to load $screenName due to an unexpected data or rendering condition.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        fontSize = 12.5.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Error Details Box
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFF1F5F9),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "${err.javaClass.simpleName}: ${err.message ?: "Unknown error"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF475569),
+                            fontSize = 11.sp,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                caughtError = null
+                                onDismiss()
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Go Back", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                caughtError = null
+                                onRetry()
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandPurple),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Retry", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Safe content composition
+        content()
     }
 }
 

@@ -50,6 +50,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import android.content.Intent
+import com.example.SettingsActivity
+import android.net.Uri
 import kotlinx.coroutines.delay
 import com.example.data.AppLocation
 import com.example.data.DestinationSuggestion
@@ -67,6 +70,9 @@ import com.example.data.remote.FirebaseRepository
 import com.example.ui.components.CityRideType
 import com.example.ui.components.CityToCityPassengerFlow
 import com.example.ui.components.CityToCityPassengerDeparturesContent
+import com.example.ui.screens.PassengerIntercityActiveRideScreen
+import com.example.data.model.PlannedDeparture
+import com.example.data.model.PlannedDepartureBooking
 import com.example.ui.components.CityToCityStep
 import com.example.ui.components.PassengerScheduledDeparturesSheet
 import com.example.ui.components.InDriveFixedBottomBar
@@ -84,6 +90,7 @@ import com.example.ui.components.RouteTopLocationsPanel
 import com.example.ui.components.UniversalSafetyModalSheet
 import com.example.ui.components.SafetyReportDialog
 import com.example.ui.components.NotificationCenterSheet
+import com.example.ui.components.NotificationSettingsSheet
 import com.example.ui.components.SmartBadge
 import com.example.ui.components.SmartBadgeType
 import com.example.ui.components.SmartDriverBidCard
@@ -174,6 +181,9 @@ fun HomeScreen(
     var activeRideRequestId by remember { mutableStateOf<String?>(null) }
     var incomingDriverOffers by remember { mutableStateOf<List<DriverOffer>>(emptyList()) }
     var showPassengerScheduledDeparturesSheet by remember { mutableStateOf(false) }
+    var showCityDeparturesScreen by remember { mutableStateOf(false) }
+    var activeIntercityDepartureForPassenger by remember { mutableStateOf<PlannedDeparture?>(null) }
+    var activeIntercityBookingForPassenger by remember { mutableStateOf<PlannedDepartureBooking?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Real-Time Chat State
@@ -263,13 +273,15 @@ fun HomeScreen(
     var nearbyDriverMarkers by remember { mutableStateOf<List<NearbyDriverMarkerData>>(emptyList()) }
 
     val repo = remember { FirebaseRepository.getInstance(context) }
-    val realActiveDrivers by repo.listenToActiveOnlineDrivers().collectAsState(initial = emptyList())
-    val userRecord by repo.listenToUserRecord(user?.uid ?: "").collectAsState(initial = null)
+    val realActiveDrivers by remember { repo.listenToActiveOnlineDrivers() }.collectAsState(initial = emptyList())
+    val userRecord by remember(user?.uid) { repo.listenToUserRecord(user?.uid ?: "") }.collectAsState(initial = null)
     val passengerAccStatus = remember(userRecord) {
         com.example.data.model.parsePassengerAccountStatus(userRecord?.accountStatus, null)
     }
 
-    val hasPassengerSubOverlay = showSafetyReportModal ||
+    val hasPassengerSubOverlay = activeIntercityDepartureForPassenger != null ||
+            showCityDeparturesScreen ||
+            showSafetyReportModal ||
             showSafetySheet ||
             showChatSheet ||
             showPassengerRatingDialog ||
@@ -281,6 +293,11 @@ fun HomeScreen(
 
     BackHandler(enabled = userMode == UserMode.PASSENGER && hasPassengerSubOverlay) {
         when {
+            activeIntercityDepartureForPassenger != null -> {
+                activeIntercityDepartureForPassenger = null
+                activeIntercityBookingForPassenger = null
+            }
+            showCityDeparturesScreen -> showCityDeparturesScreen = false
             showSafetyReportModal -> showSafetyReportModal = false
             showSafetySheet -> showSafetySheet = false
             showChatSheet -> showChatSheet = false
@@ -472,6 +489,7 @@ fun HomeScreen(
     }
 
     var showNotificationCenterSheet by remember { mutableStateOf(false) }
+    var showNotificationSettingsSheet by remember { mutableStateOf(false) }
     val notificationHistory by notifManager.notificationHistory.collectAsState()
     var lastKnownPassengerOrderStatus by remember { mutableStateOf<PassengerOrderStatus?>(null) }
     var lastKnownPassengerOrderId by remember { mutableStateOf<String?>(null) }
@@ -483,7 +501,7 @@ fun HomeScreen(
             lastKnownPassengerOrderId = order.id
             lastKnownPassengerOrderStatus = order.status
             when (order.status) {
-                PassengerOrderStatus.ACCEPTED -> {
+                PassengerOrderStatus.ACCEPTED, PassengerOrderStatus.DRIVER_COMING -> {
                     notifManager.notifyDriverAccepted(
                         driverName = order.driverName.ifBlank { "Captain" },
                         farePkr = order.agreedFare,
@@ -530,6 +548,39 @@ fun HomeScreen(
             lastKnownPassengerOrderStatus = null
             notifManager.dismissPassengerActiveRideNotification()
             notifManager.clearVoiceQueueAndTracking()
+        }
+    }
+
+    val passengerNotifUserId = remember(user?.uid) {
+        user?.uid ?: "passenger_user"
+    }
+    val seenNotificationIds = remember { mutableSetOf<String>() }
+
+    // Listen to passenger notifications (e.g. Intercity departure offer accepted by driver)
+    LaunchedEffect(passengerNotifUserId) {
+        val repo = FirebaseRepository.getInstance(context)
+        repo.listenToPassengerNotifications(passengerNotifUserId).collectLatest { notifs ->
+            notifs.forEach { notif ->
+                val notifId = notif["id"] as? String ?: return@forEach
+                if (!seenNotificationIds.contains(notifId)) {
+                    seenNotificationIds.add(notifId)
+                    val title = notif["title"] as? String ?: "Offer Accepted! Ride Confirmed"
+                    val message = notif["message"] as? String ?: "Captain accepted your offer."
+                    val subText = notif["subText"] as? String ?: "City to City • Confirmed Booking"
+                    val rideId = notif["rideId"] as? String ?: notif["departureId"] as? String
+                    val farePkr = (notif["farePkr"] as? Number)?.toInt()
+
+                    notifManager.postNotification(
+                        type = com.example.util.RideNotificationType.PASSENGER_DRIVER_ACCEPTED,
+                        title = title,
+                        message = message,
+                        subText = subText,
+                        rideId = rideId,
+                        farePkr = farePkr,
+                        speakAnnouncement = true
+                    )
+                }
+            }
         }
     }
 
@@ -1208,7 +1259,6 @@ fun HomeScreen(
     var cityScheduledDateTimeText by remember { mutableStateOf("Sun, 30 Aug 12:15 PM") }
     var cityPassengerCount by remember { mutableIntStateOf(1) }
     var cityComments by remember { mutableStateOf("") }
-    var showCityDeparturesScreen by remember { mutableStateOf(false) }
 
     // Driver Live Requests State
     var driverRideRequests by remember { mutableStateOf<List<RideRequest>>(emptyList()) }
@@ -1681,83 +1731,6 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Theme Selection Card in Drawer
-                    val currentThemeMode by ThemeManager.themeMode.collectAsState()
-                    val context = LocalContext.current
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 2.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = when (currentThemeMode) {
-                                        ThemeMode.LIGHT -> Icons.Default.LightMode
-                                        ThemeMode.DARK -> Icons.Default.DarkMode
-                                        ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
-                                    },
-                                    contentDescription = "Theme",
-                                    tint = DrigoBrandPurple,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Appearance",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                ThemeMode.values().forEach { mode ->
-                                    val isSelected = currentThemeMode == mode
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isSelected) DrigoBrandPurple else MaterialTheme.colorScheme.surface,
-                                        border = BorderStroke(1.dp, if (isSelected) DrigoBrandPurple else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable {
-                                                ThemeManager.setThemeMode(context, mode)
-                                            }
-                                    ) {
-                                        Box(
-                                            modifier = Modifier.padding(vertical = 6.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = when (mode) {
-                                                    ThemeMode.LIGHT -> "Light"
-                                                    ThemeMode.DARK -> "Dark"
-                                                    ThemeMode.SYSTEM -> "System"
-                                                },
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
                     if (userMode == UserMode.PASSENGER) {
                         NavigationDrawerItem(
                             icon = { Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = DrigoBrandPurple) },
@@ -2018,6 +1991,26 @@ fun HomeScreen(
                         modifier = Modifier
                             .padding(horizontal = 12.dp)
                             .testTag("drawer_notifications_item")
+                    )
+
+                    NavigationDrawerItem(
+                        icon = {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = null,
+                                tint = DrigoBrandPurple
+                            )
+                        },
+                        label = { Text("Settings", fontWeight = FontWeight.SemiBold) },
+                        selected = false,
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            val intent = Intent(context, SettingsActivity::class.java)
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .testTag("drawer_settings_item")
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -3468,10 +3461,20 @@ fun HomeScreen(
                 val dId = driverVerification?.uid?.takeIf { it.isNotBlank() } ?: user?.uid ?: "driver_default"
                 val dName = driverVerification?.name?.takeIf { it.isNotBlank() } ?: user?.displayName?.takeIf { it.isNotBlank() } ?: "Drigo Captain"
                 val dPhone = driverVerification?.phone?.takeIf { it.isNotBlank() } ?: user?.phoneNumber?.takeIf { it.isNotBlank() } ?: ""
+                val dVehicle = listOfNotNull(
+                    driverVerification?.vehicleCompany?.takeIf { it.isNotBlank() },
+                    driverVerification?.vehicleModel?.takeIf { it.isNotBlank() }
+                ).joinToString(" ").ifBlank { "Car" }
+                val dPlate = driverVerification?.vehicleNumber?.takeIf { it.isNotBlank() } ?: ""
                 PostPlannedRideScreen(
                     driverId = dId,
                     driverName = dName,
                     driverPhone = dPhone,
+                    driverRating = 5.0,
+                    driverTotalTrips = 0,
+                    driverVehicle = dVehicle,
+                    driverPlateNumber = dPlate,
+                    driverVehicleType = "AC Sedan",
                     onBackClick = {
                         showDriverPostPlannedRide = false
                         showDriverPlannedDepartures = true
@@ -3537,7 +3540,20 @@ fun HomeScreen(
         NotificationCenterSheet(
             notifications = notificationHistory,
             onDismiss = { showNotificationCenterSheet = false },
-            onClearAll = { notifManager.clearNotificationHistory() }
+            onClearAll = { notifManager.clearNotificationHistory() },
+            onOpenSettings = {
+                showNotificationCenterSheet = false
+                val intent = Intent(context, SettingsActivity::class.java)
+                context.startActivity(intent)
+            }
+        )
+    }
+
+    // Notification Settings Bottom Sheet
+    if (showNotificationSettingsSheet) {
+        NotificationSettingsSheet(
+            userMode = userMode,
+            onDismiss = { showNotificationSettingsSheet = false }
         )
     }
 
@@ -3546,8 +3562,45 @@ fun HomeScreen(
         CityToCityPassengerDeparturesContent(
             onBackClick = { showCityDeparturesScreen = false },
             onSosClick = { showSafetySheet = true },
-            initialFromCity = selectedPickupLocation.title.ifBlank { "Islamabad" },
-            initialToCity = selectedDestinationLocation?.title?.ifBlank { "Lahore" } ?: "Lahore",
+            onNavigateToOrders = {
+                showCityDeparturesScreen = false
+                passengerNavTab = 1
+            },
+            onViewActiveRide = { departure, booking ->
+                activeIntercityDepartureForPassenger = departure
+                activeIntercityBookingForPassenger = booking
+            },
+            initialFromCity = "All Routes",
+            initialToCity = "All Routes",
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+
+    // Passenger Intercity Active Ride Screen Overlay (Attachment 1 Target Experience)
+    if (activeIntercityDepartureForPassenger != null) {
+        val departure = activeIntercityDepartureForPassenger!!
+        PassengerIntercityActiveRideScreen(
+            departure = departure,
+            booking = activeIntercityBookingForPassenger,
+            onBack = {
+                activeIntercityDepartureForPassenger = null
+                activeIntercityBookingForPassenger = null
+            },
+            onSosClick = { showSafetySheet = true },
+            onCallDriver = { driverPhone ->
+                val phone = driverPhone.ifBlank { departure.driverPhone.ifBlank { "+923001234567" } }
+                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phone"))
+                context.startActivity(intent)
+            },
+            onOpenChat = { driverName, driverPhone ->
+                chatTripId = departure.id
+                chatPartnerName = driverName.ifBlank { departure.driverName.ifBlank { "Captain" } }
+                chatPartnerRole = "Driver"
+                chatPartnerPhone = driverPhone.ifBlank { departure.driverPhone }
+                chatPickupTitle = "${departure.pickupCity} (${departure.pickupHub})"
+                chatDestinationTitle = "${departure.dropoffCity} (${departure.dropoffHub})"
+                showChatSheet = true
+            },
             modifier = Modifier.fillMaxSize()
         )
     }
@@ -3883,8 +3936,8 @@ fun HomeScreen(
     if (showPassengerScheduledDeparturesSheet) {
         PassengerScheduledDeparturesSheet(
             onDismiss = { showPassengerScheduledDeparturesSheet = false },
-            initialFromCity = selectedPickupLocation.subtitle.split(",").lastOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "Islamabad",
-            initialToCity = selectedDestinationLocation?.subtitle?.split(",")?.lastOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "Lahore"
+            initialFromCity = "All Routes",
+            initialToCity = "All Routes"
         )
     }
 }
