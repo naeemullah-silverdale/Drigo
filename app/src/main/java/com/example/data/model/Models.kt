@@ -455,6 +455,7 @@ data class UserRecord(
     val verificationStatus: String = "PENDING", // For Drivers: PENDING, APPROVED, REJECTED
     val isOnline: Boolean = false,
     val mode: String = "PASSENGER",
+    val isPhoneVerified: Boolean = false,
     val updatedAt: Long = System.currentTimeMillis()
 )
 

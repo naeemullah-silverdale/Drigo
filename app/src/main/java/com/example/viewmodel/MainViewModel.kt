@@ -48,6 +48,35 @@ class MainViewModel(
     private val _currentUser = MutableStateFlow<FirebaseUser?>(authRepo.currentUser)
     val currentUser = _currentUser.asStateFlow()
 
+    private val _isPhonePromptDismissedForSession = MutableStateFlow(false)
+    val isPhonePromptDismissedForSession = _isPhonePromptDismissedForSession.asStateFlow()
+
+    fun dismissPhonePromptForSession() {
+        _isPhonePromptDismissedForSession.value = true
+    }
+
+    fun resetPhonePromptDismissal() {
+        _isPhonePromptDismissedForSession.value = false
+    }
+
+    fun sendPhoneVerificationCode(
+        phoneNumber: String,
+        activity: android.app.Activity,
+        callbacks: com.google.firebase.auth.PhoneAuthProvider.OnVerificationStateChangedCallbacks,
+        forceResendingToken: com.google.firebase.auth.PhoneAuthProvider.ForceResendingToken? = null
+    ) {
+        authRepo.sendPhoneOtpCode(phoneNumber, activity, callbacks, forceResendingToken)
+    }
+
+    suspend fun verifyPhoneOtpCode(verificationId: String, code: String, phoneNumber: String): Result<Unit> {
+        val result = authRepo.verifyOtpAndLinkPhone(verificationId, code, phoneNumber)
+        if (result.isSuccess) {
+            _isPhonePromptDismissedForSession.value = true
+            _currentUser.value?.uid?.let { fetchUserRecordFromDb(it) }
+        }
+        return result
+    }
+
     private fun getPersistedDriverOnlineState(): Boolean {
         return try {
             val prefs = com.example.DrigoApplication.instance.getSharedPreferences("drigo_driver_prefs", Context.MODE_PRIVATE)
@@ -395,6 +424,7 @@ class MainViewModel(
     }
 
     suspend fun signIn(email: String, password: String): Result<Unit> {
+        resetPhonePromptDismissal()
         val res = authRepo.signIn(email, password)
         return if (res.isSuccess) {
             val user = res.getOrNull()
@@ -411,6 +441,7 @@ class MainViewModel(
     }
 
     suspend fun signInWithGoogle(context: Context): Result<Unit> {
+        resetPhonePromptDismissal()
         val googleAuthClient = GoogleAuthClient(context)
         val res = googleAuthClient.signInWithGoogle()
         return if (res.isSuccess) {
@@ -424,6 +455,7 @@ class MainViewModel(
     }
 
     suspend fun signUp(fullName: String, email: String, password: String): Result<Unit> {
+        resetPhonePromptDismissal()
         val res = authRepo.signUp(email, password)
         return if (res.isSuccess) {
             val user = res.getOrNull()

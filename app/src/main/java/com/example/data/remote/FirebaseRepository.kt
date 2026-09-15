@@ -3730,7 +3730,10 @@ class FirebaseRepository private constructor(private val context: Context) {
                 val role = snapshot.child("role").getValue(String::class.java) ?: snapshot.child("mode").getValue(String::class.java) ?: "PASSENGER"
                 val name = snapshot.child("name").getValue(String::class.java) ?: snapshot.child("fullName").getValue(String::class.java) ?: ""
                 val email = snapshot.child("email").getValue(String::class.java) ?: ""
-                val phone = snapshot.child("phone").getValue(String::class.java) ?: ""
+                val phone = snapshot.child("phone").getValue(String::class.java) ?: snapshot.child("phoneNumber").getValue(String::class.java) ?: ""
+                val isPhoneVerified = snapshot.child("phoneVerified").getValue(Boolean::class.java)
+                    ?: snapshot.child("isPhoneVerified").getValue(Boolean::class.java)
+                    ?: (phone.isNotBlank() && com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.phoneNumber?.isNotBlank() == true)
                 val rawAccountStatus = snapshot.child("accountStatus").getValue(String::class.java) ?: snapshot.child("status").getValue(String::class.java) ?: "ACTIVE"
                 val rawVerStatus = snapshot.child("verificationStatus").getValue(String::class.java) ?: snapshot.child("driverVerificationStatus").getValue(String::class.java) ?: "PENDING"
                 val isOnline = snapshot.child("isOnline").getValue(Boolean::class.java) ?: false
@@ -3746,6 +3749,7 @@ class FirebaseRepository private constructor(private val context: Context) {
                     verificationStatus = rawVerStatus,
                     isOnline = isOnline,
                     mode = mode,
+                    isPhoneVerified = isPhoneVerified,
                     updatedAt = System.currentTimeMillis()
                 )
                 trySend(userRec)
