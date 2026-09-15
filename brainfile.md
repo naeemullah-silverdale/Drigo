@@ -1296,3 +1296,33 @@ Provide a global, searchable vehicle make and model catalog in Driver Registrati
 - **Commit:** `17f886f` - `feat: add global vehicle company and model searchable selector for driver registration`
 - **Verification:** Built and verified clean compilation with 0 errors via `compile_applet`.
 
+---
+
+## 📌 SECTION 36: COMPLETED IMPLEMENTATION — FIREBASE PHONE NUMBER VERIFICATION (SMS OTP)
+
+### 🎯 Objective & Scope
+Prompt users to verify their mobile phone number via Firebase SMS OTP verification whenever they sign up or sign in without a verified phone number in their profile, persisting phone verification state to both Firebase Auth and Realtime Database.
+
+### 🛠️ Key Changes
+1. **`PhoneVerificationPrompt.kt` (`com.example.ui.components`)**:
+   - Modern Material 3 phone verification dialog featuring a glowing shield header, international country code selector dropdown (+92, +1, +44, +91, +971, +966, +61, +49, +234, +254, +27, +62, +880), phone number input field, and progress state.
+   - 6-digit OTP SMS verification code view with 6 visual digit entry boxes, automatic focus progression, 60-second resend countdown timer, and error/success banners.
+   - Uses `PhoneAuthProvider.verifyPhoneNumber` with `PhoneAuthOptions` and instant auto-verification callbacks.
+
+2. **`AuthRepository.kt` & `MainViewModel.kt`**:
+   - Added `sendPhoneOtpCode(...)` and `verifyOtpAndLinkPhone(...)` methods calling `FirebaseAuth.getInstance().currentUser?.updatePhoneNumber(credential)` or `linkWithCredential(credential)`.
+   - Realtime Database sync updating `/users/{uid}/phone`, `/users/{uid}/phoneNumber`, `/users/{uid}/phoneVerified = true`, and `/users/{uid}/isPhoneVerified = true`.
+   - Session dismissal flag management (`isPhonePromptDismissedForSession`) ensuring prompts appear upon new signups and logins.
+
+3. **`Models.kt` & `FirebaseRepository.kt`**:
+   - Updated `UserRecord` to parse `isPhoneVerified` from snapshot children `phoneVerified`, `isPhoneVerified`, or Firebase Auth current user phone number.
+
+4. **`MainActivity.kt`**:
+   - Integrated `PhoneVerificationPrompt` overlay in `DrigoApp` when a logged-in user's profile reflects an unverified phone number.
+
+### 🧪 Branch, Commit & Verification
+- **Branch:** `feature/firebase-phone-verification`
+- **Commit:** `3a7c849` - `feat: implement firebase phone number verification SMS OTP flow on signup and auth`
+- **Verification:** Built and verified clean compilation with 0 errors via `compile_applet`.
+
+
