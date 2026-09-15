@@ -1,6 +1,5 @@
 package com.example.data.remote
 
-import android.app.Activity
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
@@ -10,15 +9,11 @@ import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.PhoneAuthCredential
-import com.google.firebase.auth.PhoneAuthOptions
-import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
-import java.util.concurrent.TimeUnit
 
 class AuthRepository(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
@@ -130,76 +125,6 @@ class AuthRepository(
 
     fun signOut() {
         auth.signOut()
-    }
-
-    fun sendPhoneOtpCode(
-        phoneNumber: String,
-        activity: Activity,
-        callbacks: PhoneAuthProvider.OnVerificationStateChangedCallbacks,
-        forceResendingToken: PhoneAuthProvider.ForceResendingToken? = null
-    ) {
-        val builder = PhoneAuthOptions.newBuilder(auth)
-            .setPhoneNumber(phoneNumber)
-            .setTimeout(60L, TimeUnit.SECONDS)
-            .setActivity(activity)
-            .setCallbacks(callbacks)
-        
-        if (forceResendingToken != null) {
-            builder.setForceResendingToken(forceResendingToken)
-        }
-        
-        PhoneAuthProvider.verifyPhoneNumber(builder.build())
-    }
-
-    suspend fun verifyOtpAndLinkPhone(verificationId: String, code: String, phoneNumber: String): Result<Unit> {
-        return try {
-            val credential = PhoneAuthProvider.getCredential(verificationId, code)
-            val user = auth.currentUser
-            if (user != null) {
-                try {
-                    user.updatePhoneNumber(credential).await()
-                } catch (_: Exception) {
-                    try {
-                        user.linkWithCredential(credential).await()
-                    } catch (_: Exception) {
-                        // Ignore if already linked
-                    }
-                }
-                syncPhoneVerificationToDb(user.uid, phoneNumber)
-                Result.success(Unit)
-            } else {
-                val result = auth.signInWithCredential(credential).await()
-                val newUser = result.user
-                if (newUser != null) {
-                    syncUserToRealtimeDatabase(newUser, "phone")
-                    syncPhoneVerificationToDb(newUser.uid, phoneNumber)
-                }
-                Result.success(Unit)
-            }
-        } catch (e: Exception) {
-            Result.failure(Exception(formatAuthErrorMessage(e)))
-        }
-    }
-
-    private suspend fun syncPhoneVerificationToDb(uid: String, phoneNumber: String) {
-        try {
-            val db = try {
-                FirebaseDatabase.getInstance("https://drigo-8b15c-default-rtdb.firebaseio.com")
-            } catch (_: Exception) {
-                FirebaseDatabase.getInstance()
-            }
-            val userRef = db.getReference("users").child(uid)
-            val updateData = mapOf<String, Any>(
-                "phone" to phoneNumber,
-                "phoneNumber" to phoneNumber,
-                "phoneVerified" to true,
-                "isPhoneVerified" to true,
-                "phoneVerifiedAt" to System.currentTimeMillis()
-            )
-            userRef.updateChildren(updateData).await()
-        } catch (_: Exception) {
-            // Non-blocking
-        }
     }
 
     private fun formatAuthErrorMessage(e: Exception): String {

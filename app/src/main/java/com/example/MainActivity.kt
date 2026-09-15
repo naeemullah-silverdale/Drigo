@@ -21,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.osmdroid.config.Configuration
-import com.example.ui.components.PhoneVerificationPrompt
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.SignInScreen
 import com.example.ui.screens.SignUpScreen
@@ -111,18 +110,6 @@ fun DrigoApp(viewModel: MainViewModel) {
     val driverVerification by viewModel.driverVerification.collectAsState()
     val liveRideRequests by viewModel.liveRideRequests.collectAsState()
     val userRecord by viewModel.userRecord.collectAsState()
-    val isPhonePromptDismissed by viewModel.isPhonePromptDismissedForSession.collectAsState()
-
-    // Prompt user to verify phone number whenever user is signed in and phone is unverified
-    val shouldShowPhonePrompt = remember(currentUser, userRecord, isPhonePromptDismissed, currentScreen) {
-        currentUser != null &&
-        userRecord != null &&
-        !userRecord!!.isPhoneVerified &&
-        !isPhonePromptDismissed &&
-        currentScreen != AppScreen.WELCOME &&
-        currentScreen != AppScreen.SIGN_IN &&
-        currentScreen != AppScreen.SIGN_UP
-    }
 
     // Handle top-level back button presses according to navigation stack
     val canNavigateBack = viewModel.canNavigateBack()
@@ -287,23 +274,6 @@ fun DrigoApp(viewModel: MainViewModel) {
                     }
                 )
             }
-        }
-
-        if (shouldShowPhonePrompt) {
-            PhoneVerificationPrompt(
-                onDismiss = {
-                    viewModel.dismissPhonePromptForSession()
-                },
-                onVerificationSuccess = {
-                    viewModel.dismissPhonePromptForSession()
-                },
-                onSendOtp = { phone, activity, callbacks, forceToken ->
-                    viewModel.sendPhoneVerificationCode(phone, activity, callbacks, forceToken)
-                },
-                onVerifyOtp = { verId, code, phone ->
-                    viewModel.verifyPhoneOtpCode(verId, code, phone)
-                }
-            )
         }
     }
 }
