@@ -47,9 +47,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import com.example.data.model.DriverDocumentItem
 import com.example.data.model.DriverVehicle
 import com.example.data.model.DriverVerification
+import com.example.data.model.VehicleCatalog
 import com.example.data.remote.DriverDocumentStorageManager
 import com.example.data.remote.FirebaseRepository
 import com.example.ui.theme.DrigoBrandFuchsia
@@ -1111,6 +1114,31 @@ fun VehicleDetailsStep(
     onBack: () -> Unit,
     onNext: () -> Unit
 ) {
+    var showCompanyDialog by remember { mutableStateOf(false) }
+    var showModelDialog by remember { mutableStateOf(false) }
+
+    if (showCompanyDialog) {
+        VehicleCompanySelectionDialog(
+            selectedCompany = vehicleCompany,
+            onCompanySelected = { newCompany ->
+                onVehicleCompanyChange(newCompany)
+                onVehicleModelChange("")
+            },
+            onDismiss = { showCompanyDialog = false }
+        )
+    }
+
+    if (showModelDialog) {
+        VehicleModelSelectionDialog(
+            selectedCompany = vehicleCompany,
+            selectedModel = vehicleModel,
+            onModelSelected = { newModel ->
+                onVehicleModelChange(newModel)
+            },
+            onDismiss = { showModelDialog = false }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1226,22 +1254,20 @@ fun VehicleDetailsStep(
                     color = Color.White
                 )
 
-                DriverInputField(
+                SelectableDriverInputField(
                     value = vehicleCompany,
-                    placeholder = "Company (e.g. Toyota, Honda, Suzuki)",
+                    placeholder = "Choose Company (e.g. Toyota, Nissan)",
                     label = "Vehicle Make / Manufacturer",
                     leadingIcon = Icons.Default.DirectionsCar,
-                    onValueChange = onVehicleCompanyChange,
-                    imeAction = ImeAction.Next
+                    onClick = { showCompanyDialog = true }
                 )
 
-                DriverInputField(
+                SelectableDriverInputField(
                     value = vehicleModel,
-                    placeholder = "Model (e.g. Corolla, Civic, Alto)",
+                    placeholder = if (vehicleCompany.isBlank()) "Select company first" else "Choose Model (e.g. Corolla, Civic)",
                     label = "Vehicle Model & Year",
                     leadingIcon = Icons.Default.Build,
-                    onValueChange = onVehicleModelChange,
-                    imeAction = ImeAction.Next
+                    onClick = { showModelDialog = true }
                 )
 
                 DriverInputField(
@@ -2320,5 +2346,489 @@ fun DriverInputField(
             ),
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+/**
+ * Clickable input field with dropdown arrow for company and model selection.
+ */
+@Composable
+fun SelectableDriverInputField(
+    value: String,
+    placeholder: String,
+    label: String,
+    leadingIcon: ImageVector,
+    onClick: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.85f),
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = Color.White.copy(alpha = 0.08f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onClick() }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = leadingIcon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = value.ifBlank { placeholder },
+                        fontSize = 14.sp,
+                        color = if (value.isNotBlank()) Color.White else Color.White.copy(alpha = 0.5f),
+                        fontWeight = if (value.isNotBlank()) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Select",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Searchable Vehicle Manufacturer / Company Picker Dialog
+ */
+@Composable
+fun VehicleCompanySelectionDialog(
+    selectedCompany: String,
+    onCompanySelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var showCustomInput by remember { mutableStateOf(false) }
+    var customCompanyText by remember { mutableStateOf("") }
+
+    val filteredList = remember(searchQuery) {
+        VehicleCatalog.searchManufacturers(searchQuery)
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF1E1028),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 580.dp)
+                .padding(4.dp)
+                .testTag("vehicle_company_selection_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DirectionsCar,
+                            contentDescription = null,
+                            tint = DrigoBrandFuchsia,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = "Select Vehicle Company",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search brand... e.g. Toyota, Nissan", fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f)) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White) },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.White)
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = DrigoBrandFuchsia,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (showCustomInput) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Type Custom Manufacturer:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = customCompanyText,
+                            onValueChange = { customCompanyText = it },
+                            placeholder = { Text("Enter brand name", color = Color.White.copy(alpha = 0.5f)) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = DrigoBrandFuchsia,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showCustomInput = false }) {
+                                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    if (customCompanyText.isNotBlank()) {
+                                        onCompanySelected(customCompanyText.trim())
+                                        onDismiss()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandFuchsia)
+                            ) {
+                                Text("Use Brand", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filteredList) { company ->
+                            val isSelected = company.equals(selectedCompany, ignoreCase = true)
+                            val isCustomOption = company == "Other / Custom Manufacturer"
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) DrigoBrandFuchsia.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.08f),
+                                border = if (isSelected) BorderStroke(1.dp, DrigoBrandFuchsia) else BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isCustomOption) {
+                                            showCustomInput = true
+                                        } else {
+                                            onCompanySelected(company)
+                                            onDismiss()
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isCustomOption) Icons.Default.Edit else Icons.Default.DirectionsCar,
+                                            contentDescription = null,
+                                            tint = if (isSelected || isCustomOption) InDriveLimeGreen else Color.White.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = company,
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = Color.White
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Selected",
+                                            tint = InDriveLimeGreen,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Searchable Vehicle Model Picker Dialog
+ */
+@Composable
+fun VehicleModelSelectionDialog(
+    selectedCompany: String,
+    selectedModel: String,
+    onModelSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var showCustomInput by remember { mutableStateOf(false) }
+    var customModelText by remember { mutableStateOf("") }
+
+    val effectiveCompany = selectedCompany.ifBlank { "Toyota" }
+    val filteredList = remember(effectiveCompany, searchQuery) {
+        VehicleCatalog.searchModels(effectiveCompany, searchQuery)
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF1E1028),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 580.dp)
+                .padding(4.dp)
+                .testTag("vehicle_model_selection_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Build,
+                            contentDescription = null,
+                            tint = DrigoBrandFuchsia,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Select Vehicle Model",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "For $effectiveCompany",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = InDriveLimeGreen
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search model... e.g. Corolla, Civic, Alto", fontSize = 13.sp, color = Color.White.copy(alpha = 0.5f)) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White) },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.White)
+                            }
+                        }
+                    } else null,
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = DrigoBrandFuchsia,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        cursorColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (showCustomInput) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "Type Custom Model / Year:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = customModelText,
+                            onValueChange = { customModelText = it },
+                            placeholder = { Text("e.g. Corolla 2023 / Custom Model", color = Color.White.copy(alpha = 0.5f)) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = DrigoBrandFuchsia,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(onClick = { showCustomInput = false }) {
+                                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    if (customModelText.isNotBlank()) {
+                                        onModelSelected(customModelText.trim())
+                                        onDismiss()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = DrigoBrandFuchsia)
+                            ) {
+                                Text("Use Model", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filteredList) { modelName ->
+                            val isSelected = modelName.equals(selectedModel, ignoreCase = true)
+                            val isCustomOption = modelName == "Other / Custom Model"
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) DrigoBrandFuchsia.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.08f),
+                                border = if (isSelected) BorderStroke(1.dp, DrigoBrandFuchsia) else BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isCustomOption) {
+                                            showCustomInput = true
+                                        } else {
+                                            onModelSelected(modelName)
+                                            onDismiss()
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isCustomOption) Icons.Default.Edit else Icons.Default.DirectionsCar,
+                                            contentDescription = null,
+                                            tint = if (isSelected || isCustomOption) InDriveLimeGreen else Color.White.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = modelName,
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = Color.White
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Selected",
+                                            tint = InDriveLimeGreen,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
