@@ -1271,3 +1271,28 @@ Redesign the complete **New Driver Registration / KYC onboarding flow** (`Driver
 - **Branch:** `feature/redesign-driver-registration-ui`
 - **Commit:** `07e8fd3` - `feat: redesign driver registration KYC onboarding UI/UX`
 - **Verification:** Built and verified with 0 errors via `compile_applet`.
+
+---
+
+## 📌 SECTION 35: COMPLETED IMPLEMENTATION — SEARCHABLE VEHICLE COMPANY & MODEL SELECTOR CATALOG
+
+### 🎯 Objective & Scope
+Provide a global, searchable vehicle make and model catalog in Driver Registration Step 2 (Vehicle Credentials) so drivers select their vehicle manufacturer and model from a comprehensive worldwide database instead of manually typing, while maintaining fallback support for custom entries.
+
+### 🛠️ Key Changes
+1. **`VehicleCatalog.kt` (`com.example.data.model.VehicleCatalog`)**:
+   - Comprehensive catalog of 95+ car manufacturers worldwide (Toyota, Honda, Suzuki, Nissan, Hyundai, KIA, Changan, MG, Daihatsu, BMW, Mercedes-Benz, Audi, Ford, Chevrolet, BYD, Proton, HAVAL, FAW, Peugeot, Lexus, Mitsubishi, Volkswagen, Mazda, Subaru, Tesla, Volvo, Chery, BAIC, DFSK, Tata, Mahindra, Maruti Suzuki, Geely, etc.).
+   - Model lists mapped to every brand (e.g., Toyota -> Corolla, Yaris, Camry, Fortuner, Hilux, Prado, Land Cruiser, RAV4...; Honda -> Civic, City, BR-V, HR-V, Accord, Vezel...).
+   - Quick search helper functions (`searchManufacturers`, `searchModels`) and custom fallback support ("Other / Custom Manufacturer" / "Other / Custom Model").
+
+2. **`DriverRegistrationScreen.kt`**:
+   - **`SelectableDriverInputField`**: Surface-styled clickable input field with trailing dropdown arrow (`KeyboardArrowDown`).
+   - **`VehicleCompanySelectionDialog`**: Searchable M3 dialog with real-time text filter bar, selection checkmarks, and custom brand input mode.
+   - **`VehicleModelSelectionDialog`**: Searchable model picker dynamically populated based on the selected manufacturer, with custom model input option.
+   - **Smart Model Alignment**: Changing the vehicle manufacturer automatically clears the model field so brand and model stay consistent.
+
+### 🧪 Branch, Commit & Verification
+- **Branch:** `feature/vehicle-company-model-selector`
+- **Commit:** `17f886f` - `feat: add global vehicle company and model searchable selector for driver registration`
+- **Verification:** Built and verified clean compilation with 0 errors via `compile_applet`.
+
