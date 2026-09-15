@@ -1325,4 +1325,28 @@ Prompt users to verify their mobile phone number via Firebase SMS OTP verificati
 - **Commit:** `3a7c849` - `feat: implement firebase phone number verification SMS OTP flow on signup and auth`
 - **Verification:** Built and verified clean compilation with 0 errors via `compile_applet`.
 
+---
+
+## 📌 SECTION 37: COMPLETED IMPLEMENTATION — REMOVE DRIVER REGISTRATION TEST BUTTONS & FIX NAVIGATION
+
+### 🎯 Objective & Scope
+1. Remove "Simulate Instant Approval (Test)" and "Open Admin Verification Portal" buttons from the Confirmation Pending step (`ConfirmationPendingStep`) in `DriverRegistrationScreen.kt`.
+2. Fix in-app navigation so navigating to `DRIVER_REGISTRATION` properly pushes onto `_screenBackStack`, and clicking "Return to Passenger Mode" or back button resets mode to `UserMode.PASSENGER` and smoothly navigates back to `HOME_PLACEHOLDER`.
+
+### 🛠️ Key Changes
+1. **`DriverRegistrationScreen.kt`**:
+   - Removed test buttons ("Simulate Instant Approval (Test)" and "Open Admin Verification Portal") from `ConfirmationPendingStep`.
+   - Updated `ConfirmationPendingStep` parameters and call site.
+2. **`MainViewModel.kt`**:
+   - Updated `attemptSwitchUserMode` to call `navigateTo(AppScreen.DRIVER_REGISTRATION)` when navigating to driver registration so that the backstack correctly contains the screen history.
+   - Updated switching to `UserMode.PASSENGER` to handle popping `DRIVER_REGISTRATION` off the backstack or navigating directly to `HOME_PLACEHOLDER`.
+3. **`MainActivity.kt`**:
+   - Updated `onBackToPassenger` callback in `DrigoApp` to set `setUserMode(UserMode.PASSENGER)` and ensure fallback navigation to `HOME_PLACEHOLDER` if backstack pop returns false.
+
+### 🧪 Branch, Commit & Verification
+- **Branch:** `feature/remove-driver-test-buttons-and-fix-nav`
+- **Commit:** `38949ac` - `fix: remove test and admin buttons from driver registration confirmation step and fix in-app navigation`
+- **Verification:** Built and verified clean compilation with 0 errors via `compile_applet`.
+
+
 
