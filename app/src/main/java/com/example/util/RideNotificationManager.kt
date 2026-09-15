@@ -1,0 +1,728 @@
+package com.example.util
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.RingtoneManager
+import android.os.Build
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.example.MainActivity
+import com.example.R
+import com.example.data.model.PassengerOrder
+import com.example.data.model.PassengerOrderStatus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+/**
+ * Ride Notification Event Types for Passenger and Driver journeys
+ */
+enum class RideNotificationType(
+    val channelId: String,
+    val categoryName: String,
+    val isDriverEvent: Boolean
+) {
+    // Passenger Notifications
+    PASSENGER_DRIVER_FOUND("passenger_ride_updates", "Captain Found", false),
+    PASSENGER_DRIVER_ACCEPTED("passenger_ride_updates", "Ride Confirmed", false),
+    PASSENGER_DRIVER_COUNTER_OFFER("passenger_ride_updates", "Counter-Offer", false),
+    PASSENGER_DRIVER_ARRIVING("passenger_ride_updates", "Captain Arriving", false),
+    PASSENGER_DRIVER_ARRIVED("passenger_ride_updates", "Captain Arrived", false),
+    PASSENGER_RIDE_STARTED("passenger_ride_updates", "Ride Started", false),
+    PASSENGER_RIDE_COMPLETED("passenger_ride_updates", "Trip Completed", false),
+    PASSENGER_RIDE_CANCELLED("passenger_ride_updates", "Trip Cancelled", false),
+
+    // Driver Notifications
+    DRIVER_NEW_REQUEST("driver_radar_alerts", "New Ride Request", true),
+    DRIVER_OFFER_ACCEPTED("driver_radar_alerts", "Offer Accepted", true),
+    DRIVER_RIDE_ASSIGNED("driver_radar_alerts", "Ride Assigned", true),
+    DRIVER_RIDE_CANCELLED("driver_radar_alerts", "Ride Cancelled", true),
+    DRIVER_SHARED_MATCH("driver_radar_alerts", "Shared Ride Match", true),
+
+    // General, Communication & Marketing
+    CHAT_MESSAGE("passenger_ride_updates", "Chat Message", false),
+    PROMOTIONAL_ALERT("passenger_ride_updates", "Special Offer", false)
+}
+
+/**
+ * Represents an active in-app heads-up notification event
+ */
+data class InAppNotificationItem(
+    val id: String = "notif_${System.currentTimeMillis()}",
+    val type: RideNotificationType,
+    val title: String,
+    val message: String,
+    val subText: String? = null,
+    val actionLabel: String? = null,
+    val rideId: String? = null,
+    val farePkr: Int? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val onActionClick: (() -> Unit)? = null
+)
+
+/**
+ * Centralized Real-time Notification Manager.
+ * Dispatches Android system notifications and publishes to the in-app notification state flow.
+ */
+class RideNotificationManager private constructor(private val appContext: Context) {
+
+    private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private var dismissJob: Job? = null
+
+    private val _inAppNotification = MutableStateFlow<InAppNotificationItem?>(null)
+    val inAppNotification: StateFlow<InAppNotificationItem?> = _inAppNotification.asStateFlow()
+
+    private val _notificationHistory = MutableStateFlow<List<InAppNotificationItem>>(emptyList())
+    val notificationHistory: StateFlow<List<InAppNotificationItem>> = _notificationHistory.asStateFlow()
+
+    private var audioHelper: DriverAudioHelper? = null
+
+    init {
+        createNotificationChannels()
+        try {
+            audioHelper = DriverAudioHelper.getInstance(appContext)
+        } catch (t: Throwable) {
+            Log.e("RideNotificationManager", "Audio helper init error: ${t.message}")
+        }
+    }
+
+    companion object {
+        const val CHANNEL_PASSENGER = "passenger_ride_updates"
+        const val CHANNEL_PASSENGER_ACTIVE_RIDE = "passenger_active_ride_channel"
+        const val CHANNEL_DRIVER = "driver_radar_alerts"
+        const val CHANNEL_DRIVER_ACTIVE_RIDE = "driver_active_ride_channel"
+        const val CHANNEL_EMERGENCY = "emergency_sos_alerts"
+        const val NOTIFICATION_ID_DRIVER_ACTIVE_RIDE = 8801
+        const val NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE = 8802
+
+        @Volatile
+        private var INSTANCE: RideNotificationManager? = null
+
+        fun getInstance(context: Context): RideNotificationManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: RideNotificationManager(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+    }
+
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                ?: return
+
+            val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .build()
+
+            // 1. Passenger updates channel
+            val passengerChannel = NotificationChannel(
+                CHANNEL_PASSENGER,
+                "Passenger Trip Updates",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Live notifications for driver arrival, trip progress and ride completion"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 250, 150, 250)
+                setSound(defaultSoundUri, audioAttributes)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+
+            // 2. Passenger persistent active ride channel
+            val passengerActiveChannel = NotificationChannel(
+                CHANNEL_PASSENGER_ACTIVE_RIDE,
+                "Passenger Active Ride Status",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Persistent status updates while a passenger trip is active"
+                setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+
+            // 3. Driver radar alerts channel
+            val driverChannel = NotificationChannel(
+                CHANNEL_DRIVER,
+                "Driver Radar & Requests",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Real-time alerts for incoming passenger requests, bids and ride assignments"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 300, 200, 300)
+                setSound(defaultSoundUri, audioAttributes)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+
+            // 4. Driver active ride ongoing channel
+            val driverActiveChannel = NotificationChannel(
+                CHANNEL_DRIVER_ACTIVE_RIDE,
+                "Driver Active Ride Progress",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Ongoing persistent notification displaying active ride progress for drivers"
+                setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+
+            // 5. Emergency SOS channel
+            val emergencyChannel = NotificationChannel(
+                CHANNEL_EMERGENCY,
+                "Emergency & Safety SOS Alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Critical alerts for emergency assistance and safety updates"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+
+            notificationManager.createNotificationChannels(
+                listOf(passengerChannel, passengerActiveChannel, driverChannel, driverActiveChannel, emergencyChannel)
+            )
+        }
+    }
+
+    /**
+     * Dispatches a notification for both System status bar (if permitted) and In-App floating toast banner
+     */
+    fun postNotification(
+        type: RideNotificationType,
+        title: String,
+        message: String,
+        subText: String? = null,
+        actionLabel: String? = null,
+        rideId: String? = null,
+        farePkr: Int? = null,
+        speakAnnouncement: Boolean = true,
+        onActionClick: (() -> Unit)? = null
+    ) {
+        val item = InAppNotificationItem(
+            type = type,
+            title = title,
+            message = message,
+            subText = subText,
+            actionLabel = actionLabel,
+            rideId = rideId,
+            farePkr = farePkr,
+            onActionClick = onActionClick
+        )
+
+        // 1. Maintain recent notification history (capped at 50 items)
+        _notificationHistory.value = (listOf(item) + _notificationHistory.value).take(50)
+
+        // Check user notification preferences toggle before presenting banner, sound or system push
+        if (!NotificationPreferencesManager.isNotificationAllowed(type)) {
+            Log.d("RideNotificationManager", "Notification suppressed by user preferences: ${type.name}")
+            return
+        }
+
+        val prefs = NotificationPreferencesManager.preferences.value
+
+        // 2. Trigger In-App notification banner
+        _inAppNotification.value = item
+        dismissJob?.cancel()
+        dismissJob = scope.launch {
+            delay(5500) // Auto-dismiss after 5.5s
+            if (_inAppNotification.value?.id == item.id) {
+                _inAppNotification.value = null
+            }
+        }
+
+        // 3. Trigger haptic vibration for in-app heads-up feedback (if vibration enabled in preferences)
+        if (prefs.vibrationEnabled) {
+            try {
+                val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                if (vibrator != null && vibrator.hasVibrator()) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        vibrator.vibrate(android.os.VibrationEffect.createOneShot(120, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator.vibrate(120)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 4. Voice announcement strictly for active ride updates (deduped, if enabled in preferences)
+        if (speakAnnouncement && prefs.voiceAnnouncementsEnabled) {
+            try {
+                val effectiveRideId = rideId ?: "active_event_${type.name}"
+                val statusString = when (type) {
+                    RideNotificationType.DRIVER_NEW_REQUEST -> "REQUESTED"
+                    RideNotificationType.PASSENGER_DRIVER_ACCEPTED,
+                    RideNotificationType.DRIVER_OFFER_ACCEPTED,
+                    RideNotificationType.DRIVER_RIDE_ASSIGNED -> "ACCEPTED"
+                    RideNotificationType.PASSENGER_DRIVER_ARRIVED -> "ARRIVED"
+                    RideNotificationType.PASSENGER_RIDE_STARTED -> "IN_TRANSIT"
+                    RideNotificationType.PASSENGER_RIDE_COMPLETED -> "COMPLETED"
+                    RideNotificationType.PASSENGER_RIDE_CANCELLED,
+                    RideNotificationType.DRIVER_RIDE_CANCELLED -> "CANCELLED"
+                    else -> type.name
+                }
+                audioHelper?.announceActiveRideStatus(
+                    rideId = effectiveRideId,
+                    status = statusString,
+                    customMessage = title,
+                    farePkr = farePkr
+                )
+            } catch (e: Exception) {
+                Log.e("RideNotificationManager", "Voice feedback error: ${e.message}")
+            }
+        }
+
+        // 5. System Push / Status Bar Notification
+        showSystemNotification(item)
+    }
+
+    fun dismissInAppNotification() {
+        dismissJob?.cancel()
+        _inAppNotification.value = null
+    }
+
+    fun clearNotificationHistory() {
+        _notificationHistory.value = emptyList()
+    }
+
+    private fun showSystemNotification(item: InAppNotificationItem) {
+        try {
+            // Check user preferences
+            if (!NotificationPreferencesManager.isNotificationAllowed(item.type)) {
+                return
+            }
+
+            // Check Android 13+ POST_NOTIFICATIONS permission
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return // In-app notification acts as fallback
+                }
+            }
+
+            val intent = Intent(appContext, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("NOTIFICATION_RIDE_ID", item.rideId)
+                putExtra("NOTIFICATION_TYPE", item.type.name)
+                putExtra("OPEN_DRIVER_MODE", item.type.isDriverEvent)
+                putExtra("OPEN_PASSENGER_MODE", !item.type.isDriverEvent)
+            }
+
+            val requestCode = ((item.rideId?.hashCode() ?: 0) * 31 + item.type.ordinal) and 0x7FFFFFFF
+
+            val pendingIntent = PendingIntent.getActivity(
+                appContext,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val prefs = NotificationPreferencesManager.preferences.value
+            val defaultFlags = when {
+                prefs.soundEnabled && prefs.vibrationEnabled -> NotificationCompat.DEFAULT_ALL
+                prefs.soundEnabled -> NotificationCompat.DEFAULT_SOUND
+                prefs.vibrationEnabled -> NotificationCompat.DEFAULT_VIBRATE
+                else -> 0
+            }
+
+            val builder = NotificationCompat.Builder(appContext, item.type.channelId)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(if (item.type.isDriverEvent) 0xFF00E676.toInt() else 0xFF6C47FF.toInt())
+                .setContentTitle(item.title)
+                .setContentText(item.message)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(item.message))
+                .setSubText(item.subText ?: item.type.categoryName)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(defaultFlags)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+
+            item.actionLabel?.let { label ->
+                builder.addAction(R.drawable.ic_notification, label, pendingIntent)
+            }
+
+            val notificationId = (item.rideId?.hashCode() ?: System.currentTimeMillis().toInt()) and 0x7FFFFFFF
+            NotificationManagerCompat.from(appContext).notify(notificationId, builder.build())
+        } catch (t: Throwable) {
+            Log.e("RideNotificationManager", "Error showing system notification: ${t.message}")
+        }
+    }
+
+    // Convenience Helper Methods for Passenger
+
+    fun notifyDriverFound(driverName: String, etaMinutes: Int, rideId: String) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_DRIVER_FOUND,
+            title = "Captain Found!",
+            message = "$driverName is reviewing your ride (~$etaMinutes min away)",
+            subText = "Captain Nearby",
+            actionLabel = "View Status",
+            rideId = rideId
+        )
+    }
+
+    fun notifyDriverAccepted(driverName: String, farePkr: Int, vehicleModel: String, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_DRIVER_ACCEPTED,
+            title = "Ride Confirmed!",
+            message = "$driverName accepted your offer for PKR $farePkr in $vehicleModel",
+            subText = "Booking Active",
+            actionLabel = "Track Driver",
+            rideId = rideId,
+            farePkr = farePkr,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyDepartureOfferAccepted(
+        driverName: String,
+        routeText: String,
+        farePkr: Int,
+        seats: Int = 1,
+        departureId: String,
+        vehicleInfo: String = "",
+        onAction: (() -> Unit)? = null
+    ) {
+        val seatText = if (seats > 1) "$seats seats" else "1 seat"
+        val vehiclePart = if (vehicleInfo.isNotBlank()) " in $vehicleInfo" else ""
+        postNotification(
+            type = RideNotificationType.PASSENGER_DRIVER_ACCEPTED,
+            title = "Offer Accepted! Ride Confirmed",
+            message = "$driverName accepted your offer of PKR $farePkr for $routeText ($seatText$vehiclePart)",
+            subText = "City to City • Confirmed Booking",
+            actionLabel = "View Ride",
+            rideId = departureId,
+            farePkr = farePkr,
+            speakAnnouncement = true,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyDriverCounterOffer(driverName: String, counterFare: Int, etaMinutes: Int, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_DRIVER_COUNTER_OFFER,
+            title = "New Counter-Offer Received",
+            message = "$driverName offered PKR $counterFare (~$etaMinutes min away)",
+            subText = "Offer Pending",
+            actionLabel = "Review Offer",
+            rideId = rideId,
+            farePkr = counterFare,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyDriverArriving(driverName: String, vehicleColor: String, vehicleModel: String, plate: String, rideId: String) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_DRIVER_ARRIVING,
+            title = "Captain is Arriving",
+            message = "$driverName is 2 mins away in $vehicleColor $vehicleModel ($plate)",
+            subText = "Almost There",
+            actionLabel = "See Map",
+            rideId = rideId
+        )
+    }
+
+    fun notifyDriverArrived(driverName: String, plateNumber: String, rideId: String) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_DRIVER_ARRIVED,
+            title = "Captain Has Arrived!",
+            message = "$driverName ($plateNumber) is waiting at your pickup point",
+            subText = "Arrived at Pickup",
+            actionLabel = "Meet Captain",
+            rideId = rideId
+        )
+    }
+
+    fun notifyRideStarted(destination: String, rideId: String) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_RIDE_STARTED,
+            title = "Ride Started",
+            message = "Heading to $destination. Have a safe journey!",
+            subText = "Trip In Progress",
+            actionLabel = "Safety Center",
+            rideId = rideId
+        )
+    }
+
+    fun notifyRideCompleted(farePkr: Int, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_RIDE_COMPLETED,
+            title = "Trip Completed!",
+            message = "PKR $farePkr collected. Please rate your captain.",
+            subText = "Trip Finished",
+            actionLabel = "Rate Ride",
+            rideId = rideId,
+            farePkr = farePkr,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyPassengerRideCancelled(reason: String = "Cancelled", rideId: String) {
+        postNotification(
+            type = RideNotificationType.PASSENGER_RIDE_CANCELLED,
+            title = "Ride Cancelled",
+            message = "Your ride was cancelled ($reason). You can re-book anytime.",
+            subText = "Cancelled",
+            actionLabel = "Re-book",
+            rideId = rideId
+        )
+    }
+
+    // Convenience Helper Methods for Driver
+
+    fun notifyNewRideRequest(pickup: String, dest: String, farePkr: Int, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.DRIVER_NEW_REQUEST,
+            title = "New Ride Request! PKR $farePkr",
+            message = "$pickup → $dest",
+            subText = "Nearby Passenger",
+            actionLabel = "View & Bid",
+            rideId = rideId,
+            farePkr = farePkr,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyPassengerAcceptedOffer(passengerName: String, farePkr: Int, pickup: String, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.DRIVER_OFFER_ACCEPTED,
+            title = "Passenger Accepted Your Offer!",
+            message = "$passengerName agreed to PKR $farePkr. Proceed to $pickup",
+            subText = "Ride Confirmed",
+            actionLabel = "Start Pickup",
+            rideId = rideId,
+            farePkr = farePkr,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyDriverRideAssigned(passengerName: String, pickup: String, rideId: String) {
+        postNotification(
+            type = RideNotificationType.DRIVER_RIDE_ASSIGNED,
+            title = "Ride Assigned to You",
+            message = "Pickup $passengerName at $pickup",
+            subText = "Active Assignment",
+            actionLabel = "Navigate",
+            rideId = rideId
+        )
+    }
+
+    fun notifyDriverRideCancelled(passengerName: String, rideId: String) {
+        postNotification(
+            type = RideNotificationType.DRIVER_RIDE_CANCELLED,
+            title = "Ride Cancelled",
+            message = "$passengerName cancelled the ride request",
+            subText = "Cancelled by Passenger",
+            actionLabel = "Back to Radar",
+            rideId = rideId
+        )
+    }
+
+    fun notifySharedRideMatch(pickup: String, dest: String, extraFare: Int, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.DRIVER_SHARED_MATCH,
+            title = "Shared Route Match! +PKR $extraFare",
+            message = "New passenger on your route: $pickup → $dest",
+            subText = "Route Optimizer Match",
+            actionLabel = "Accept Match",
+            rideId = rideId,
+            farePkr = extraFare,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyChatMessage(senderName: String, messageText: String, rideId: String, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.CHAT_MESSAGE,
+            title = "Message from $senderName",
+            message = messageText,
+            subText = "Trip Chat",
+            actionLabel = "Reply",
+            rideId = rideId,
+            speakAnnouncement = false,
+            onActionClick = onAction
+        )
+    }
+
+    fun notifyPromotionalAlert(title: String, description: String, promoCode: String? = null, onAction: (() -> Unit)? = null) {
+        postNotification(
+            type = RideNotificationType.PROMOTIONAL_ALERT,
+            title = title,
+            message = if (promoCode != null) "$description (Use code: $promoCode)" else description,
+            subText = "Drigo Offer",
+            actionLabel = if (promoCode != null) "Apply Code" else "View Details",
+            speakAnnouncement = false,
+            onActionClick = onAction
+        )
+    }
+
+    /**
+     * Shows or updates a persistent, ongoing status bar notification for the active driver ride.
+     * Stays visible during DRIVER_COMING, DRIVER_ARRIVED, and IN_TRIP states.
+     * Tapping it reopens the active ride screen in Driver mode.
+     */
+    fun updateDriverActiveRideNotification(trip: PassengerOrder) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+            }
+
+            val title = when (trip.status) {
+                PassengerOrderStatus.DRIVER_ARRIVED -> "Arrived at Pickup • Waiting for Passenger"
+                PassengerOrderStatus.IN_TRIP -> "Trip in Progress • Heading to Destination"
+                else -> "En Route to Pickup • ${trip.pickupTitle.take(28)}"
+            }
+
+            val passName = trip.passengerName.ifBlank { "Passenger" }
+            val contentText = when (trip.status) {
+                PassengerOrderStatus.DRIVER_ARRIVED -> "Passenger: $passName • PKR ${trip.agreedFare}"
+                PassengerOrderStatus.IN_TRIP -> "Dropoff: ${trip.destinationTitle.take(25)} • PKR ${trip.agreedFare}"
+                else -> "Passenger: $passName • (~${trip.etaMinutes} min away)"
+            }
+
+            val intent = Intent(appContext, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("OPEN_DRIVER_MODE", true)
+                putExtra("NOTIFICATION_RIDE_ID", trip.id)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                appContext,
+                NOTIFICATION_ID_DRIVER_ACTIVE_RIDE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val builder = NotificationCompat.Builder(appContext, CHANNEL_DRIVER_ACTIVE_RIDE)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(0xFF00E676.toInt())
+                .setContentTitle(title)
+                .setContentText(contentText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+                .setSubText("Drigo Captain Active Ride")
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pendingIntent)
+
+            NotificationManagerCompat.from(appContext).notify(NOTIFICATION_ID_DRIVER_ACTIVE_RIDE, builder.build())
+        } catch (t: Throwable) {
+            Log.e("RideNotificationManager", "Error updating active ride notification: ${t.message}")
+        }
+    }
+
+    /**
+     * Shows or updates a persistent, ongoing status bar notification for the active passenger trip.
+     * Stays visible while the passenger is waiting for the captain or in transit.
+     * Tapping it returns the passenger directly to the live trip screen in Drigo.
+     */
+    fun updatePassengerActiveRideNotification(order: PassengerOrder) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    return
+                }
+            }
+
+            val captName = order.driverName.ifBlank { "Captain" }
+            val vehicleInfo = listOf(order.driverVehicleColor, order.driverVehicleMake, order.driverVehicleModel)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+                .ifBlank { "Vehicle" }
+
+            val title = when (order.status) {
+                PassengerOrderStatus.DRIVER_ARRIVED -> "Captain Has Arrived! • $captName"
+                PassengerOrderStatus.IN_TRIP -> "On the Road • Heading to Destination"
+                else -> "Captain on the Way • $captName"
+            }
+
+            val contentText = when (order.status) {
+                PassengerOrderStatus.DRIVER_ARRIVED -> "$vehicleInfo (${order.driverPlateNumber}) waiting at ${order.pickupTitle.take(24)}"
+                PassengerOrderStatus.IN_TRIP -> "Heading to: ${order.destinationTitle.take(24)} • PKR ${order.agreedFare}"
+                else -> "$vehicleInfo (${order.driverPlateNumber}) • ETA ~${order.etaMinutes} min • PKR ${order.agreedFare}"
+            }
+
+            val intent = Intent(appContext, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("OPEN_PASSENGER_MODE", true)
+                putExtra("OPEN_DRIVER_MODE", false)
+                putExtra("NOTIFICATION_RIDE_ID", order.id)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                appContext,
+                NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val builder = NotificationCompat.Builder(appContext, CHANNEL_PASSENGER_ACTIVE_RIDE)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(0xFF6C47FF.toInt())
+                .setContentTitle(title)
+                .setContentText(contentText)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
+                .setSubText("Drigo Active Trip")
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pendingIntent)
+
+            NotificationManagerCompat.from(appContext).notify(NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE, builder.build())
+        } catch (t: Throwable) {
+            Log.e("RideNotificationManager", "Error updating passenger active ride notification: ${t.message}")
+        }
+    }
+
+    /**
+     * Dismisses the persistent passenger active ride notification upon completion or cancellation.
+     */
+    fun dismissPassengerActiveRideNotification() {
+        try {
+            NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_ID_PASSENGER_ACTIVE_RIDE)
+        } catch (e: Exception) {
+            Log.e("RideNotificationManager", "Error cancelling passenger active ride notification: ${e.message}")
+        }
+    }
+
+    /**
+     * Dismisses and removes the persistent active ride notification.
+     * Called strictly when ride is COMPLETED or CANCELLED.
+     */
+    fun dismissDriverActiveRideNotification() {
+        try {
+            NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_ID_DRIVER_ACTIVE_RIDE)
+            audioHelper?.clearQueueAndResetTracking()
+        } catch (e: Exception) {
+            Log.e("RideNotificationManager", "Error cancelling active ride notification: ${e.message}")
+        }
+    }
+
+    /**
+     * Clears speech queue and resets tracking state when a ride transitions out of active states.
+     */
+    fun clearVoiceQueueAndTracking() {
+        try {
+            audioHelper?.clearQueueAndResetTracking()
+        } catch (e: Exception) {
+            Log.e("RideNotificationManager", "Error clearing voice queue: ${e.message}")
+        }
+    }
+}

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Stylized White 'D' Location Pin Frame -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,22 C43,22 34,31 34,42 C34,55 49,72 52.8,76.5 C53.4,77.2 54.6,77.2 55.2,76.5 C59,72 74,55 74,42 C74,31 65,22 54,22 Z M54,56 C46.3,56 40,49.7 40,42 C40,34.3 46.3,28 54,28 C61.7,28 68,34.3 68,42 C68,49.7 61.7,56 54,56 Z" />
+
+    <!-- Bright Fuchsia Pulse Circle -->
+    <path
+        android:pathData="M54,32 A10,10 0 1,0 54,52 A10,10 0 1,0 54,32">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="44"
+                android:startY="32"
+                android:endX="64"
+                android:endY="52"
+                android:type="linear">
+                <item android:color="#FF00CC" android:offset="0.0" />
+                <item android:color="#8B004F" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Sleek White Ride Car Silhouette in Center of Pin -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,37 L50.5,34 C51,33.4 51.7,33 52.5,33 L55.5,33 C56.3,33 57,33.4 57.5,34 L60,37 L63.5,37 C64.3,37 65,37.7 65,38.5 L65,43.5 C65,44.3 64.3,45 63.5,45 L63,45 L63,46.5 C63,47.3 62.3,48 61.5,48 L60.5,48 C59.7,48 59,47.3 59,46.5 L59,45 L49,45 L49,46.5 C49,47.3 48.3,48 47.5,48 L46.5,48 C45.7,48 45,47.3 45,46.5 L45,45 L44.5,45 C43.7,45 43,44.3 43,43.5 L43,38.5 C43,37.7 43.7,37 44.5,37 Z M48.5,38.5 C48.8,38.5 49,38.3 49,38 C49,37.7 48.8,37.5 48.5,37.5 C48.2,37.5 48,37.7 48,38 C48,38.3 48.2,38.5 48.5,38.5 Z M59.5,38.5 C59.8,38.5 60,38.3 60,38 C60,37.7 59.8,37.5 59.5,37.5 C59.2,37.5 59,37.7 59,38 C59,38.3 59.2,38.5 59.5,38.5 Z M50.5,37 L57.5,37 L56,34.5 L52,34.5 Z" />
+
+    <!-- Green Pulse Accent Dot -->
+    <path
+        android:fillColor="#00E676"
+        android:pathData="M54,80 A3.5,3.5 0 1,0 54,87 A3.5,3.5 0 1,0 54,80" />
+
+</vector>

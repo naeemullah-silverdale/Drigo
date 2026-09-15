@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Drigo</string>
+    <string name="welcome_title">Welcome to Drigo</string>
+    <string name="welcome_tagline">Your ride, your way</string>
+</resources>
