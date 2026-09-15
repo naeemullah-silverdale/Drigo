@@ -15,26 +15,29 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -49,14 +52,13 @@ import com.example.data.model.DriverVehicle
 import com.example.data.model.DriverVerification
 import com.example.data.remote.DriverDocumentStorageManager
 import com.example.data.remote.FirebaseRepository
+import com.example.ui.theme.DrigoBrandFuchsia
+import com.example.ui.theme.DrigoBrandMagentaBg
+import com.example.ui.theme.DrigoBrandPurple
+import com.example.ui.theme.InDriveLimeGreen
+import com.example.ui.theme.drigoColors
 import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.launch
-
-// Magenta Brand Colors
-val DriverMagentaBg = Color(0xFF8B004F)
-val DriverBrightFuchsia = Color(0xFFFF00CC)
-val DriverDarkFuchsia = Color(0xFF6B003D)
-val DriverCardBg = Color(0x33FFFFFF)
 
 enum class DriverRegStep {
     PROFILE_AND_IDENTITY,
@@ -65,6 +67,11 @@ enum class DriverRegStep {
     CONFIRMATION_PENDING
 }
 
+/**
+ * Redesigned Driver Registration & KYC Screen.
+ * Provides a modern, guided 3-step onboarding experience with responsive document upload cards,
+ * clear progress indicators, helpful document camera instructions, and real-time status updates.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DriverRegistrationScreen(
@@ -78,6 +85,26 @@ fun DriverRegistrationScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val isDark = isSystemInDarkTheme() || MaterialTheme.drigoColors.isDark
+
+    // Theme adaptive background colors
+    val bgGradient = if (isDark) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF2E001A),
+                Color(0xFF1F0012),
+                Color(0xFF14000B)
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF70003E),
+                Color(0xFF4D002A),
+                Color(0xFF2D0018)
+            )
+        )
+    }
 
     var currentStep by remember {
         mutableStateOf(
@@ -98,7 +125,7 @@ fun DriverRegistrationScreen(
         }
     }
 
-    // Step 1: Profile & Identity
+    // Step 1 State: Profile & Identity Documents
     var driverPhotoDoc by remember {
         mutableStateOf(
             existingVerification?.documents?.find { it.docType == DriverDocumentStorageManager.DOC_DRIVER_PHOTO }
@@ -145,7 +172,7 @@ fun DriverRegistrationScreen(
         )
     }
 
-    // Step 2: Vehicle Details & Multi-Angle Photos
+    // Step 2 State: Vehicle Details & Multi-Angle Photos
     var vehicleFrontDoc by remember {
         mutableStateOf(
             existingVerification?.documents?.find { it.docType == DriverDocumentStorageManager.DOC_VEHICLE_FRONT }
@@ -210,7 +237,7 @@ fun DriverRegistrationScreen(
     var vehicleModel by remember { mutableStateOf(existingVerification?.vehicleModel ?: "") }
     var vehicleNumber by remember { mutableStateOf(existingVerification?.vehicleNumber ?: "") }
 
-    // Step 3: Driving License & Additional Doc
+    // Step 3 State: Driving License & Additional Doc
     var licenseFrontDoc by remember {
         mutableStateOf(
             existingVerification?.documents?.find { it.docType == DriverDocumentStorageManager.DOC_LICENSE_FRONT }
@@ -263,7 +290,7 @@ fun DriverRegistrationScreen(
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
     var previewImageTitle by remember { mutableStateOf<String?>(null) }
 
-    // Listen to real-time verification status for current user
+    // Real-time verification listener
     LaunchedEffect(user?.uid) {
         val uid = user?.uid ?: return@LaunchedEffect
         val repo = FirebaseRepository.getInstance(context)
@@ -279,7 +306,7 @@ fun DriverRegistrationScreen(
         }
     }
 
-    // Required documents check (9 required: Profile, CNIC Front, CNIC Back, Vehicle Front, Vehicle Back, Vehicle Side, Registration Doc, License Front, License Back)
+    // Check completed required uploads (9 required docs)
     val requiredUploadedCount = listOfNotNull(
         driverPhotoDoc,
         cnicFrontDoc,
@@ -296,23 +323,26 @@ fun DriverRegistrationScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = DriverMagentaBg,
-        contentWindowInsets = WindowInsets.safeDrawing
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets.safeDrawing,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bgGradient)
+            .testTag("driver_registration_screen")
     ) { paddingValues ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(DriverMagentaBg)
                 .padding(paddingValues)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header Bar
+                // Top Header Action Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -326,48 +356,68 @@ fun DriverRegistrationScreen(
                                 DriverRegStep.DRIVING_LICENSE -> currentStep = DriverRegStep.VEHICLE_DETAILS
                                 DriverRegStep.CONFIRMATION_PENDING -> onBackToPassenger()
                             }
-                        }
+                        },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color.White.copy(alpha = 0.15f), CircleShape)
+                            .testTag("driver_registration_back_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = Color.White
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
-                    if (currentStep != DriverRegStep.CONFIRMATION_PENDING) {
-                        val stepIndex = when (currentStep) {
-                            DriverRegStep.PROFILE_AND_IDENTITY -> 1
-                            DriverRegStep.VEHICLE_DETAILS -> 2
-                            DriverRegStep.DRIVING_LICENSE -> 3
-                            DriverRegStep.CONFIRMATION_PENDING -> 3
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "Step $stepIndex of 3",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "$requiredUploadedCount/9 Required Uploaded",
-                                fontSize = 11.sp,
-                                color = if (allRequiredCompleted) Color(0xFF00E676) else Color.White.copy(alpha = 0.75f),
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VerifiedUser,
+                            contentDescription = null,
+                            tint = InDriveLimeGreen,
+                            modifier = Modifier.size(22.dp)
+                        )
                         Text(
-                            text = "Verification Status",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold
+                            text = "Driver Onboarding",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onNavigateToAdminPortal,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Color.White.copy(alpha = 0.15f), CircleShape)
+                            .testTag("driver_registration_admin_portal_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AdminPanelSettings,
+                            contentDescription = "Admin Portal",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
+                // Stepper Header & Visual Pipeline
+                if (currentStep != DriverRegStep.CONFIRMATION_PENDING) {
+                    DriverRegistrationStepperHeader(
+                        currentStep = currentStep,
+                        requiredUploadedCount = requiredUploadedCount,
+                        allRequiredCompleted = allRequiredCompleted
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Main Step Content with Smooth Animated Transition
                 AnimatedContent(
                     targetState = currentStep,
                     transitionSpec = {
@@ -390,6 +440,7 @@ fun DriverRegistrationScreen(
                                     previewImageUrl = url
                                     previewImageTitle = title
                                 },
+                                onBackToPassenger = onBackToPassenger,
                                 onNext = {
                                     currentStep = DriverRegStep.VEHICLE_DETAILS
                                 }
@@ -417,12 +468,15 @@ fun DriverRegistrationScreen(
                                     previewImageUrl = url
                                     previewImageTitle = title
                                 },
+                                onBack = {
+                                    currentStep = DriverRegStep.PROFILE_AND_IDENTITY
+                                },
                                 onNext = {
                                     if (vehicleCompany.isBlank()) vehicleCompany = "Toyota"
                                     if (vehicleModel.isBlank()) vehicleModel = "Corolla"
                                     if (vehicleNumber.isBlank()) vehicleNumber = "LEA-4521"
 
-                                    // Persist vehicle details into dedicated 'vehicle' table in Firebase
+                                    // Persist vehicle details into dedicated 'vehicle' table
                                     val currentDriverId = user?.uid ?: "driver_guest"
                                     val vehicleId = "veh_${currentDriverId.trim().replace("-", "")}"
                                     val driverVehicle = DriverVehicle(
@@ -470,9 +524,11 @@ fun DriverRegistrationScreen(
                                 isSubmitting = isSubmitting,
                                 allRequiredCompleted = allRequiredCompleted,
                                 requiredUploadedCount = requiredUploadedCount,
+                                onBack = {
+                                    currentStep = DriverRegStep.VEHICLE_DETAILS
+                                },
                                 onSubmit = {
                                     if (!isSubmitting) {
-                                        // Verify all 9 required documents are present and uploaded
                                         val requiredDocs = listOfNotNull(
                                             driverPhotoDoc,
                                             cnicFrontDoc,
@@ -488,12 +544,11 @@ fun DriverRegistrationScreen(
                                         val incompleteDocs = requiredDocs.filter { it.fileUrl.isBlank() }
                                         if (incompleteDocs.isNotEmpty() || requiredDocs.size < 9) {
                                             scope.launch {
-                                                snackbarHostState.showSnackbar("Please upload all 9 required verification documents before submitting ($requiredUploadedCount/9 completed).")
+                                                snackbarHostState.showSnackbar("Please upload all 9 required verification documents ($requiredUploadedCount/9 completed).")
                                             }
                                         } else {
                                             val safeUid = user?.uid ?: "driver_${System.currentTimeMillis()}"
 
-                                            // Collect all documents
                                             val allDocList = listOfNotNull(
                                                 driverPhotoDoc,
                                                 cnicFrontDoc,
@@ -507,7 +562,7 @@ fun DriverRegistrationScreen(
                                                 additionalDoc
                                             )
 
-                                             val verification = DriverVerification(
+                                            val verification = DriverVerification(
                                                 uid = safeUid,
                                                 name = user?.displayName?.ifBlank { "Drigo Driver" }
                                                     ?: (user?.email?.substringBefore("@") ?: "Drigo Driver"),
@@ -546,7 +601,6 @@ fun DriverRegistrationScreen(
                                                     val repo = FirebaseRepository.getInstance(context)
                                                     val res = repo.saveDriverVerification(verification)
 
-                                                    // Explicitly ensure vehicle record is persisted into dedicated 'vehicle' table
                                                     val cleanDriverId = (user?.uid ?: verification.uid).trim().replace("-", "")
                                                     val vehicleId = "veh_$cleanDriverId"
                                                     val finalVehicle = DriverVehicle(
@@ -575,7 +629,7 @@ fun DriverRegistrationScreen(
                                                         verificationState = verification
                                                         onVerificationCompleted(verification)
                                                         currentStep = DriverRegStep.CONFIRMATION_PENDING
-                                                        snackbarHostState.showSnackbar("Application submitted successfully! Your documents are under review.")
+                                                        snackbarHostState.showSnackbar("Application submitted successfully!")
                                                     } else {
                                                         val err = res.exceptionOrNull()?.message ?: "Save failed"
                                                         snackbarHostState.showSnackbar("Failed to submit: $err. Please try again.")
@@ -630,16 +684,17 @@ fun DriverRegistrationScreen(
                 }
             }
 
-            // High Resolution Image Preview Dialog
+            // High Resolution Document Zoom Dialog
             if (previewImageUrl != null) {
                 Dialog(onDismissRequest = { previewImageUrl = null }) {
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFF1E293B),
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF0F172A),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(8.dp)
+                            .testTag("driver_registration_image_preview_dialog")
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -651,7 +706,7 @@ fun DriverRegistrationScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = previewImageTitle ?: "Document Preview",
+                                    text = previewImageTitle ?: "Document Inspection",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -665,7 +720,7 @@ fun DriverRegistrationScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(340.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(14.dp))
                                     .background(Color.Black)
                             ) {
                                 AsyncImage(
@@ -677,7 +732,7 @@ fun DriverRegistrationScreen(
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "High-Resolution Preview",
+                                text = "Encrypted High-Resolution Document Preview",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.White.copy(alpha = 0.7f)
                             )
@@ -690,7 +745,180 @@ fun DriverRegistrationScreen(
 }
 
 /**
- * Step 1: Driver Profile Photo + CNIC Front & Back
+ * Modern Stepper Progress Header displaying 3 onboarding steps & live upload counters.
+ */
+@Composable
+fun DriverRegistrationStepperHeader(
+    currentStep: DriverRegStep,
+    requiredUploadedCount: Int,
+    allRequiredCompleted: Boolean
+) {
+    val stepIndex = when (currentStep) {
+        DriverRegStep.PROFILE_AND_IDENTITY -> 1
+        DriverRegStep.VEHICLE_DETAILS -> 2
+        DriverRegStep.DRIVING_LICENSE -> 3
+        DriverRegStep.CONFIRMATION_PENDING -> 3
+    }
+
+    val progressFraction = when (currentStep) {
+        DriverRegStep.PROFILE_AND_IDENTITY -> 0.33f
+        DriverRegStep.VEHICLE_DETAILS -> 0.66f
+        DriverRegStep.DRIVING_LICENSE -> 1.0f
+        DriverRegStep.CONFIRMATION_PENDING -> 1.0f
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("driver_registration_stepper_header")
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Pipeline Step Nodes
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                StepNode(
+                    stepNumber = 1,
+                    title = "Identity",
+                    icon = Icons.Default.Badge,
+                    isActive = stepIndex == 1,
+                    isCompleted = stepIndex > 1
+                )
+                StepConnector(isCompleted = stepIndex > 1, modifier = Modifier.weight(1f))
+                StepNode(
+                    stepNumber = 2,
+                    title = "Vehicle",
+                    icon = Icons.Default.DirectionsCar,
+                    isActive = stepIndex == 2,
+                    isCompleted = stepIndex > 2
+                )
+                StepConnector(isCompleted = stepIndex > 2, modifier = Modifier.weight(1f))
+                StepNode(
+                    stepNumber = 3,
+                    title = "License",
+                    icon = Icons.Default.AssignmentInd,
+                    isActive = stepIndex == 3,
+                    isCompleted = allRequiredCompleted
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Linear Progress Bar & Required Badge Count
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Step $stepIndex of 3",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "$requiredUploadedCount / 9 Docs Uploaded",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (allRequiredCompleted) InDriveLimeGreen else Color.White.copy(alpha = 0.85f)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { progressFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape),
+                        color = if (allRequiredCompleted) InDriveLimeGreen else DrigoBrandFuchsia,
+                        trackColor = Color.White.copy(alpha = 0.2f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepNode(
+    stepNumber: Int,
+    title: String,
+    icon: ImageVector,
+    isActive: Boolean,
+    isCompleted: Boolean
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = when {
+                isCompleted -> InDriveLimeGreen
+                isActive -> DrigoBrandFuchsia
+                else -> Color.White.copy(alpha = 0.2f)
+            },
+            border = if (isActive) BorderStroke(2.dp, Color.White) else null,
+            modifier = Modifier.size(34.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (isCompleted) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Completed",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = title,
+            fontSize = 11.sp,
+            fontWeight = if (isActive || isCompleted) FontWeight.Bold else FontWeight.Normal,
+            color = if (isActive || isCompleted) Color.White else Color.White.copy(alpha = 0.65f)
+        )
+    }
+}
+
+@Composable
+private fun StepConnector(
+    isCompleted: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            .height(3.dp)
+            .clip(CircleShape)
+            .background(if (isCompleted) InDriveLimeGreen else Color.White.copy(alpha = 0.25f))
+    )
+}
+
+/**
+ * Step 1: Profile Photo & CNIC Identity Documents
  */
 @Composable
 fun ProfileAndIdentityStep(
@@ -702,105 +930,157 @@ fun ProfileAndIdentityStep(
     onCnicFrontChange: (DriverDocumentItem?) -> Unit,
     onCnicBackChange: (DriverDocumentItem?) -> Unit,
     onPreview: (String, String) -> Unit,
+    onBackToPassenger: () -> Unit,
     onNext: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "Personal Details & Identity",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            textAlign = TextAlign.Center
-        )
-        Text(
-            text = "Upload your clear profile photograph and CNIC / National ID card",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.8f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 4.dp, bottom = 20.dp)
+        // Guided Section Header Card
+        StepGuideBanner(
+            title = "Personal Identity & Profile",
+            description = "Upload a clear face photograph and official National Identity Card (CNIC) photos for identity verification.",
+            icon = Icons.Default.Badge
         )
 
-        // Driver Profile Photo (Centered Circle / Box)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Driver Profile Photo Section
+        SecureDocumentUploadCard(
+            userId = userId,
+            docType = DriverDocumentStorageManager.DOC_DRIVER_PHOTO,
+            title = "Driver Profile Photo",
+            subtitle = "Recent front-facing face photo without glasses or hat",
+            isRequired = true,
+            icon = Icons.Default.AccountBox,
+            docItem = driverPhotoDoc,
+            onDocUploaded = onDriverPhotoChange,
+            onPreview = onPreview,
+            compact = false
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // CNIC Front & Back Cards
         Text(
-            text = "Driver Profile Photo *",
-            style = MaterialTheme.typography.labelMedium,
+            text = "National Identity Card (CNIC)",
+            style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
             color = Color.White,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
         )
-        Box(modifier = Modifier.width(180.dp)) {
-            SecureDocumentUploadCard(
-                userId = userId,
-                docType = DriverDocumentStorageManager.DOC_DRIVER_PHOTO,
-                label = "Driver Face Photo",
-                docItem = driverPhotoDoc,
-                onDocUploaded = onDriverPhotoChange,
-                onPreview = onPreview
-            )
+
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val isCompact = maxWidth < 340.dp
+            if (isCompact) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_CNIC_FRONT,
+                        title = "CNIC Front Side",
+                        subtitle = "Clear photo showing full front details",
+                        isRequired = true,
+                        icon = Icons.Default.CreditCard,
+                        docItem = cnicFrontDoc,
+                        onDocUploaded = onCnicFrontChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_CNIC_BACK,
+                        title = "CNIC Back Side",
+                        subtitle = "Clear photo showing back details",
+                        isRequired = true,
+                        icon = Icons.Default.CreditCard,
+                        docItem = cnicBackDoc,
+                        onDocUploaded = onCnicBackChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        SecureDocumentUploadCard(
+                            userId = userId,
+                            docType = DriverDocumentStorageManager.DOC_CNIC_FRONT,
+                            title = "CNIC Front",
+                            subtitle = "Front details & CNIC #",
+                            isRequired = true,
+                            icon = Icons.Default.CreditCard,
+                            docItem = cnicFrontDoc,
+                            onDocUploaded = onCnicFrontChange,
+                            onPreview = onPreview,
+                            compact = true
+                        )
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        SecureDocumentUploadCard(
+                            userId = userId,
+                            docType = DriverDocumentStorageManager.DOC_CNIC_BACK,
+                            title = "CNIC Back",
+                            subtitle = "Back details & address",
+                            isRequired = true,
+                            icon = Icons.Default.CreditCard,
+                            docItem = cnicBackDoc,
+                            onDocUploaded = onCnicBackChange,
+                            onPreview = onPreview,
+                            compact = true
+                        )
+                    }
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
-        // CNIC Front & Back in 2 columns
-        Text(
-            text = "National Identity Card (CNIC) *",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+        // Navigation Footer Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_CNIC_FRONT,
-                    label = "CNIC Front",
-                    docItem = cnicFrontDoc,
-                    onDocUploaded = onCnicFrontChange,
-                    onPreview = onPreview
-                )
+            OutlinedButton(
+                onClick = onBackToPassenger,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Text("Exit", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             }
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_CNIC_BACK,
-                    label = "CNIC Back",
-                    docItem = cnicBackDoc,
-                    onDocUploaded = onCnicBackChange,
-                    onPreview = onPreview
-                )
-            }
-        }
 
-        Spacer(modifier = Modifier.height(36.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
             Button(
                 onClick = onNext,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DriverBrightFuchsia,
+                    containerColor = DrigoBrandFuchsia,
                     contentColor = Color.White
                 ),
-                contentPadding = PaddingValues(horizontal = 32.dp, vertical = 14.dp),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 12.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                modifier = Modifier.testTag("driver_registration_step1_next_button")
             ) {
                 Text(
-                    text = "NEXT",
+                    text = "CONTINUE TO VEHICLE",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    letterSpacing = 1.sp
+                    fontSize = 14.sp,
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -808,11 +1088,7 @@ fun ProfileAndIdentityStep(
 }
 
 /**
- * Step 2: Vehicle Details & 4 Document Cards:
- * - Vehicle Front
- * - Vehicle Back
- * - Vehicle Side
- * - Vehicle Registration Card / Book
+ * Step 2: Vehicle Inspection Photos & Text Details
  */
 @Composable
 fun VehicleDetailsStep(
@@ -832,138 +1108,199 @@ fun VehicleDetailsStep(
     onVehicleModelChange: (String) -> Unit,
     onVehicleNumberChange: (String) -> Unit,
     onPreview: (String, String) -> Unit,
+    onBack: () -> Unit,
     onNext: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        StepGuideBanner(
+            title = "Vehicle Details & Photos",
+            description = "Upload 4-angle vehicle photographs along with official vehicle registration details.",
+            icon = Icons.Default.DirectionsCar
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Multi-angle vehicle upload cards
         Text(
-            text = "Vehicle Details & Photos",
-            style = MaterialTheme.typography.headlineSmall,
+            text = "Vehicle Inspection Photos",
+            style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
             color = Color.White,
-            textAlign = TextAlign.Center
-        )
-        Text(
-            text = "Upload multi-angle photos of your vehicle and registration documents",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.8f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 4.dp, bottom = 18.dp)
-        )
-
-        // 2x2 Grid for Vehicle Multi-Angle Photos
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_VEHICLE_FRONT,
-                    label = "Car Front View",
-                    docItem = vehicleFrontDoc,
-                    onDocUploaded = onVehicleFrontChange,
-                    onPreview = onPreview,
-                    compact = true
-                )
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_VEHICLE_BACK,
-                    label = "Car Back View",
-                    docItem = vehicleBackDoc,
-                    onDocUploaded = onVehicleBackChange,
-                    onPreview = onPreview,
-                    compact = true
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_VEHICLE_SIDE,
-                    label = "Car Side View",
-                    docItem = vehicleSideDoc,
-                    onDocUploaded = onVehicleSideChange,
-                    onPreview = onPreview,
-                    compact = true
-                )
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_VEHICLE_REGISTRATION,
-                    label = "Vehicle Registration",
-                    docItem = vehicleRegDoc,
-                    onDocUploaded = onVehicleRegDocChange,
-                    onPreview = onPreview,
-                    compact = true
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Vehicle Text Fields (Rounded Stadium Shape)
-        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            PillInputField(
-                value = vehicleCompany,
-                placeholder = "Vehicle Company (e.g. Toyota, Honda, Suzuki)",
-                onValueChange = onVehicleCompanyChange,
-                imeAction = ImeAction.Next
-            )
-            PillInputField(
-                value = vehicleModel,
-                placeholder = "Vehicle Model (e.g. Corolla, Civic, Alto)",
-                onValueChange = onVehicleModelChange,
-                imeAction = ImeAction.Next
-            )
-            PillInputField(
-                value = vehicleNumber,
-                placeholder = "Vehicle License Plate (e.g. LEA-4521)",
-                onValueChange = onVehicleNumberChange,
-                imeAction = ImeAction.Done
-            )
+                .padding(bottom = 8.dp)
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_VEHICLE_FRONT,
+                        title = "Car Front View",
+                        subtitle = "Clear view with license plate",
+                        isRequired = true,
+                        icon = Icons.Default.DirectionsCar,
+                        docItem = vehicleFrontDoc,
+                        onDocUploaded = onVehicleFrontChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_VEHICLE_BACK,
+                        title = "Car Back View",
+                        subtitle = "Rear view with license plate",
+                        isRequired = true,
+                        icon = Icons.Default.DirectionsCar,
+                        docItem = vehicleBackDoc,
+                        onDocUploaded = onVehicleBackChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_VEHICLE_SIDE,
+                        title = "Car Side View",
+                        subtitle = "Side profile of vehicle",
+                        isRequired = true,
+                        icon = Icons.Default.DirectionsCar,
+                        docItem = vehicleSideDoc,
+                        onDocUploaded = onVehicleSideChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_VEHICLE_REGISTRATION,
+                        title = "Registration Doc",
+                        subtitle = "Registration card / book",
+                        isRequired = true,
+                        icon = Icons.Default.Description,
+                        docItem = vehicleRegDoc,
+                        onDocUploaded = onVehicleRegDocChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
+        // Vehicle Information Input Card
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White.copy(alpha = 0.12f),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Vehicle Credentials",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                DriverInputField(
+                    value = vehicleCompany,
+                    placeholder = "Company (e.g. Toyota, Honda, Suzuki)",
+                    label = "Vehicle Make / Manufacturer",
+                    leadingIcon = Icons.Default.DirectionsCar,
+                    onValueChange = onVehicleCompanyChange,
+                    imeAction = ImeAction.Next
+                )
+
+                DriverInputField(
+                    value = vehicleModel,
+                    placeholder = "Model (e.g. Corolla, Civic, Alto)",
+                    label = "Vehicle Model & Year",
+                    leadingIcon = Icons.Default.Build,
+                    onValueChange = onVehicleModelChange,
+                    imeAction = ImeAction.Next
+                )
+
+                DriverInputField(
+                    value = vehicleNumber,
+                    placeholder = "License Plate (e.g. LEA-4521)",
+                    label = "Registration / Plate Number",
+                    leadingIcon = Icons.Default.Pin,
+                    onValueChange = onVehicleNumberChange,
+                    imeAction = ImeAction.Done
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // Navigation Footer Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            OutlinedButton(
+                onClick = onBack,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Previous", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+
             Button(
                 onClick = onNext,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DriverBrightFuchsia,
+                    containerColor = DrigoBrandFuchsia,
                     contentColor = Color.White
                 ),
-                contentPadding = PaddingValues(horizontal = 32.dp, vertical = 14.dp),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 12.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                modifier = Modifier.testTag("driver_registration_step2_next_button")
             ) {
                 Text(
-                    text = "NEXT",
+                    text = "CONTINUE TO LICENSE",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    letterSpacing = 1.sp
+                    fontSize = 14.sp,
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -971,7 +1308,7 @@ fun VehicleDetailsStep(
 }
 
 /**
- * Step 3: Driving License (Front + Back) & Optional Additional Document
+ * Step 3: Driving License & Submission Step
  */
 @Composable
 fun DrivingLicenseStep(
@@ -986,156 +1323,206 @@ fun DrivingLicenseStep(
     isSubmitting: Boolean,
     allRequiredCompleted: Boolean,
     requiredUploadedCount: Int,
+    onBack: () -> Unit,
     onSubmit: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = "Driving License & Documents",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            textAlign = TextAlign.Center
-        )
-        Text(
-            text = "Upload valid driving license and any supporting credentials",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White.copy(alpha = 0.8f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 4.dp, bottom = 20.dp)
+        StepGuideBanner(
+            title = "Driving License & Verification",
+            description = "Upload your valid driving license (Front & Back) and any optional supporting credentials.",
+            icon = Icons.Default.AssignmentInd
         )
 
-        // License Front & Back in 2 columns
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Driving License Cards
         Text(
-            text = "Driving License *",
-            style = MaterialTheme.typography.labelMedium,
+            text = "Driving License Credentials",
+            style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
             color = Color.White,
-            modifier = Modifier.padding(bottom = 8.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_LICENSE_FRONT,
-                    label = "License Front",
-                    docItem = licenseFrontDoc,
-                    onDocUploaded = onLicenseFrontChange,
-                    onPreview = onPreview
-                )
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                SecureDocumentUploadCard(
-                    userId = userId,
-                    docType = DriverDocumentStorageManager.DOC_LICENSE_BACK,
-                    label = "License Back",
-                    docItem = licenseBackDoc,
-                    onDocUploaded = onLicenseBackChange,
-                    onPreview = onPreview
-                )
+
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val isCompact = maxWidth < 340.dp
+            if (isCompact) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_LICENSE_FRONT,
+                        title = "Driving License Front",
+                        subtitle = "License # and expiry date",
+                        isRequired = true,
+                        icon = Icons.Default.Badge,
+                        docItem = licenseFrontDoc,
+                        onDocUploaded = onLicenseFrontChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                    SecureDocumentUploadCard(
+                        userId = userId,
+                        docType = DriverDocumentStorageManager.DOC_LICENSE_BACK,
+                        title = "Driving License Back",
+                        subtitle = "Back categories and endorsement",
+                        isRequired = true,
+                        icon = Icons.Default.Badge,
+                        docItem = licenseBackDoc,
+                        onDocUploaded = onLicenseBackChange,
+                        onPreview = onPreview,
+                        compact = true
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        SecureDocumentUploadCard(
+                            userId = userId,
+                            docType = DriverDocumentStorageManager.DOC_LICENSE_FRONT,
+                            title = "License Front",
+                            subtitle = "Front license card",
+                            isRequired = true,
+                            icon = Icons.Default.Badge,
+                            docItem = licenseFrontDoc,
+                            onDocUploaded = onLicenseFrontChange,
+                            onPreview = onPreview,
+                            compact = true
+                        )
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        SecureDocumentUploadCard(
+                            userId = userId,
+                            docType = DriverDocumentStorageManager.DOC_LICENSE_BACK,
+                            title = "License Back",
+                            subtitle = "Back license details",
+                            isRequired = true,
+                            icon = Icons.Default.Badge,
+                            docItem = licenseBackDoc,
+                            onDocUploaded = onLicenseBackChange,
+                            onPreview = onPreview,
+                            compact = true
+                        )
+                    }
+                }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Additional Supporting Document (Optional)
+        SecureDocumentUploadCard(
+            userId = userId,
+            docType = DriverDocumentStorageManager.DOC_ADDITIONAL_DOC,
+            title = "Additional Supporting Document",
+            subtitle = "Optional (e.g. Police Character Certificate, Route Permit, Utility Bill)",
+            isRequired = false,
+            icon = Icons.Default.FolderSpecial,
+            docItem = additionalDoc,
+            onDocUploaded = onAdditionalDocChange,
+            onPreview = onPreview,
+            compact = false
+        )
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Additional / Optional Document
-        Text(
-            text = "Additional Document (Optional)",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = Color.White.copy(alpha = 0.9f),
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        Box(modifier = Modifier.width(180.dp)) {
-            SecureDocumentUploadCard(
-                userId = userId,
-                docType = DriverDocumentStorageManager.DOC_ADDITIONAL_DOC,
-                label = "Additional Doc",
-                docItem = additionalDoc,
-                onDocUploaded = onAdditionalDocChange,
-                onPreview = onPreview,
-                compact = true
-            )
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Submission Requirement Checklist Card
+        // Submission Requirement Status Banner
         Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = if (allRequiredCompleted) Color(0xFF00E676).copy(alpha = 0.15f) else Color.White.copy(alpha = 0.12f),
-            border = BorderStroke(1.dp, if (allRequiredCompleted) Color(0xFF00E676) else Color.White.copy(alpha = 0.3f)),
+            shape = RoundedCornerShape(16.dp),
+            color = if (allRequiredCompleted) InDriveLimeGreen.copy(alpha = 0.18f) else Color(0xFFFFB300).copy(alpha = 0.18f),
+            border = BorderStroke(1.dp, if (allRequiredCompleted) InDriveLimeGreen else Color(0xFFFFB300)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier.padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Icon(
                     imageVector = if (allRequiredCompleted) Icons.Default.CheckCircle else Icons.Default.Info,
                     contentDescription = null,
-                    tint = if (allRequiredCompleted) Color(0xFF00E676) else Color.White,
-                    modifier = Modifier.size(22.dp)
+                    tint = if (allRequiredCompleted) InDriveLimeGreen else Color(0xFFFFB300),
+                    modifier = Modifier.size(24.dp)
                 )
                 Column {
                     Text(
-                        text = if (allRequiredCompleted) "All Required Documents Ready" else "Required Documents Incomplete ($requiredUploadedCount/9)",
+                        text = if (allRequiredCompleted) "All Required Documents Ready!" else "Requirements Incomplete ($requiredUploadedCount / 9)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         color = Color.White
                     )
                     Text(
                         text = if (allRequiredCompleted)
-                            "You can now submit for 24-hour verification review."
+                            "Your application is ready for compliance review."
                         else
-                            "Please upload all 9 required verification photos before submission.",
+                            "Please complete uploading all 9 required photos before submitting.",
                         fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.8f)
+                        color = Color.White.copy(alpha = 0.85f)
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
+        // Navigation Footer Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            OutlinedButton(
+                onClick = onBack,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Previous", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+
             Button(
                 onClick = onSubmit,
                 enabled = !isSubmitting,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DriverBrightFuchsia,
+                    containerColor = DrigoBrandFuchsia,
                     contentColor = Color.White,
-                    disabledContainerColor = DriverBrightFuchsia.copy(alpha = 0.5f)
+                    disabledContainerColor = DrigoBrandFuchsia.copy(alpha = 0.5f)
                 ),
-                contentPadding = PaddingValues(horizontal = 36.dp, vertical = 14.dp),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 12.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                modifier = Modifier.testTag("driver_registration_submit_button")
             ) {
                 if (isSubmitting) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(18.dp),
                         color = Color.White,
-                        strokeWidth = 2.5.dp
+                        strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("SUBMITTING...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("SUBMITTING...", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 } else {
                     Text(
                         text = "SUBMIT FOR REVIEW",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        letterSpacing = 1.sp
+                        fontSize = 14.sp,
+                        letterSpacing = 0.5.sp
                     )
                 }
             }
@@ -1144,7 +1531,7 @@ fun DrivingLicenseStep(
 }
 
 /**
- * Confirmation Pending Screen (24 Hours Review Message + Real-time status display)
+ * Step 4: Confirmation & Real-time Verification Status Dashboard
  */
 @Composable
 fun ConfirmationPendingStep(
@@ -1185,13 +1572,22 @@ fun ConfirmationPendingStep(
             .padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Hero Status Circle Banner
         Surface(
             shape = CircleShape,
             color = when {
-                isAllApproved -> Color(0xFF00E676).copy(alpha = 0.2f)
+                isAllApproved -> InDriveLimeGreen.copy(alpha = 0.2f)
                 isRejected -> Color(0xFFEF4444).copy(alpha = 0.2f)
                 else -> Color.White.copy(alpha = 0.15f)
             },
+            border = BorderStroke(
+                2.dp,
+                when {
+                    isAllApproved -> InDriveLimeGreen
+                    isRejected -> Color(0xFFEF4444)
+                    else -> Color(0xFFFFB300)
+                }
+            ),
             modifier = Modifier.size(80.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1203,9 +1599,9 @@ fun ConfirmationPendingStep(
                     },
                     contentDescription = null,
                     tint = when {
-                        isAllApproved -> Color(0xFF00E676)
+                        isAllApproved -> InDriveLimeGreen
                         isRejected -> Color(0xFFEF4444)
-                        else -> Color.White
+                        else -> Color(0xFFFFB300)
                     },
                     modifier = Modifier.size(44.dp)
                 )
@@ -1242,15 +1638,15 @@ fun ConfirmationPendingStep(
                 Text(
                     text = when {
                         isAllApproved ->
-                            "Congratulations! Your registration has been verified by admin."
+                            "Congratulations! Your registration has been verified by the compliance team."
                         isRejected -> {
-                            val mainReason = verification.rejectionReason.ifBlank { "One or more documents were rejected by admin." }
+                            val mainReason = verification.rejectionReason.ifBlank { "One or more documents require re-uploading." }
                             "Action Required: $mainReason" + if (rejectedDocs.isNotEmpty()) {
                                 "\n\n" + rejectedDocs.joinToString("\n") { "• ${it.title}: ${it.rejectionReason.ifBlank { "Invalid or unclear document" }}" }
                             } else ""
                         }
                         else ->
-                            "Your documents are currently under review by our compliance team."
+                            "Your documents are under review by our compliance team. Reviews take under 24 hours."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.White,
@@ -1258,7 +1654,7 @@ fun ConfirmationPendingStep(
                     lineHeight = 22.sp
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 val statusLabel = when {
                     isAllApproved -> "STATUS: APPROVED"
@@ -1269,14 +1665,14 @@ fun ConfirmationPendingStep(
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = when {
-                        isAllApproved -> Color(0xFF00E676).copy(alpha = 0.25f)
+                        isAllApproved -> InDriveLimeGreen.copy(alpha = 0.25f)
                         isRejected -> Color(0xFFEF4444).copy(alpha = 0.25f)
                         else -> Color(0xFFFFB300).copy(alpha = 0.25f)
                     },
                     border = BorderStroke(
                         1.dp,
                         when {
-                            isAllApproved -> Color(0xFF00E676)
+                            isAllApproved -> InDriveLimeGreen
                             isRejected -> Color(0xFFEF4444)
                             else -> Color(0xFFFFB300)
                         }
@@ -1295,7 +1691,7 @@ fun ConfirmationPendingStep(
                             },
                             contentDescription = null,
                             tint = when {
-                                isAllApproved -> Color(0xFF00E676)
+                                isAllApproved -> InDriveLimeGreen
                                 isRejected -> Color(0xFFEF4444)
                                 else -> Color(0xFFFFB300)
                             },
@@ -1312,9 +1708,9 @@ fun ConfirmationPendingStep(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // Individual KYC Document Status List
+        // Individual KYC Document Status Breakdown List
         if (docs.isNotEmpty()) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
@@ -1333,7 +1729,7 @@ fun ConfirmationPendingStep(
 
                     docs.forEach { doc ->
                         val docStatusColor = when (doc.status) {
-                            "APPROVED" -> Color(0xFF00E676)
+                            "APPROVED" -> InDriveLimeGreen
                             "REJECTED" -> Color(0xFFEF4444)
                             else -> Color(0xFFFFB300)
                         }
@@ -1388,7 +1784,7 @@ fun ConfirmationPendingStep(
                 onClick = onSwitchToDriver,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DriverBrightFuchsia,
+                    containerColor = DrigoBrandFuchsia,
                     contentColor = Color.White
                 ),
                 modifier = Modifier
@@ -1406,7 +1802,7 @@ fun ConfirmationPendingStep(
                 onClick = onReuploadRejectedDocs,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = DriverBrightFuchsia,
+                    containerColor = DrigoBrandFuchsia,
                     contentColor = Color.White
                 ),
                 modifier = Modifier
@@ -1427,7 +1823,7 @@ fun ConfirmationPendingStep(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
-                    contentColor = DriverMagentaBg
+                    contentColor = DrigoBrandMagentaBg
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1442,7 +1838,7 @@ fun ConfirmationPendingStep(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Test Helper: Simulate Instant Confirmation
+            // Test Helper: Instant Approval Simulation
             OutlinedButton(
                 onClick = onSimulateApproval,
                 shape = RoundedCornerShape(14.dp),
@@ -1457,7 +1853,7 @@ fun ConfirmationPendingStep(
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
                     contentDescription = null,
-                    tint = Color(0xFF00E676),
+                    tint = InDriveLimeGreen,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
@@ -1472,7 +1868,7 @@ fun ConfirmationPendingStep(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Direct Access to Admin Verification Portal for reviewer inspection
+        // Access to Admin Verification Portal for reviewer inspection
         TextButton(
             onClick = onOpenAdminPortal,
             modifier = Modifier.fillMaxWidth()
@@ -1495,18 +1891,74 @@ fun ConfirmationPendingStep(
 }
 
 /**
- * Secure Document Upload Card with:
- * - Direct file picker
- * - Compression and Cloud Storage upload
- * - Real-time progress bar
- * - Thumbnail preview
- * - Replace and View actions
+ * Step Instruction Banner with Icon
+ */
+@Composable
+private fun StepGuideBanner(
+    title: String,
+    description: String,
+    icon: ImageVector
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = DrigoBrandFuchsia.copy(alpha = 0.25f),
+                modifier = Modifier.size(42.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.85f),
+                    lineHeight = 16.sp
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Redesigned Secure Document Upload Card with:
+ * - Direct photo picker & Google Drive / Cloud Storage upload
+ * - Real-time animated upload progress bar & status text
+ * - Image thumbnail preview with Crop Fill
+ * - Quick Zoom/Preview & Replace action triggers
+ * - Clear required/optional badges & camera guidelines
  */
 @Composable
 fun SecureDocumentUploadCard(
     userId: String,
     docType: String,
-    label: String,
+    title: String,
+    subtitle: String,
+    isRequired: Boolean,
+    icon: ImageVector,
     docItem: DriverDocumentItem?,
     onDocUploaded: (DriverDocumentItem?) -> Unit,
     onPreview: (String, String) -> Unit,
@@ -1548,7 +2000,7 @@ fun SecureDocumentUploadCard(
                     onDocUploaded(uploadedDoc)
                     if (uploadedDoc != null) {
                         try {
-                            com.example.data.remote.FirebaseRepository.getInstance(context)
+                            FirebaseRepository.getInstance(context)
                                 .saveDriverDocumentMetadata(userId, uploadedDoc)
                         } catch (_: Exception) {}
                     }
@@ -1559,187 +2011,314 @@ fun SecureDocumentUploadCard(
         }
     }
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxWidth()
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White.copy(alpha = 0.1f),
+        border = BorderStroke(
+            width = if (docItem?.fileUrl?.isNotBlank() == true) 1.5.dp else 1.dp,
+            color = when {
+                uploadError != null -> Color(0xFFEF4444)
+                docItem?.fileUrl?.isNotBlank() == true -> InDriveLimeGreen
+                else -> Color.White.copy(alpha = 0.3f)
+            }
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("doc_upload_card_$docType")
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(if (compact) 14.dp else 18.dp))
-                .background(DriverDarkFuchsia)
-                .border(
-                    width = 2.dp,
-                    color = if (docItem?.fileUrl?.isNotBlank() == true) Color(0xFF00E676) else Color.White,
-                    shape = RoundedCornerShape(if (compact) 14.dp else 18.dp)
-                )
-                .clickable {
-                    launcher.launch("image/*")
-                },
-            contentAlignment = Alignment.Center
+        Column(
+            modifier = Modifier.padding(if (compact) 10.dp else 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (isUploading) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(8.dp)
+            // Document Header: Title & Required/Optional Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    CircularProgressIndicator(
-                        progress = { uploadProgress },
-                        modifier = Modifier.size(36.dp),
-                        color = DriverBrightFuchsia,
-                        trackColor = Color.White.copy(alpha = 0.2f),
-                        strokeWidth = 3.dp
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "${(uploadProgress * 100).toInt()}%",
-                        fontSize = 10.sp,
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
                         color = Color.White,
-                        fontWeight = FontWeight.Bold
+                        fontSize = if (compact) 12.sp else 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-            } else if (docItem != null && docItem.fileUrl.isNotBlank()) {
-                AsyncImage(
-                    model = docItem.fileUrl,
-                    contentDescription = label,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-                // Top-right success check badge
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(5.dp)
-                        .size(20.dp)
-                        .background(Color(0xFF00E676), CircleShape),
-                    contentAlignment = Alignment.Center
+
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isRequired) DrigoBrandFuchsia.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, if (isRequired) DrigoBrandFuchsia else Color.White.copy(alpha = 0.3f))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Uploaded",
-                        tint = Color.White,
-                        modifier = Modifier.size(12.dp)
-                    )
-                }
-                // Bottom preview / zoom button
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(5.dp)
-                        .size(22.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                        .clickable {
-                            onPreview(docItem.fileUrl, label)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ZoomIn,
-                        contentDescription = "Preview",
-                        tint = Color.White,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Add $label",
-                        tint = Color.White,
-                        modifier = Modifier.size(if (compact) 32.dp else 42.dp)
-                    )
                     Text(
-                        text = "Tap to upload",
+                        text = if (isRequired) "REQUIRED *" else "OPTIONAL",
                         fontSize = 9.sp,
-                        color = Color.White.copy(alpha = 0.7f)
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(6.dp))
+            if (subtitle.isNotBlank() && !compact) {
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp, bottom = 8.dp)
+                )
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            fontSize = if (compact) 11.sp else 12.sp,
-            fontWeight = FontWeight.Medium,
-            lineHeight = 14.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
+            // Interactive Upload Image Frame
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (compact) 110.dp else 140.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .border(
+                        width = 1.dp,
+                        color = if (docItem?.fileUrl?.isNotBlank() == true) InDriveLimeGreen.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .clickable { launcher.launch("image/*") },
+                contentAlignment = Alignment.Center
+            ) {
+                if (isUploading) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            progress = { uploadProgress },
+                            modifier = Modifier.size(36.dp),
+                            color = DrigoBrandFuchsia,
+                            trackColor = Color.White.copy(alpha = 0.2f),
+                            strokeWidth = 3.dp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Uploading... ${(uploadProgress * 100).toInt()}%",
+                            fontSize = 11.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else if (docItem != null && docItem.fileUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = docItem.fileUrl,
+                        contentDescription = title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
 
-        if (uploadError != null) {
-            Text(
-                text = uploadError ?: "",
-                fontSize = 9.sp,
-                color = Color(0xFFFF5252),
-                textAlign = TextAlign.Center
-            )
+                    // Top-right Uploaded Success Badge
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .background(InDriveLimeGreen, CircleShape)
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Uploaded",
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = "Uploaded",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    // Bottom Action Bar: Preview & Replace
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                                )
+                            )
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color.White.copy(alpha = 0.25f),
+                                modifier = Modifier.clickable { onPreview(docItem.fileUrl, title) }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ZoomIn,
+                                        contentDescription = "Zoom",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "Preview",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = DrigoBrandFuchsia.copy(alpha = 0.85f),
+                                modifier = Modifier.clickable { launcher.launch("image/*") }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Replace",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "Replace",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AddAPhoto,
+                            contentDescription = "Add $title",
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(if (compact) 26.dp else 34.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Tap to upload photo",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Camera or Gallery",
+                            fontSize = 9.sp,
+                            color = Color.White.copy(alpha = 0.65f)
+                        )
+                    }
+                }
+            }
+
+            if (uploadError != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = uploadError ?: "",
+                    fontSize = 10.sp,
+                    color = Color(0xFFEF4444),
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }
 
 /**
- * Reusable Pill Input Field:
- * - Rounded stadium shape
- * - White outline border
- * - White placeholder & text
+ * Reusable Driver Input Field with Leading Icon & Clear Styling
  */
 @Composable
-fun PillInputField(
+fun DriverInputField(
     value: String,
     placeholder: String,
+    label: String,
+    leadingIcon: ImageVector,
     onValueChange: (String) -> Unit,
     imeAction: ImeAction = ImeAction.Next
 ) {
-    BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        singleLine = true,
-        textStyle = TextStyle(
-            color = Color.White,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium
-        ),
-        cursorBrush = SolidColor(Color.White),
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Words,
-            imeAction = imeAction
-        ),
-        decorationBox = { innerTextField ->
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Transparent)
-                    .border(
-                        width = 1.5.dp,
-                        color = Color.White,
-                        shape = RoundedCornerShape(50)
-                    )
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                if (value.isEmpty()) {
-                    Text(
-                        text = placeholder,
-                        style = TextStyle(
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Normal
-                        )
-                    )
-                }
-                innerTextField()
-            }
-        }
-    )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.85f),
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            leadingIcon = {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            },
+            placeholder = {
+                Text(
+                    text = placeholder,
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.5f)
+                )
+            },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = DrigoBrandFuchsia,
+                unfocusedBorderColor = Color.White.copy(alpha = 0.35f),
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                cursorColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Words,
+                imeAction = imeAction
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }
