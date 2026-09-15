@@ -317,5 +317,10 @@ private fun getNotificationVisuals(type: RideNotificationType): NotificationVisu
             accentColor = Color(0xFFFF4081),
             bgTint = Color(0xFFFF4081)
         )
+        else -> NotificationVisuals(
+            icon = Icons.Default.Notifications,
+            accentColor = Color(0xFF00E5FF),
+            bgTint = Color(0xFF00E5FF)
+        )
     }
 }
