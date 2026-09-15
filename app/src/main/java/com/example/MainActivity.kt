@@ -255,7 +255,10 @@ fun DrigoApp(viewModel: MainViewModel) {
                     user = currentUser,
                     existingVerification = driverVerification,
                     onBackToPassenger = {
-                        viewModel.popBackStack()
+                        viewModel.setUserMode(UserMode.PASSENGER)
+                        if (!viewModel.popBackStack()) {
+                            viewModel.navigateTo(AppScreen.HOME_PLACEHOLDER)
+                        }
                     },
                     onVerificationCompleted = { ver ->
                         viewModel.updateDriverVerification(ver)

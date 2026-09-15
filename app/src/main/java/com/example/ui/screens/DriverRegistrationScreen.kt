@@ -659,25 +659,7 @@ fun DriverRegistrationScreen(
                             ConfirmationPendingStep(
                                 verification = currentVer,
                                 onBackToPassenger = onBackToPassenger,
-                                onSimulateApproval = {
-                                    val uid = user?.uid ?: currentVer.uid
-                                    scope.launch {
-                                        val repo = FirebaseRepository.getInstance(context)
-                                        val approvedDocs = currentVer.documents.map { it.copy(status = "APPROVED") }
-                                        val newVer = currentVer.copy(
-                                            confirmtion = true,
-                                            status = "APPROVED",
-                                            documents = approvedDocs,
-                                            reviewNotes = "All driver documents verified and approved."
-                                        )
-                                        repo.saveDriverVerification(newVer)
-                                        repo.updateDriverConfirmation(uid, true)
-                                        verificationState = newVer
-                                        snackbarHostState.showSnackbar("Profile approved! You can now switch to Driver Mode.")
-                                    }
-                                },
                                 onSwitchToDriver = onConfirmedAndSwitchToDriver,
-                                onOpenAdminPortal = onNavigateToAdminPortal,
                                 onReuploadRejectedDocs = {
                                     currentStep = DriverRegStep.PROFILE_AND_IDENTITY
                                 }
@@ -1563,9 +1545,7 @@ fun DrivingLicenseStep(
 fun ConfirmationPendingStep(
     verification: DriverVerification,
     onBackToPassenger: () -> Unit,
-    onSimulateApproval: () -> Unit,
     onSwitchToDriver: () -> Unit,
-    onOpenAdminPortal: () -> Unit,
     onReuploadRejectedDocs: () -> Unit
 ) {
     val docs = remember(verification) {
@@ -1861,57 +1841,6 @@ fun ConfirmationPendingStep(
                     fontSize = 15.sp
                 )
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Test Helper: Instant Approval Simulation
-            OutlinedButton(
-                onClick = onSimulateApproval,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.7f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = Color.White
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = InDriveLimeGreen,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Simulate Instant Approval (Test)",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 13.sp,
-                    color = Color.White
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Access to Admin Verification Portal for reviewer inspection
-        TextButton(
-            onClick = onOpenAdminPortal,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = Icons.Default.AdminPanelSettings,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.85f),
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = "Open Admin Verification Portal",
-                color = Color.White.copy(alpha = 0.85f),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold
-            )
         }
     }
 }

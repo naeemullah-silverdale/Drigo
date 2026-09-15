@@ -327,13 +327,18 @@ class MainViewModel(
 
             if (verStatus != com.example.data.model.DriverVerificationStatus.APPROVED) {
                 // Not approved yet -> navigate to Driver Registration / KYC Status Tracker screen
-                _currentScreen.value = AppScreen.DRIVER_REGISTRATION
+                navigateTo(AppScreen.DRIVER_REGISTRATION)
             } else {
                 // Confirmed & Approved! Switch to DRIVER mode
                 setUserMode(UserMode.DRIVER)
             }
         } else {
             setUserMode(UserMode.PASSENGER)
+            if (_currentScreen.value == AppScreen.DRIVER_REGISTRATION) {
+                if (!popBackStack()) {
+                    navigateTo(AppScreen.HOME_PLACEHOLDER)
+                }
+            }
         }
     }
 
